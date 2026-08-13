@@ -1,0 +1,89 @@
+{
+  "theme": "Dark Mode Default (The Performance Pro / High-Contrast Analytics)",
+  "typography": {
+    "headings": "Outfit (Google Fonts) - Sharp, professional, high-impact. Use for H1, H2, H3.",
+    "body": "Inter (Google Fonts) - Clean, highly legible at small sizes.",
+    "mono": "JetBrains Mono (Google Fonts) - Mandatory for URLs, API keys, prices, and terminal/status output.",
+    "weights": "High contrast: Use Light (300) for elegance, Bold (700) or Black (900) for impact. Avoid medium everywhere.",
+    "hierarchy_rules": "Tight tracking on headings (`tracking-tighter`), loose leading on body (`leading-relaxed`). Limit H1 to `text-5xl`."
+  },
+  "colors": {
+    "background": "#0A0A0A",
+    "surface": "#121212",
+    "border": "#27272A",
+    "primary": "#0057FF",
+    "primary_hover": "#337BFF",
+    "success": "#00E676",
+    "warning": "#FFEA00",
+    "destructive": "#FF3B30",
+    "text_primary": "#FFFFFF",
+    "text_secondary": "#A1A1AA"
+  },
+  "visual_enhancers": {
+    "borders": "1px solid borders (`border-border`). No generic soft shadows. Use inner glow (`shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]`) on buttons and active cards.",
+    "hover_states": "Crisp background color shifts, text color brightening. All interactive elements MUST have explicitly defined hover text colors.",
+    "glassmorphism": "Used exclusively for sticky headers, floating action bars, or modal overlays (`backdrop-blur-xl bg-black/60`). Never use generic opacity without blur.",
+    "textures": "Subtle SVG noise/grain overlay fixed in the background at 2-3% opacity to kill digital flatness.",
+    "empty_states": "Minimalist, utilizing generous negative space. Center align the empty state illustration with JetBrains Mono helper text."
+  },
+  "layouts": {
+    "dashboard_shell": "Collapsible left sidebar for navigation. Main content area with massive generous padding (`p-8` to `p-12`).",
+    "scraper_view": "Centered, high-focus command center. URL input area should be massive (`text-2xl`).",
+    "product_details": "Bento Grid (Mode B). Image gallery spans 2 columns on the left. Specs, location, shipping, and description stack on the right.",
+    "library": "High-density layout. Use a data table with tight spacing or a grid of dense cards. Include a sticky header for bulk actions.",
+    "watchlist": "Card grid with inline Recharts sparklines (LineChart) for historical price tracking."
+  },
+  "components": {
+    "inputs": "Shadcn UI Input, customized with JetBrains Mono text, sharp corners (`rounded-none` or `rounded-sm`), 1px border. Deep background.",
+    "buttons": "Sharp edges, high contrast. Primary button has Electric Blue background with white text. Loading state must show spinner/loader.",
+    "tabs": "Shadcn Tabs for switching views (e.g., Settings: API Keys vs General).",
+    "toasts": "Sonner (bottom-right) for scraping statuses (Success, Blocked, Retrying...).",
+    "charts": "Recharts for price history. Minimalist: hide grid lines, use an Electric Blue stroke for the line, no background fill.",
+    "icons": "lucide-react (functional, clean, scale relative to text size)."
+  },
+  "motion": {
+    "page_transitions": "Framer Motion: Fade in and slight slide up (`y: 10 -> 0`) for page content.",
+    "scraping_state": "Pulsing/shimmering border animation on the URL input container while scraping is in progress.",
+    "gallery": "Smooth crossfade transition when switching product images in the carousel."
+  },
+  "accessibility": {
+    "contrast": "Ensure all text, especially grey text, meets WCAG AA against the `#0A0A0A` background.",
+    "focus_states": "High-visibility focus rings (`focus:ring-2 focus:ring-[#0057FF] focus:outline-none`).",
+    "data_testid": "MANDATORY: Add `data-testid` attributes to all interactive elements (e.g., `import-item-button`, `ebay-url-input`, `api-key-input`)."
+  },
+  "media": {
+    "image_urls": {
+      "empty_state": {
+        "url": "https://images.pexels.com/photos/8066709/pexels-photo-8066709.png",
+        "description": "Empty cardboard box. Use for 'No items scraped yet' empty states."
+      },
+      "placeholder_product_1": {
+        "url": "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwxfHxzb255JTIwbWlycm9ybGVzcyUyMGNhbWVyYSUyMHByb2R1Y3R8ZW58MHx8fHwxNzgzNjI4MjQ1fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Sony Camera for mock Scraped Items Library."
+      },
+      "placeholder_product_2": {
+        "url": "https://images.unsplash.com/photo-1644171703660-81c9da68402b",
+        "description": "Macbook Pro for mock Scraped Items Library."
+      }
+    }
+  },
+  "instructions_to_main_agent": [
+    "Use Tailwind CSS for all styling. Rely on raw HTML/Tailwind for complex overlapping or bento layouts.",
+    "Implement Shadcn UI for standard interactions (Dialog, Select, Tabs, Dropdown, Table), but strip generic 'Vercel-look' styling to match the Performance Pro theme.",
+    "Use `sonner` for toast notifications. Ensure toasts provide specific scraping status (e.g., 'API Scraper fallback initiated', 'Ebay AU Blocked - Retrying').",
+    "For the Scraper view, visually emphasize the 'eBay Australia Only' constraint (e.g., an AU flag or distinct label near the input).",
+    "For Item Details, ensure the location and shipping costs are highly visible, as these are critical for AU buyers.",
+    "Implement bulk selection checkboxes in the Library view to allow deleting or moving multiple items.",
+    "In the Settings panel, ensure ScraperAPI and ScrapingBee keys use password-type inputs for security.",
+    "Never use completely transparent backgrounds for dropdowns, modals, or overlapping elements. Use `bg-[#121212]` or `backdrop-blur-xl bg-black/80`.",
+    "Include a dynamic scraping status indicator (e.g., 'Using Manual Server Scraping', 'Using ScraperAPI (Auto)') on the active scrape card."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Prioritize depth through layered design (z-index) instead of flat layouts.",
+    "Avoid generic centered layouts; use optical alignment and asymmetrical bento grids.",
+    "Every interaction needs micro-animations (hover, focus, active).",
+    "Do not apply `transition: all`. Target specific properties like `transition: transform 0.2s ease, opacity 0.2s ease`.",
+    "Never use placeholder URLs (like via.placeholder.com). Use the provided image_urls.",
+    "Toast notifications must use 'sonner'."
+  ]
+}

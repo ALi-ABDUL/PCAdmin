@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import re
 import random
 import logging
 import httpx
@@ -38,6 +39,46 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 CATEGORIES = ["electronics", "home", "tools", "apparel", "other"]
+
+# Seed categories for ecommerce store (auto-populated on first startup)
+SEED_CATEGORIES = [
+    # Electronics
+    {"name": "Phones & Tablets",       "group": "Electronics", "icon": "smartphone",   "color": "#4F46E5", "description": "Mobile phones, tablets and accessories."},
+    {"name": "Laptops & Computers",    "group": "Electronics", "icon": "laptop",       "color": "#4338CA", "description": "Laptops, desktops, monitors and peripherals."},
+    {"name": "TVs & Home Theatre",     "group": "Electronics", "icon": "tv",           "color": "#6366F1", "description": "Televisions, projectors and sound bars."},
+    {"name": "Audio & Headphones",     "group": "Electronics", "icon": "headphones",   "color": "#7C3AED", "description": "Headphones, earbuds, speakers and hi-fi."},
+    {"name": "Cameras & Photo",        "group": "Electronics", "icon": "camera",       "color": "#8B5CF6", "description": "Digital cameras, lenses, drones and gear."},
+    {"name": "Gaming",                 "group": "Electronics", "icon": "gamepad-2",    "color": "#A855F7", "description": "Consoles, games, controllers and gaming PCs."},
+    {"name": "Wearables & Smart Home", "group": "Electronics", "icon": "watch",        "color": "#EC4899", "description": "Smart watches, trackers and connected home."},
+    # Home
+    {"name": "Kitchen & Dining",       "group": "Home",        "icon": "utensils",     "color": "#F59E0B", "description": "Cookware, appliances and dining."},
+    {"name": "Furniture",              "group": "Home",        "icon": "armchair",     "color": "#D97706", "description": "Living, bedroom and office furniture."},
+    {"name": "Home Décor & Lighting",  "group": "Home",        "icon": "lamp",         "color": "#EA580C", "description": "Rugs, wall art, mirrors and lighting."},
+    {"name": "Bedroom & Bath",         "group": "Home",        "icon": "bed",          "color": "#F97316", "description": "Linen, bedding, towels and bathware."},
+    {"name": "Vacuums & Cleaning",     "group": "Home",        "icon": "spray-can",    "color": "#FB923C", "description": "Vacuums, mops and cleaning supplies."},
+    {"name": "Garden & Outdoor",       "group": "Home",        "icon": "flower-2",     "color": "#65A30D", "description": "BBQs, garden tools and outdoor living."},
+    # Tools
+    {"name": "Power Tools",            "group": "Tools",       "icon": "drill",        "color": "#0EA5E9", "description": "Cordless drills, saws, grinders and impact drivers."},
+    {"name": "Hand Tools",             "group": "Tools",       "icon": "wrench",       "color": "#0284C7", "description": "Hammers, spanners, screwdrivers and pliers."},
+    {"name": "Automotive",             "group": "Tools",       "icon": "car",          "color": "#0369A1", "description": "Car care, tyres, dash cams and workshop gear."},
+    {"name": "Workshop & Storage",     "group": "Tools",       "icon": "hammer",       "color": "#075985", "description": "Workbenches, tool cabinets and hardware."},
+    {"name": "Safety & Workwear",      "group": "Tools",       "icon": "shield",       "color": "#0891B2", "description": "PPE, hi-vis, boots and safety gear."},
+    # Apparel
+    {"name": "Men's Clothing",         "group": "Apparel",     "icon": "shirt",        "color": "#059669", "description": "Men's shirts, jeans, jackets and more."},
+    {"name": "Women's Clothing",       "group": "Apparel",     "icon": "shirt",        "color": "#10B981", "description": "Women's dresses, tops, activewear and more."},
+    {"name": "Shoes & Sneakers",       "group": "Apparel",     "icon": "footprints",   "color": "#14B8A6", "description": "Sneakers, boots, sandals and formal shoes."},
+    {"name": "Watches & Jewellery",    "group": "Apparel",     "icon": "watch",        "color": "#06B6D4", "description": "Watches, rings, necklaces and accessories."},
+    # Sports
+    {"name": "Fitness & Gym",          "group": "Sports",      "icon": "dumbbell",     "color": "#DC2626", "description": "Dumbbells, benches, treadmills and yoga."},
+    {"name": "Outdoor & Camping",      "group": "Sports",      "icon": "tent",         "color": "#B91C1C", "description": "Tents, sleeping bags, hiking and camping."},
+    {"name": "Cycling",                "group": "Sports",      "icon": "bike",         "color": "#EF4444", "description": "Bikes, helmets, cycling apparel and parts."},
+    # Toys / Collectibles
+    {"name": "Lego & Building",        "group": "Toys",        "icon": "blocks",       "color": "#F43F5E", "description": "LEGO sets, blocks and building toys."},
+    {"name": "Board Games & Puzzles",  "group": "Toys",        "icon": "puzzle",       "color": "#E11D48", "description": "Board games, card games and puzzles."},
+    {"name": "Collectibles & Trading Cards", "group": "Toys",  "icon": "star",         "color": "#BE185D", "description": "Pokémon, sports cards, figures and collectibles."},
+    # Fallback
+    {"name": "Other",                  "group": "General",     "icon": "package",      "color": "#6B7280", "description": "Uncategorised or miscellaneous items."},
+]
 
 # ---------------------------------------------------------------------------
 # Models
@@ -143,6 +184,42 @@ class Settings(BaseModel):
     country: str = "Australia"
     tax_rate: float = 10.0
     accent_color: str = "indigo"
+
+
+def _slug(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-") or "cat"
+
+
+class Category(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    slug: str
+    group: str = "General"
+    icon: str = "package"
+    color: str = "#6B7280"
+    description: str = ""
+    active: bool = True
+    sort_order: int = 0
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class CategoryCreate(BaseModel):
+    name: str
+    group: str = "General"
+    icon: str = "package"
+    color: str = "#6B7280"
+    description: str = ""
+    active: bool = True
+
+
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = None
+    group: Optional[str] = None
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    description: Optional[str] = None
+    active: Optional[bool] = None
+    sort_order: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +457,84 @@ async def _nightly_refresh_loop():
 
 @app.on_event("startup")
 async def _start_scheduler():
+    await _ensure_categories_seeded()
     asyncio.create_task(_nightly_refresh_loop())
+
+
+# ---------------------------------------------------------------------------
+# Categories
+# ---------------------------------------------------------------------------
+
+async def _ensure_categories_seeded() -> None:
+    count = await db.categories.count_documents({})
+    if count > 0:
+        return
+    for i, s in enumerate(SEED_CATEGORIES):
+        cat = Category(
+            name=s["name"], slug=_slug(s["name"]), group=s["group"],
+            icon=s["icon"], color=s["color"], description=s["description"], sort_order=i,
+        )
+        await db.categories.insert_one(cat.model_dump())
+    logger.info(f"Seeded {len(SEED_CATEGORIES)} categories")
+
+
+@api_router.get("/categories")
+async def list_categories(active: Optional[bool] = None, group: Optional[str] = None):
+    q: dict[str, Any] = {}
+    if active is not None: q["active"] = active
+    if group: q["group"] = group
+    cats = await db.categories.find(q, {"_id": 0}).sort([("sort_order", 1), ("name", 1)]).to_list(500)
+    # Attach product counts
+    pipeline = [{"$group": {"_id": "$category", "count": {"$sum": 1}}}]
+    counts = {c["_id"]: c["count"] for c in await db.products.aggregate(pipeline).to_list(500)}
+    for c in cats:
+        c["product_count"] = counts.get(c["slug"], 0)
+    groups = sorted({c["group"] for c in cats})
+    return {"categories": cats, "groups": groups, "total": len(cats)}
+
+
+@api_router.post("/categories", response_model=Category)
+async def create_category(body: CategoryCreate):
+    slug = _slug(body.name)
+    if await db.categories.find_one({"slug": slug}):
+        raise HTTPException(status_code=409, detail="A category with that name/slug already exists")
+    n = await db.categories.count_documents({})
+    cat = Category(**body.model_dump(), slug=slug, sort_order=n)
+    await db.categories.insert_one(cat.model_dump())
+    return cat
+
+
+@api_router.patch("/categories/{cid}")
+async def update_category(cid: str, body: CategoryUpdate):
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "name" in fields:
+        fields["slug"] = _slug(fields["name"])
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    r = await db.categories.update_one({"id": cid}, {"$set": fields})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Category not found")
+    return await db.categories.find_one({"id": cid}, {"_id": 0})
+
+
+@api_router.delete("/categories/{cid}")
+async def delete_category(cid: str):
+    cat = await db.categories.find_one({"id": cid}, {"_id": 0})
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+    in_use = await db.products.count_documents({"category": cat["slug"]})
+    if in_use > 0:
+        raise HTTPException(status_code=409, detail=f"Cannot delete: {in_use} product(s) still use this category.")
+    await db.categories.delete_one({"id": cid})
+    return {"deleted": True}
+
+
+@api_router.post("/categories/reseed")
+async def reseed_categories(force: bool = False):
+    if force:
+        await db.categories.delete_many({})
+    await _ensure_categories_seeded()
+    return await list_categories()
 
 
 # ---------------------------------------------------------------------------
@@ -389,14 +543,39 @@ async def _start_scheduler():
 
 def _guess_category(title: str) -> str:
     t = (title or "").lower()
-    if any(k in t for k in ["iphone", "samsung", "laptop", "camera", "tv", "playstation", "xbox", "headphone", "airpods", "monitor", "gpu", "ssd", "drone"]):
-        return "electronics"
-    if any(k in t for k in ["drill", "saw", "wrench", "spanner", "hammer", "screwdriver", "grinder", "sander", "tool"]):
-        return "tools"
-    if any(k in t for k in ["kitchen", "vacuum", "sofa", "chair", "lamp", "candle", "cushion", "mattress", "linen", "curtain"]):
-        return "home"
-    if any(k in t for k in ["shirt", "jeans", "jacket", "hoodie", "shoes", "sneaker", "dress"]):
-        return "apparel"
+    rules = [
+        (["iphone", "samsung galaxy", "pixel", "smartphone", "ipad", "tablet"], "phones-tablets"),
+        (["laptop", "macbook", "notebook", "monitor", "keyboard", "mouse", "ssd", "gpu", "desktop", "pc"], "laptops-computers"),
+        (["tv", "television", "projector", "soundbar", "home theatre"], "tvs-home-theatre"),
+        (["headphone", "earbud", "airpods", "speaker", "hi-fi", "hifi", "amp"], "audio-headphones"),
+        (["camera", "lens", "gopro", "drone"], "cameras-photo"),
+        (["playstation", "ps5", "xbox", "nintendo", "switch", "controller", "gaming"], "gaming"),
+        (["smart watch", "smartwatch", "fitbit", "garmin", "smart home", "echo", "alexa"], "wearables-smart-home"),
+        (["kitchen", "cookware", "coffee", "espresso", "kettle", "toaster", "microwave", "blender"], "kitchen-dining"),
+        (["sofa", "couch", "chair", "desk", "table", "wardrobe"], "furniture"),
+        (["rug", "wall art", "mirror", "lamp", "candle", "vase"], "home-decor-lighting"),
+        (["mattress", "linen", "towel", "quilt", "duvet", "pillow"], "bedroom-bath"),
+        (["vacuum", "robot vac", "mop", "cleaner"], "vacuums-cleaning"),
+        (["bbq", "garden", "outdoor", "lawn", "mower", "shed"], "garden-outdoor"),
+        (["drill", "impact driver", "grinder", "sander", "circular saw", "power tool"], "power-tools"),
+        (["hammer", "spanner", "wrench", "screwdriver", "plier", "tape measure"], "hand-tools"),
+        (["dash cam", "car ", "auto ", "tyre", "engine oil"], "automotive"),
+        (["workbench", "tool cabinet", "tool box", "workshop"], "workshop-storage"),
+        (["hi-vis", "safety boot", "ppe", "helmet", "gloves"], "safety-workwear"),
+        (["men's ", "mens shirt", "mens jeans", "mens jacket", "mens hoodie"], "mens-clothing"),
+        (["women's ", "womens dress", "womens top", "womens jeans"], "womens-clothing"),
+        (["shoe", "sneaker", "boot", "sandal"], "shoes-sneakers"),
+        (["watch", "ring ", "necklace", "bracelet", "earring"], "watches-jewellery"),
+        (["dumbbell", "bench press", "treadmill", "yoga", "gym"], "fitness-gym"),
+        (["tent", "sleeping bag", "hiking", "camping"], "outdoor-camping"),
+        (["bike", "bicycle", "cycling", "mtb"], "cycling"),
+        (["lego", "building block", "brick"], "lego-building"),
+        (["board game", "card game", "puzzle"], "board-games-puzzles"),
+        (["pokemon", "trading card", "figurine", "funko", "collectible"], "collectibles-trading-cards"),
+    ]
+    for keywords, slug in rules:
+        if any(k in t for k in keywords):
+            return slug
     return "other"
 
 

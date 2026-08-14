@@ -8,6 +8,9 @@ import {
   Loader2, Trash2, Star, RefreshCw, MapPin, Truck, User as UserIcon, Box, ExternalLink,
   X, ChevronLeft, ChevronRight, ClipboardPaste, Plus, TrendingUp, TrendingDown, DollarSign,
   ShoppingBag, Percent, Boxes, ArrowUpRight, Filter, Download, ImageIcon, Sparkles,
+  Smartphone, Laptop, Tv, Headphones, Camera, Gamepad2, Watch, Utensils, Armchair, Lamp,
+  Bed, SprayCan, Flower2, Wrench, Car, Hammer, Shield, Shirt, Footprints, Dumbbell, Tent,
+  Bike, Blocks, Puzzle, Tags, Palette,
 } from "lucide-react";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -63,6 +66,7 @@ export default function App() {
             <motion.div key={tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
               {tab === "dashboard" && <Dashboard />}
               {tab === "products"  && <Products />}
+              {tab === "categories" && <Categories />}
               {tab === "scraper"   && <ScraperPage onView={setSelectedItem} />}
               {tab === "orders"    && <Orders />}
               {tab === "customers" && <Customers />}
@@ -79,11 +83,26 @@ export default function App() {
   );
 }
 
+/* ------------------------- Category icon mapping ------------------------- */
+const ICON_MAP = {
+  smartphone: Smartphone, laptop: Laptop, tv: Tv, headphones: Headphones, camera: Camera,
+  "gamepad-2": Gamepad2, watch: Watch, utensils: Utensils, armchair: Armchair, lamp: Lamp,
+  bed: Bed, "spray-can": SprayCan, "flower-2": Flower2, drill: Wrench, wrench: Wrench,
+  car: Car, hammer: Hammer, shield: Shield, shirt: Shirt, footprints: Footprints,
+  dumbbell: Dumbbell, tent: Tent, bike: Bike, blocks: Blocks, puzzle: Puzzle,
+  star: Star, package: Package,
+};
+const CatIcon = ({ name, size = 16, ...p }) => {
+  const C = ICON_MAP[name] || Package;
+  return <C size={size} {...p} />;
+};
+
 /* --------------------------------- Sidebar -------------------------------- */
 function Sidebar({ tab, setTab }) {
   const nav = [
     { id: "dashboard", label: "Dashboard",  icon: LayoutDashboard },
     { id: "products",  label: "Products",   icon: Package },
+    { id: "categories", label: "Categories", icon: Tags },
     { id: "scraper",   label: "eBay AU Scraper", icon: Zap, badge: "AU" },
     { id: "orders",    label: "Orders",     icon: ShoppingCart },
     { id: "customers", label: "Customers",  icon: Users },
@@ -127,7 +146,7 @@ function Sidebar({ tab, setTab }) {
 
 function TopHeader({ tab }) {
   const titles = {
-    dashboard: "Dashboard", products: "Products", scraper: "eBay AU Scraper",
+    dashboard: "Dashboard", products: "Products", categories: "Categories", scraper: "eBay AU Scraper",
     orders: "Orders", customers: "Customers", analytics: "Analytics", settings: "Settings",
   };
   return (
@@ -366,14 +385,17 @@ function Products() {
   const [list, setList] = useState([]); const [total, setTotal] = useState(0);
   const [q, setQ] = useState(""); const [cat, setCat] = useState(""); const [sort, setSort] = useState("created_at_desc");
   const [editing, setEditing] = useState(null);
+  const [cats, setCats] = useState([]);
 
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/products`, { params: { q: q || undefined, category: cat || undefined, sort } });
     setList(data.products); setTotal(data.total);
   }, [q, cat, sort]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { axios.get(`${API}/categories`, { params: { active: true }}).then(r => setCats(r.data.categories)); }, []);
 
   const del = async (p) => { if (!window.confirm(`Delete "${p.title}"?`)) return; await axios.delete(`${API}/products/${p.id}`); toast.success("Deleted"); load(); };
+  const catByslug = (slug) => cats.find(c => c.slug === slug);
 
   return (
     <div className="grid gap-4">
@@ -383,7 +405,7 @@ function Products() {
           <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={q} onChange={(e)=>setQ(e.target.value)} data-testid="product-search" placeholder="Search title / SKU" className="input pl-9 pr-3 py-2 text-sm w-56"/></div>
           <select value={cat} onChange={(e)=>setCat(e.target.value)} className="input px-3 py-2 text-sm" data-testid="product-cat">
             <option value="">All categories</option>
-            {["electronics","home","tools","apparel","other"].map(c=><option key={c} value={c}>{c}</option>)}
+            {cats.map(c=><option key={c.slug} value={c.slug}>{c.name}</option>)}
           </select>
           <select value={sort} onChange={(e)=>setSort(e.target.value)} className="input px-3 py-2 text-sm">
             <option value="created_at_desc">Newest</option>
@@ -402,7 +424,9 @@ function Products() {
             <tbody>
               {list.length === 0
                 ? <tr><td colSpan={7} className="text-center py-10 text-slate-500">No products yet. Head to the <b>eBay Scraper</b> and import your first one.</td></tr>
-                : list.map((p) => (
+                : list.map((p) => {
+                    const c = catByslug(p.category);
+                    return (
                   <tr key={p.id} data-testid="product-row" className={p.is_sold || !p.active ? "opacity-50" : ""}>
                     <td>
                       <div className="flex items-center gap-3 min-w-0">
@@ -416,7 +440,13 @@ function Products() {
                       </div>
                     </td>
                     <td className="font-mono text-xs text-slate-500">{p.sku || "—"}</td>
-                    <td><span className="chip chip-neutral capitalize">{p.category}</span></td>
+                    <td>
+                      {c ? (
+                        <span className="chip inline-flex items-center gap-1.5" style={{ background: `${c.color}18`, color: c.color }}>
+                          <CatIcon name={c.icon} size={11}/> {c.name}
+                        </span>
+                      ) : <span className="chip chip-neutral capitalize">{p.category || "—"}</span>}
+                    </td>
                     <td className="font-mono font-bold text-indigo-600">{moneyCents(p.price)}</td>
                     <td className={p.stock <= 3 ? "text-red-600 font-bold" : "text-slate-700"}>{p.stock}</td>
                     <td>{p.sold_count || 0}</td>
@@ -427,20 +457,20 @@ function Products() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                );})}
             </tbody>
           </table>
         </div>
       </div>
 
       <AnimatePresence>
-        {editing && <ProductEditModal product={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }}/>}
+        {editing && <ProductEditModal product={editing} categories={cats} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }}/>}
       </AnimatePresence>
     </div>
   );
 }
 
-function ProductEditModal({ product, onClose, onSaved }) {
+function ProductEditModal({ product, categories = [], onClose, onSaved }) {
   const [f, setF] = useState({ ...product });
   const save = async () => {
     try { await axios.patch(`${API}/products/${product.id}`, { title: f.title, price: Number(f.price), cost: Number(f.cost), stock: Number(f.stock), category: f.category, active: !!f.active, description: f.description, sku: f.sku }); toast.success("Saved"); onSaved(); }
@@ -457,8 +487,9 @@ function ProductEditModal({ product, onClose, onSaved }) {
           <Field label="Title" className="md:col-span-2"><input className="input w-full px-3 py-2" value={f.title||""} onChange={(e)=>setF({...f, title:e.target.value})}/></Field>
           <Field label="SKU"><input className="input w-full px-3 py-2 font-mono" value={f.sku||""} onChange={(e)=>setF({...f, sku:e.target.value})}/></Field>
           <Field label="Category">
-            <select className="input w-full px-3 py-2" value={f.category} onChange={(e)=>setF({...f, category:e.target.value})}>
-              {["electronics","home","tools","apparel","other"].map(c=><option key={c}>{c}</option>)}
+            <select className="input w-full px-3 py-2" value={f.category||"other"} onChange={(e)=>setF({...f, category:e.target.value})}>
+              {categories.length === 0 && <option value="other">Other</option>}
+              {categories.map(c=><option key={c.slug} value={c.slug}>{c.group} · {c.name}</option>)}
             </select>
           </Field>
           <Field label="Price (AUD)"><input type="number" className="input w-full px-3 py-2 font-mono" value={f.price||0} onChange={(e)=>setF({...f, price:e.target.value})}/></Field>
@@ -474,6 +505,158 @@ function ProductEditModal({ product, onClose, onSaved }) {
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onClose} className="btn btn-ghost">Cancel</button>
           <button onClick={save} className="btn btn-primary">Save</button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/* ------------------------------- Categories ------------------------------- */
+function Categories() {
+  const [cats, setCats] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [group, setGroup] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/categories`);
+    setCats(data.categories); setGroups(data.groups);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = group ? cats.filter(c => c.group === group) : cats;
+  const grouped = filtered.reduce((acc, c) => { (acc[c.group] = acc[c.group] || []).push(c); return acc; }, {});
+
+  const del = async (c) => {
+    if (!window.confirm(`Delete category "${c.name}"?`)) return;
+    try { await axios.delete(`${API}/categories/${c.id}`); toast.success("Deleted"); load(); }
+    catch (e) { toast.error("Delete failed", { description: e?.response?.data?.detail }); }
+  };
+  const toggleActive = async (c) => {
+    try { await axios.patch(`${API}/categories/${c.id}`, { active: !c.active }); load(); }
+    catch { toast.error("Update failed"); }
+  };
+  const reseed = async () => {
+    if (!window.confirm("Reseed defaults? Existing categories will remain; only missing defaults are added.")) return;
+    try { await axios.post(`${API}/categories/reseed`, null); toast.success("Reseeded"); load(); }
+    catch (e) { toast.error("Reseed failed", { description: e?.response?.data?.detail }); }
+  };
+
+  return (
+    <div className="grid gap-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="font-display text-2xl font-bold tracking-tight">Categories</div>
+          <div className="text-xs text-slate-500 font-mono">{cats.length} categories across {groups.length} groups · used to tag products in your storefront</div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={group} onChange={(e)=>setGroup(e.target.value)} className="input px-3 py-2 text-sm" data-testid="cat-group-filter">
+            <option value="">All groups</option>
+            {groups.map(g => <option key={g}>{g}</option>)}
+          </select>
+          <button onClick={reseed} className="btn btn-ghost text-sm"><Sparkles size={13}/> Reseed defaults</button>
+          <button onClick={() => setCreating(true)} className="btn btn-primary text-sm" data-testid="add-category-btn"><Plus size={14}/> New category</button>
+        </div>
+      </div>
+
+      {Object.keys(grouped).sort().map((g) => (
+        <div key={g}>
+          <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+            <span>{g}</span><span className="text-slate-300">·</span><span>{grouped[g].length}</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {grouped[g].map((c) => (
+              <div key={c.id} className={`card p-4 group hover:shadow-lg transition-shadow ${!c.active ? "opacity-50" : ""}`} data-testid="category-card">
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-xl grid place-items-center shrink-0" style={{ background: `${c.color}20`, color: c.color }}>
+                    <CatIcon name={c.icon} size={18}/>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-display font-semibold truncate">{c.name}</div>
+                    <div className="text-[11px] font-mono text-slate-400 truncate">/{c.slug}</div>
+                  </div>
+                  <span className="chip chip-neutral">{c.product_count}</span>
+                </div>
+                <div className="text-xs text-slate-500 mt-3 leading-relaxed line-clamp-2 min-h-[2.4em]">{c.description || "—"}</div>
+                <div className="mt-3 pt-3 border-t hairline flex items-center gap-1">
+                  <label className="flex items-center gap-1.5 text-[11px] font-mono uppercase text-slate-500 cursor-pointer mr-auto">
+                    <input type="checkbox" checked={c.active} onChange={()=>toggleActive(c)} className="accent-indigo-600 w-3.5 h-3.5"/>Active
+                  </label>
+                  <button onClick={()=>setEditing(c)} className="btn btn-ghost text-xs !py-1 !px-2">Edit</button>
+                  <button onClick={()=>del(c)} className="btn btn-danger text-xs !py-1 !px-2"><Trash2 size={12}/></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <AnimatePresence>
+        {(creating || editing) && <CategoryEditModal cat={editing} groups={groups} onClose={()=>{ setCreating(false); setEditing(null); }} onSaved={()=>{ setCreating(false); setEditing(null); load(); }}/>}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function CategoryEditModal({ cat, groups, onClose, onSaved }) {
+  const isNew = !cat;
+  const [f, setF] = useState(cat || { name: "", group: groups[0] || "General", icon: "package", color: "#4F46E5", description: "", active: true });
+  const iconOptions = Object.keys(ICON_MAP);
+  const colorPresets = ["#4F46E5","#EC4899","#0EA5E9","#10B981","#F59E0B","#8B5CF6","#EF4444","#0891B2","#14B8A6","#F97316","#65A30D","#DC2626","#6B7280"];
+
+  const save = async () => {
+    try {
+      if (isNew) await axios.post(`${API}/categories`, { name: f.name, group: f.group, icon: f.icon, color: f.color, description: f.description, active: !!f.active });
+      else await axios.patch(`${API}/categories/${cat.id}`, { name: f.name, group: f.group, icon: f.icon, color: f.color, description: f.description, active: !!f.active });
+      toast.success(isNew ? "Category created" : "Saved"); onSaved();
+    } catch (e) { toast.error("Failed", { description: e?.response?.data?.detail }); }
+  };
+
+  return (
+    <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md overflow-y-auto" onClick={onClose}>
+      <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} exit={{opacity:0, y:20}} onClick={(e)=>e.stopPropagation()} className="card max-w-lg mx-auto my-10 p-6">
+        <div className="flex items-center justify-between mb-5">
+          <div className="font-display font-bold text-xl">{isNew ? "New category" : "Edit category"}</div>
+          <button onClick={onClose} className="btn btn-ghost !p-2"><X size={16}/></button>
+        </div>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-14 h-14 rounded-2xl grid place-items-center shrink-0" style={{ background: `${f.color}22`, color: f.color }}>
+            <CatIcon name={f.icon} size={24}/>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-display text-lg font-bold truncate">{f.name || "Category name"}</div>
+            <div className="text-[11px] font-mono text-slate-400">preview</div>
+          </div>
+        </div>
+        <div className="grid gap-3">
+          <Field label="Name"><input className="input px-3 py-2 w-full" value={f.name} onChange={(e)=>setF({...f, name:e.target.value})} data-testid="cat-name"/></Field>
+          <Field label="Group">
+            <input list="cat-groups" className="input px-3 py-2 w-full" value={f.group} onChange={(e)=>setF({...f, group:e.target.value})}/>
+            <datalist id="cat-groups">{groups.map(g => <option key={g} value={g}/>)}</datalist>
+          </Field>
+          <Field label="Description"><textarea className="input px-3 py-2 w-full h-20" value={f.description||""} onChange={(e)=>setF({...f, description:e.target.value})}/></Field>
+          <Field label="Icon">
+            <div className="grid grid-cols-8 gap-1.5">
+              {iconOptions.map(n => (
+                <button key={n} onClick={()=>setF({...f, icon:n})} className={`aspect-square rounded-lg grid place-items-center border ${f.icon===n?"border-indigo-500 bg-indigo-50 text-indigo-600":"hairline text-slate-500 hover:bg-slate-50"}`} title={n}>
+                  <CatIcon name={n} size={14}/>
+                </button>
+              ))}
+            </div>
+          </Field>
+          <Field label="Colour">
+            <div className="flex items-center gap-2 flex-wrap">
+              {colorPresets.map(c => (
+                <button key={c} onClick={()=>setF({...f, color:c})} className={`w-7 h-7 rounded-full border-2 ${f.color===c?"border-slate-900":"border-white shadow"}`} style={{ background: c }} title={c}/>
+              ))}
+              <input type="color" value={f.color} onChange={(e)=>setF({...f, color:e.target.value})} className="w-9 h-9 rounded cursor-pointer"/>
+            </div>
+          </Field>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onClose} className="btn btn-ghost">Cancel</button>
+          <button onClick={save} className="btn btn-primary" data-testid="cat-save">{isNew ? "Create" : "Save"}</button>
         </div>
       </motion.div>
     </motion.div>

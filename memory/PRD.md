@@ -25,3 +25,11 @@ Build an eBay Australia scraper (ebay.com.au only) with manual + auto (ScrapingB
 - Authentication for admin
 - Real customer accounts (currently derived)
 - Public storefront that reads /api/products
+
+## Update (2026-01-14)
+- Extracts postage_display, postage_fee, delivery_estimate, collection, returns_policy, payment_methods (with regex fallbacks — visibility depends on eBay's page for that listing/user location)
+- Sold detection: is_sold flag set when eBay page shows "listing ended" / "sold" markers; grays out card in scraper AND auto-deactivates linked product
+- Per-item feature_flags: show_postage, show_delivery, show_collection, show_returns, show_payments, show_seller, show_description, show_specifics, visible — toggled inline in the item modal
+- Manual "Refresh all now" button in eBay AU Scraper header
+- Background asyncio task (_nightly_refresh_loop) re-scrapes every item every 24h + writes summary to db.system.nightly
+- New endpoints: PATCH /api/items/{id}/features, POST /api/items/refresh-all, GET /api/items/refresh-status

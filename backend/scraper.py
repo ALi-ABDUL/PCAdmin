@@ -479,7 +479,7 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
             location = _text(node)
             break
 
-    # Shipping
+    # Shipping (broad line)
     shipping = None
     for sel in [
         ".ux-labels-values--shipping .ux-labels-values__values",
@@ -490,6 +490,104 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
         if node:
             shipping = _text(node)
             break
+
+    # --- Postage / Delivery / Collection / Returns / Payments ---------------
+    postage_display: Optional[str] = None
+    postage_fee: Optional[float] = None
+    delivery_estimate: Optional[str] = None
+    collection: Optional[str] = None
+    returns_policy: Optional[str] = None
+    payment_methods: Optional[str] = None
+
+    # Scan every ux-labels-values dl by label text
+    for dl in soup.select("dl.ux-labels-values"):
+        label_node = dl.select_one(".ux-labels-values__labels")
+        value_node = dl.select_one(".ux-labels-values__values")
+        if not label_node or not value_node:
+            continue
+        label = _text(label_node).rstrip(":").lower()
+        value = _text(value_node)
+        if not value:
+            continue
+        if "postage" in label or "shipping" in label:
+            if not postage_display:
+                postage_display = value
+            m = re.search(r"(AU\s*\$|A\$|\$)\s*([0-9,]+\.?[0-9]*)", value)
+            if m:
+                try: postage_fee = float(m.group(2).replace(",", ""))
+                except ValueError: pass
+        elif "delivery" in label or "estimated" in label:
+            delivery_estimate = value
+        elif "collection" in label or "pickup" in label or "pick up" in label:
+            collection = value
+        elif "return" in label:
+            returns_policy = value
+        elif "payment" in label:
+            payment_methods = value
+
+    # Regex fallback for delivery estimate text anywhere on the page
+    if not delivery_estimate:
+        patterns = [
+            r"Estimated between\s+([A-Za-z]{3},\s*\d{1,2}\s+[A-Za-z]{3})\s+and\s+([A-Za-z]{3},\s*\d{1,2}\s+[A-Za-z]{3})(?:\s+to\s+(\d{3,4}))?",
+            r"Estimated delivery[^A-Za-z]{0,4}([A-Za-z]{3},\s*\d{1,2}\s+[A-Za-z]{3}(?:\s*-\s*[A-Za-z]{3},\s*\d{1,2}\s+[A-Za-z]{3})?)",
+            r'"deliveryDate"[^"]{0,10}"([^"]{5,80})"',
+            r"Estimated\s+(?:between|on|by)\s+([^<\"\n]{6,90}?)(?:\s+to\s+(\d{3,4}))?[<\"\n]",
+        ]
+        for pat in patterns:
+            m = re.search(pat, html)
+            if m:
+                if len(m.groups()) >= 2 and m.group(2) and re.match(r"^[A-Za-z]{3}", m.group(2)):
+                    delivery_estimate = f"Estimated between {m.group(1)} and {m.group(2)}" + (f" to {m.group(3)}" if len(m.groups()) >= 3 and m.group(3) else "")
+                else:
+                    delivery_estimate = f"Estimated {m.group(1).strip()}" + (f" to {m.group(2)}" if len(m.groups()) >= 2 and m.group(2) and m.group(2).isdigit() else "")
+                break
+
+    # Regex fallback for postage fee anywhere in the page
+    if postage_fee is None:
+        for pat in [
+            r"(?:Postage|Shipping)[^$]{0,120}?(?:AU\s*\$|A\$|\$)\s*([0-9]+(?:[.,][0-9]{1,2})?)",
+            r'"shippingServiceCost"[^0-9]{0,20}([0-9]+\.[0-9]{1,2})',
+            r'"shippingCost"[^0-9]{0,20}([0-9]+\.[0-9]{1,2})',
+        ]:
+            m = re.search(pat, html)
+            if m:
+                try:
+                    postage_fee = float(m.group(1).replace(",", "."))
+                    if not postage_display:
+                        postage_display = f"AU ${postage_fee:.2f}"
+                    break
+                except ValueError: pass
+
+    # Parse the shipping blob if we have it but no split fields
+    if shipping and not postage_display:
+        m = re.search(r"(AU\s*\$|A\$|\$)\s*([0-9]+(?:\.[0-9]{1,2})?)", shipping)
+        if m:
+            postage_display = shipping.split("See details")[0].strip()
+            try: postage_fee = float(m.group(2))
+            except ValueError: pass
+        elif "free" in shipping.lower() and "post" in shipping.lower():
+            postage_display = "Free postage"
+            postage_fee = 0.0
+
+    if shipping and not collection and re.search(r"(local pick[- ]?up|collection)", shipping, re.IGNORECASE):
+        m = re.search(r"(Free local pickup[^.]*|[Ll]ocal pick[- ]?up[^.]*)", shipping)
+        if m: collection = m.group(1).strip()
+
+    if shipping and not location:
+        m = re.search(r"Located in[:\s]+([^.]+?)(?:\.|$)", shipping)
+        if m: location = m.group(1).strip()
+
+    # --- Sold / ended detection ---------------------------------------------
+    is_sold = False
+    lower_html = html.lower()
+    if ("this listing has ended" in lower_html
+        or "this listing was ended by the seller" in lower_html
+        or 'itemavailability">soldout' in lower_html.replace(" ", "")
+        or 'itemavailability" content="https://schema.org/soldout' in lower_html
+        or re.search(r"this\s+item\s+has\s+sold", lower_html)
+    ):
+        is_sold = True
+
 
     # Description will be fetched separately from the iframe.
     description = None
@@ -531,6 +629,13 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
         "availability": availability,
         "description": description,
         "description_iframe_url": description_iframe_url,
+        "postage_display": postage_display,
+        "postage_fee": postage_fee,
+        "delivery_estimate": delivery_estimate,
+        "collection": collection,
+        "returns_policy": returns_policy,
+        "payment_methods": payment_methods,
+        "is_sold": is_sold,
         "images": images,
         "specifics": specifics,
     }

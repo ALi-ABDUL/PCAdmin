@@ -382,15 +382,15 @@ function Products() {
               {list.length === 0
                 ? <tr><td colSpan={7} className="text-center py-10 text-slate-500">No products yet. Head to the <b>eBay Scraper</b> and import your first one.</td></tr>
                 : list.map((p) => (
-                  <tr key={p.id} data-testid="product-row">
+                  <tr key={p.id} data-testid="product-row" className={p.is_sold || !p.active ? "opacity-50" : ""}>
                     <td>
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border hairline shrink-0">
+                        <div className={`w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border hairline shrink-0 ${p.is_sold ? "grayscale" : ""}`}>
                           {p.images?.[0] ? <img src={proxyImg(p.images[0])} alt="" className="w-full h-full object-cover"/> : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={16}/></div>}
                         </div>
                         <div className="min-w-0">
-                          <div className="text-sm font-medium truncate max-w-[320px]">{p.title}</div>
-                          <div className="text-[11px] text-slate-400 truncate">{p.active ? "Active" : "Draft"}</div>
+                          <div className="text-sm font-medium truncate max-w-[320px] flex items-center gap-2">{p.title}{p.is_sold && <span className="chip chip-danger">SOLD</span>}</div>
+                          <div className="text-[11px] text-slate-400 truncate">{p.is_sold ? "Sold — disabled" : (p.active ? "Active" : "Draft")}</div>
                         </div>
                       </div>
                     </td>
@@ -509,15 +509,38 @@ function ScraperPage({ onView }) {
     catch (e) { toast.error("Failed", { id: it.id, description: e?.response?.data?.detail?.slice(0,150) || e.message }); }
   };
 
+  const [refreshingAll, setRefreshingAll] = useState(false);
+  const refreshAll = async () => {
+    if (!window.confirm("Re-scrape ALL eBay AU items now? This may take a while.")) return;
+    const keys = loadKeys();
+    setRefreshingAll(true); toast.loading("Refreshing all items…", { id: "ra" });
+    try {
+      const { data } = await axios.post(`${API}/items/refresh-all`, { method: keys.method || "auto", scrapingbee_key: keys.scrapingbee_key || undefined, scraperapi_key: keys.scraperapi_key || undefined }, { timeout: 30 * 60 * 1000 });
+      toast.success(`Done · ${data.refreshed}/${data.total} refreshed · ${data.sold_found} sold`, { id: "ra", description: data.failed ? `${data.failed} failed` : undefined });
+      await load();
+    } catch (e) { toast.error("Refresh failed", { id: "ra", description: e?.response?.data?.detail?.slice(0,200) || e.message }); }
+    finally { setRefreshingAll(false); }
+  };
+
   return (
     <div className="grid gap-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="font-display text-2xl font-bold tracking-tight">eBay AU Scraper</div>
+          <div className="text-xs text-slate-500 font-mono">stealth scrape · nightly auto-refresh · sold detection</div>
+        </div>
+        <button data-testid="refresh-all-btn" onClick={refreshAll} disabled={refreshingAll} className="btn btn-primary">
+          {refreshingAll ? <Loader2 className="animate-spin" size={14}/> : <RefreshCw size={14}/>}
+          {refreshingAll ? "Refreshing all…" : "Refresh all now"}
+        </button>
+      </div>
       <section className={`card p-6 md:p-8 ${loading ? "scanning" : ""}`}>
         <div className="flex items-center gap-2 mb-2">
           <span className="chip chip-primary">ebay.com.au only</span>
           <span className="chip chip-success">Chrome TLS fingerprint</span>
         </div>
         <h2 className="font-display text-2xl md:text-3xl font-bold tracking-tight">Paste an eBay Australia item URL to import</h2>
-        <p className="text-slate-500 text-sm mt-1">Manual server-side stealth scrape (curl_cffi Chrome impersonation) with ScrapingBee & ScraperAPI as fallback.</p>
+        <p className="text-slate-500 text-sm mt-1">Manual server-side stealth scrape (curl_cffi Chrome impersonation) with ScrapingBee & ScraperAPI as fallback. Auto-refreshes every night.</p>
 
         <div className="mt-5 flex flex-col md:flex-row gap-3">
           <div className="relative flex-1">
@@ -560,7 +583,8 @@ function ScraperPage({ onView }) {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {items.map((it) => (
-              <div key={it.id} className="card overflow-hidden hover:shadow-lg transition-shadow" data-testid="scraped-card">
+              <div key={it.id} className={`card overflow-hidden hover:shadow-lg transition-shadow relative ${it.is_sold ? "opacity-60 grayscale" : ""}`} data-testid="scraped-card">
+                {it.is_sold && <div className="absolute top-2 left-2 chip chip-danger z-10">SOLD</div>}
                 <div className="aspect-[4/3] bg-slate-50 relative cursor-pointer" onClick={()=>onView(it)}>
                   {it.images?.[0]
                     ? <img src={proxyImg(it.images[0])} alt="" className="w-full h-full object-contain p-2"/>
@@ -744,26 +768,43 @@ function SettingsPage() {
 /* -------------------------------- Item modal ------------------------------ */
 function ItemModal({ item, onClose }) {
   const [imgIdx, setImgIdx] = useState(0);
-  const images = item.images || [];
-  const specifics = item.specifics ? Object.entries(item.specifics) : [];
-  useEffect(() => { setImgIdx(0); }, [item.id]);
+  const [it, setIt] = useState(item);
+  const images = it.images || [];
+  const specifics = it.specifics ? Object.entries(it.specifics) : [];
+  useEffect(() => { setImgIdx(0); setIt(item); }, [item]);
+
+  const ff = it.feature_flags || { show_postage:true, show_delivery:true, show_collection:true, show_returns:true, show_payments:true, show_seller:true, show_description:true, show_specifics:true, visible:true };
+  const toggle = async (key) => {
+    const next = { ...ff, [key]: !ff[key] };
+    setIt({ ...it, feature_flags: next });
+    try { await axios.patch(`${API}/items/${it.id}/features`, next); toast.success("Updated"); }
+    catch { toast.error("Save failed"); }
+  };
+  const shipFields = [
+    ["show_postage", "Postage", it.postage_display || (it.postage_fee != null ? `AU $${it.postage_fee.toFixed(2)}` : null) || it.shipping],
+    ["show_delivery", "Delivery estimate", it.delivery_estimate],
+    ["show_collection", "Collection / Pickup", it.collection],
+    ["show_returns", "Returns", it.returns_policy],
+    ["show_payments", "Payment methods", it.payment_methods],
+  ].filter(([_, __, v]) => v);
 
   return (
     <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md overflow-y-auto" onClick={onClose}>
       <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} exit={{opacity:0, y:20}} onClick={(e)=>e.stopPropagation()} className="card max-w-6xl mx-auto my-6 md:my-10">
         <div className="sticky top-0 z-10 backdrop-blur-xl bg-white/85 border-b hairline flex items-center justify-between px-5 md:px-8 py-4">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="chip chip-neutral">{item.method_used || "manual"}</span>
-            {item.item_id && <span className="text-xs font-mono text-slate-500 truncate">#{item.item_id}</span>}
+            <span className="chip chip-neutral">{it.method_used || "manual"}</span>
+            {it.is_sold && <span className="chip chip-danger">SOLD</span>}
+            {it.item_id && <span className="text-xs font-mono text-slate-500 truncate">#{it.item_id}</span>}
           </div>
           <div className="flex items-center gap-2">
-            <a href={item.url} target="_blank" rel="noreferrer" className="btn btn-ghost text-xs !py-1.5"><ExternalLink size={12}/> Open on eBay</a>
+            <a href={it.url} target="_blank" rel="noreferrer" className="btn btn-ghost text-xs !py-1.5"><ExternalLink size={12}/> Open on eBay</a>
             <button onClick={onClose} className="btn btn-ghost !p-2"><X size={16}/></button>
           </div>
         </div>
         <div className="p-5 md:p-8 grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-8">
           <div>
-            <div className="aspect-square bg-slate-50 border hairline rounded-xl overflow-hidden relative">
+            <div className={`aspect-square bg-slate-50 border hairline rounded-xl overflow-hidden relative ${it.is_sold?"grayscale":""}`}>
               {images[imgIdx] ? (
                 <AnimatePresence mode="wait">
                   <motion.img key={imgIdx} src={proxyImg(images[imgIdx])} alt="" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} transition={{duration:0.2}} className="w-full h-full object-contain p-4"/>
@@ -788,29 +829,60 @@ function ItemModal({ item, onClose }) {
             )}
           </div>
           <div className="min-w-0">
-            <h2 className="font-display text-2xl md:text-3xl font-bold tracking-tight leading-tight">{item.title || "Untitled"}</h2>
+            <h2 className="font-display text-2xl md:text-3xl font-bold tracking-tight leading-tight">{it.title || "Untitled"}</h2>
             <div className="mt-3 flex items-baseline gap-3 flex-wrap">
-              <span className="font-mono text-3xl font-black text-indigo-600">{item.price_display || "—"}</span>
-              {item.condition && <span className="chip chip-neutral">{item.condition.split(" ").slice(0, 3).join(" ")}</span>}
-              {item.availability && <span className="chip chip-neutral">{item.availability}</span>}
+              <span className="font-mono text-3xl font-black text-indigo-600">{it.price_display || "—"}</span>
+              {it.condition && <span className="chip chip-neutral">{it.condition.split(" ").slice(0, 3).join(" ")}</span>}
+              {it.availability && <span className="chip chip-neutral">{it.availability}</span>}
             </div>
             <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <InfoBox icon={<MapPin size={14}/>} label="Location" value={item.location}/>
-              <InfoBox icon={<Truck size={14}/>} label="Shipping" value={item.shipping}/>
-              <InfoBox icon={<UserIcon size={14}/>} label="Seller" value={item.seller}/>
-              <InfoBox icon={<Box size={14}/>} label="Item ID" value={item.item_id} mono/>
+              {ff.show_seller !== false && <InfoBox icon={<UserIcon size={14}/>} label="Seller" value={it.seller}/>}
+              <InfoBox icon={<MapPin size={14}/>} label="Located in" value={it.location}/>
+              <InfoBox icon={<Box size={14}/>} label="Item ID" value={it.item_id} mono/>
             </div>
 
-            {item.description && (
+            {/* Postage, returns and payments */}
+            <div className="mt-6 card-flat p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-display font-bold text-sm">Postage, returns & payments</div>
+                {it.delivery_estimate_updated_at && <span className="text-[10px] font-mono text-slate-400">updated {fmtDate(it.delivery_estimate_updated_at)}</span>}
+              </div>
+              {shipFields.length === 0 ? (
+                <div className="text-xs text-slate-500">No postage/delivery data returned by eBay for this listing.</div>
+              ) : (
+                <div className="grid gap-2">
+                  {shipFields.map(([key, label, value]) => (
+                    <div key={key} className={`flex items-start gap-3 p-2 rounded-lg ${ff[key] ? "" : "opacity-40"}`}>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">{label}</div>
+                        <div className="text-sm text-slate-800 break-words">{value}</div>
+                      </div>
+                      <label className="cursor-pointer flex items-center gap-1 text-[10px] font-mono uppercase text-slate-500">
+                        <input type="checkbox" checked={!!ff[key]} onChange={()=>toggle(key)} data-testid={`ff-${key}`} className="accent-indigo-600 w-4 h-4"/>
+                        Show
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {it.description && ff.show_description !== false && (
               <div className="mt-6">
-                <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2">Description (from seller)</div>
-                <div className="text-sm text-slate-700 leading-relaxed max-h-72 overflow-y-auto pr-2 border hairline rounded-xl p-4 bg-slate-50 whitespace-pre-wrap">{item.description}</div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500">Description (from seller)</div>
+                  <label className="text-[10px] font-mono uppercase text-slate-500 flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={!!ff.show_description} onChange={()=>toggle("show_description")} className="accent-indigo-600 w-3.5 h-3.5"/>Show</label>
+                </div>
+                <div className="text-sm text-slate-700 leading-relaxed max-h-64 overflow-y-auto pr-2 border hairline rounded-xl p-4 bg-slate-50 whitespace-pre-wrap">{it.description}</div>
               </div>
             )}
 
-            {specifics.length > 0 && (
+            {specifics.length > 0 && ff.show_specifics !== false && (
               <div className="mt-6">
-                <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2">Item specifics</div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500">Item specifics</div>
+                  <label className="text-[10px] font-mono uppercase text-slate-500 flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={!!ff.show_specifics} onChange={()=>toggle("show_specifics")} className="accent-indigo-600 w-3.5 h-3.5"/>Show</label>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
                   {specifics.map(([k, v]) => (
                     <div key={k} className="flex justify-between gap-3 border-b border-dashed hairline py-1.5">

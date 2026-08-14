@@ -13,6 +13,7 @@ from typing import List, Optional, Any
 import uuid
 from datetime import datetime, timezone, timedelta
 
+import asyncio
 from scraper import (
     ScrapeError,
     NotEbayAUError,
@@ -66,6 +67,20 @@ class ScrapedItem(BaseModel):
     availability: Optional[str] = None
     description: Optional[str] = None
     description_iframe_url: Optional[str] = None
+    postage_display: Optional[str] = None
+    postage_fee: Optional[float] = None
+    delivery_estimate: Optional[str] = None
+    delivery_estimate_updated_at: Optional[str] = None
+    collection: Optional[str] = None
+    returns_policy: Optional[str] = None
+    payment_methods: Optional[str] = None
+    is_sold: bool = False
+    sold_detected_at: Optional[str] = None
+    feature_flags: dict = Field(default_factory=lambda: {
+        "show_postage": True, "show_delivery": True, "show_collection": True,
+        "show_returns": True, "show_payments": True, "show_seller": True,
+        "show_description": True, "show_specifics": True, "visible": True,
+    })
     images: List[str] = Field(default_factory=list)
     specifics: dict = Field(default_factory=dict)
     method_used: Optional[str] = None
@@ -178,12 +193,24 @@ async def scrape(req: ScrapeRequest) -> dict:
 
     now_iso = datetime.now(timezone.utc).isoformat()
     history_point = {"at": now_iso, "value": data.get("price_value"), "display": data.get("price_display")}
+    if data.get("delivery_estimate"):
+        data["delivery_estimate_updated_at"] = now_iso
+    if data.get("is_sold"):
+        data["sold_detected_at"] = now_iso
 
     if req.save:
         query = {"item_id": data["item_id"]} if data.get("item_id") else {"url": url}
         existing = await db.items.find_one(query, {"_id": 0})
         if existing:
             update_fields = {**data, "method_used": method_used, "updated_at": now_iso}
+            # Preserve user's feature_flags
+            if "feature_flags" in existing:
+                update_fields["feature_flags"] = existing["feature_flags"]
+            # Only overwrite sold_detected_at if it's a new sold event
+            if data.get("is_sold") and not existing.get("is_sold"):
+                update_fields["sold_detected_at"] = now_iso
+                # Mirror to product if linked
+                await db.products.update_many({"source_item_id": data.get("item_id")}, {"$set": {"active": False, "is_sold": True, "updated_at": now_iso}})
             history = existing.get("price_history", [])
             last_val = history[-1]["value"] if history else None
             if data.get("price_value") is not None and data.get("price_value") != last_val:
@@ -198,6 +225,7 @@ async def scrape(req: ScrapeRequest) -> dict:
             item = ScrapedItem(**data, method_used=method_used, price_history=[history_point])
             doc = item.model_dump()
             await db.items.insert_one(doc)
+            doc.pop("_id", None)
             return {"item": doc, "method_used": method_used, "saved": True, "updated": False}
     else:
         return {"item": {**data, "method_used": method_used}, "method_used": method_used, "saved": False}
@@ -230,6 +258,12 @@ async def list_items(
     items = await cursor.to_list(length=limit)
     total = await db.items.count_documents(query)
     return {"items": items, "total": total}
+
+
+@api_router.get("/items/refresh-status")
+async def refresh_status():
+    doc = await db.system.find_one({"_id": "nightly"}, {"_id": 0})
+    return doc or {"last_run": None}
 
 
 @api_router.get("/items/{item_id}")
@@ -268,6 +302,63 @@ async def refresh_item(item_id: str, req: ScrapeRequest):
     req.url = existing["url"]
     req.save = True
     return await scrape(req)
+
+
+@api_router.patch("/items/{item_id}/features")
+async def update_item_features(item_id: str, features: dict):
+    r = await db.items.update_one({"id": item_id}, {"$set": {"feature_flags": features, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return await db.items.find_one({"id": item_id}, {"_id": 0})
+
+
+class RefreshAllRequest(BaseModel):
+    method: str = "auto"
+    scrapingbee_key: Optional[str] = None
+    scraperapi_key: Optional[str] = None
+
+
+async def _refresh_all_items(method: str = "auto", scrapingbee_key: Optional[str] = None, scraperapi_key: Optional[str] = None) -> dict:
+    """Re-scrape every stored item; detects sold status + updates delivery estimate."""
+    items = await db.items.find({}, {"_id": 0, "id": 1, "url": 1, "item_id": 1}).to_list(1000)
+    ok = 0; sold = 0; failed = 0
+    for it in items:
+        try:
+            r = ScrapeRequest(url=it["url"], method=method, scrapingbee_key=scrapingbee_key, scraperapi_key=scraperapi_key, save=True)
+            res = await scrape(r)
+            if res.get("item", {}).get("is_sold"):
+                sold += 1
+            ok += 1
+        except Exception as e:
+            failed += 1
+            logger.info(f"refresh-all: {it.get('item_id')} failed: {e}")
+        await asyncio.sleep(1.2)  # be gentle to eBay
+    return {"refreshed": ok, "sold_found": sold, "failed": failed, "total": len(items)}
+
+
+@api_router.post("/items/refresh-all")
+async def refresh_all_items(body: RefreshAllRequest):
+    return await _refresh_all_items(body.method, body.scrapingbee_key, body.scraperapi_key)
+
+
+async def _nightly_refresh_loop():
+    """Fire-and-forget background task: re-scrape all items every 24h."""
+    # Wait until app fully starts + first-day delay so we don't hammer on boot
+    await asyncio.sleep(60)
+    while True:
+        try:
+            logger.info("nightly refresh: starting")
+            summary = await _refresh_all_items(method="auto")
+            await db.system.update_one({"_id": "nightly"}, {"$set": {"last_run": datetime.now(timezone.utc).isoformat(), **summary}}, upsert=True)
+            logger.info(f"nightly refresh done: {summary}")
+        except Exception as e:
+            logger.exception(f"nightly refresh error: {e}")
+        await asyncio.sleep(24 * 60 * 60)
+
+
+@app.on_event("startup")
+async def _start_scheduler():
+    asyncio.create_task(_nightly_refresh_loop())
 
 
 # ---------------------------------------------------------------------------

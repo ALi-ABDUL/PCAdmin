@@ -31,6 +31,27 @@ export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [selectedItem, setSelectedItem] = useState(null);
 
+  // Poll for new sold events every 60s and fire toasts
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const { data } = await axios.get(`${API}/sold-events`, { params: { unread_only: true, mark_seen: true, limit: 20 } });
+        if (cancelled || !data.events?.length) return;
+        data.events.forEach((e) => {
+          toast.error(`SOLD · ${e.title?.slice(0, 60) || "Item"}`, {
+            description: `Detected during auto-refresh · ${fmtDate(e.detected_at)}`,
+            duration: 15000,
+            action: e.url ? { label: "Open", onClick: () => window.open(e.url, "_blank") } : undefined,
+          });
+        });
+      } catch { /* silent */ }
+    };
+    check(); // fire once on mount
+    const iv = setInterval(check, 60_000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, []);
+
   return (
     <div className="min-h-screen flex">
       <Toaster theme="light" position="bottom-right" />

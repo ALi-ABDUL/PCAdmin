@@ -209,6 +209,18 @@ async def scrape(req: ScrapeRequest) -> dict:
             # Only overwrite sold_detected_at if it's a new sold event
             if data.get("is_sold") and not existing.get("is_sold"):
                 update_fields["sold_detected_at"] = now_iso
+                # Record a sold-event for the frontend toast feed
+                await db.sold_events.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "item_id": existing.get("id"),
+                    "ebay_item_id": data.get("item_id"),
+                    "title": data.get("title") or existing.get("title"),
+                    "url": existing.get("url"),
+                    "image": (data.get("images") or existing.get("images") or [None])[0],
+                    "last_price": data.get("price_value") or existing.get("price_value"),
+                    "detected_at": now_iso,
+                    "notified": False,
+                })
                 # Mirror to product if linked
                 await db.products.update_many({"source_item_id": data.get("item_id")}, {"$set": {"active": False, "is_sold": True, "updated_at": now_iso}})
             history = existing.get("price_history", [])
@@ -264,6 +276,16 @@ async def list_items(
 async def refresh_status():
     doc = await db.system.find_one({"_id": "nightly"}, {"_id": 0})
     return doc or {"last_run": None}
+
+
+@api_router.get("/sold-events")
+async def list_sold_events(unread_only: bool = True, mark_seen: bool = True, limit: int = 50):
+    q = {"notified": False} if unread_only else {}
+    events = await db.sold_events.find(q, {"_id": 0}).sort("detected_at", -1).limit(limit).to_list(limit)
+    if mark_seen and events:
+        ids = [e["id"] for e in events]
+        await db.sold_events.update_many({"id": {"$in": ids}}, {"$set": {"notified": True}})
+    return {"events": events}
 
 
 @api_router.get("/items/{item_id}")

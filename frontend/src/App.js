@@ -11,6 +11,8 @@ import {
   Smartphone, Laptop, Tv, Headphones, Camera, Gamepad2, Watch, Utensils, Armchair, Lamp,
   Bed, SprayCan, Flower2, Wrench, Car, Hammer, Shield, Shirt, Footprints, Dumbbell, Tent,
   Bike, Blocks, Puzzle, Tags, Palette,
+  Store, CreditCard, Receipt, Undo2, Mail, MessageSquare, Menu, Layout, FileText, Building2,
+  Globe, Activity, Cable, Lock, ChevronDown, Bell, HelpCircle,
 } from "lucide-react";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -30,9 +32,32 @@ const moneyCents = (n) => (n == null ? "—" : new Intl.NumberFormat("en-AU", { 
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" }); } catch { return iso; } };
 const fmtDay = (iso) => { try { return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short" }); } catch { return iso; } };
 
+/* --------------------------- Store Management nav ------------------------- */
+const STORE_NAV = [
+  { id: "store-settings",      label: "Store Settings",       icon: Store,        group: "Configuration" },
+  { id: "payment-gateway",     label: "Payment Gateway",      icon: CreditCard,   group: "Configuration" },
+  { id: "shipping-methods",    label: "Shipping Methods",     icon: Truck,        group: "Configuration" },
+  { id: "tax-rates",           label: "Tax Rates",            icon: Receipt,      group: "Configuration" },
+  { id: "checkout-settings",   label: "Checkout Settings",    icon: ShoppingCart, group: "Configuration" },
+  { id: "returns-refunds",     label: "Returns & Refunds",    icon: Undo2,        group: "Configuration" },
+  { id: "email-notifications", label: "Email & Notifications",icon: Mail,         group: "Content" },
+  { id: "popup-messages",      label: "Popup Messages",       icon: MessageSquare,group: "Content" },
+  { id: "site-menus",          label: "Site Menus",           icon: Menu,         group: "Content" },
+  { id: "pages",               label: "Pages",                icon: FileText,     group: "Content" },
+  { id: "locations",           label: "Locations",            icon: Building2,    group: "Business" },
+  { id: "seo-settings",        label: "SEO Settings",         icon: Globe,        group: "Marketing" },
+  { id: "analytics-tracking",  label: "Analytics & Tracking", icon: Activity,     group: "Marketing" },
+  { id: "integrations",        label: "Integrations",         icon: Cable,        group: "Advanced" },
+  { id: "security",            label: "Security",             icon: Lock,         group: "Advanced" },
+];
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
+  const [storeSection, setStoreSection] = useState("store-settings");
   const [selectedItem, setSelectedItem] = useState(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => { setMobileNavOpen(false); }, [tab]);
 
   // Poll for new sold events every 60s and fire toasts
   useEffect(() => {
@@ -50,21 +75,52 @@ export default function App() {
         });
       } catch { /* silent */ }
     };
-    check(); // fire once on mount
+    check();
     const iv = setInterval(check, 60_000);
     return () => { cancelled = true; clearInterval(iv); };
   }, []);
 
+  const inStore = tab === "store";
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex bg-[color:var(--bg)]">
       <Toaster theme="light" position="bottom-right" />
-      <Sidebar tab={tab} setTab={setTab} />
+
+      {/* Mobile overlay backdrop */}
+      <AnimatePresence>
+        {mobileNavOpen && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMobileNavOpen(false)} className="lg:hidden fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm"/>
+        )}
+      </AnimatePresence>
+
+      {/* Primary sidebar */}
+      <Sidebar tab={tab} setTab={setTab} mobileOpen={mobileNavOpen} setMobileOpen={setMobileNavOpen} />
+
+      {/* Secondary store sidebar */}
+      <AnimatePresence>
+        {inStore && (
+          <motion.aside
+            key="store-sidebar"
+            initial={{ opacity: 0, x: -20, width: 0 }}
+            animate={{ opacity: 1, x: 0, width: 280 }}
+            exit={{ opacity: 0, x: -20, width: 0 }}
+            transition={{ duration: 0.22 }}
+            className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden"
+          >
+            <StoreSideNav active={storeSection} setActive={setStoreSection} />
+          </motion.aside>
+        )}
+      </AnimatePresence>
+
+      {/* Main content */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopHeader tab={tab} />
-        <main className="flex-1 min-w-0 p-6 lg:p-10">
+        <TopHeader tab={tab} storeSection={storeSection} onMenu={() => setMobileNavOpen(true)}/>
+        {/* On smaller screens, show Store nav as a horizontal scroller above content */}
+        {inStore && <StoreMobileNav active={storeSection} setActive={setStoreSection} />}
+        <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 xl:p-10">
           <AnimatePresence mode="wait">
-            <motion.div key={tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <motion.div key={inStore ? `store-${storeSection}` : tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
               {tab === "dashboard" && <Dashboard />}
+              {tab === "store"     && <StoreManagement section={storeSection} setSection={setStoreSection}/>}
               {tab === "products"  && <Products />}
               {tab === "categories" && <Categories />}
               {tab === "scraper"   && <ScraperPage onView={setSelectedItem} />}
@@ -98,71 +154,220 @@ const CatIcon = ({ name, size = 16, ...p }) => {
 };
 
 /* --------------------------------- Sidebar -------------------------------- */
-function Sidebar({ tab, setTab }) {
+function Sidebar({ tab, setTab, mobileOpen, setMobileOpen }) {
   const nav = [
-    { id: "dashboard", label: "Dashboard",  icon: LayoutDashboard },
-    { id: "products",  label: "Products",   icon: Package },
-    { id: "categories", label: "Categories", icon: Tags },
-    { id: "scraper",   label: "eBay AU Scraper", icon: Zap, badge: "AU" },
-    { id: "orders",    label: "Orders",     icon: ShoppingCart },
-    { id: "customers", label: "Customers",  icon: Users },
-    { id: "analytics", label: "Analytics",  icon: BarChart3 },
-    { id: "settings",  label: "Settings",   icon: Settings2 },
+    { id: "dashboard", label: "Dashboard",  icon: LayoutDashboard, group: "General" },
+    { id: "store",     label: "Store Management", icon: Store, group: "General", hasSub: true },
+    { id: "products",  label: "Products",   icon: Package,        group: "Catalog" },
+    { id: "categories", label: "Categories", icon: Tags,          group: "Catalog" },
+    { id: "scraper",   label: "eBay AU Scraper", icon: Zap, badge: "AU", group: "Catalog" },
+    { id: "orders",    label: "Orders",     icon: ShoppingCart,   group: "Operations" },
+    { id: "customers", label: "Customers",  icon: Users,          group: "Operations" },
+    { id: "analytics", label: "Analytics",  icon: BarChart3,      group: "Insights" },
+    { id: "settings",  label: "Settings",   icon: Settings2,      group: "System" },
   ];
-  return (
-    <aside className="hidden lg:flex w-64 shrink-0 flex-col border-r hairline bg-white/70 backdrop-blur-xl sticky top-0 h-screen">
+  const grouped = nav.reduce((acc, n) => { (acc[n.group] = acc[n.group] || []).push(n); return acc; }, {});
+
+  const content = (
+    <>
       <div className="px-5 py-5 flex items-center gap-3">
-        <div className="w-9 h-9 grid place-items-center rounded-xl text-white font-black font-display" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>A</div>
-        <div>
-          <div className="font-display font-bold text-[15px] tracking-tight">Aussie Admin</div>
-          <div className="text-[10px] font-mono uppercase tracking-widest text-[color:var(--dim)]">v1.0 · AU</div>
+        <div className="w-9 h-9 grid place-items-center rounded-xl text-white font-black font-display shrink-0" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>A</div>
+        <div className="min-w-0">
+          <div className="font-display font-bold text-[15px] tracking-tight truncate">Aussie Admin</div>
+          <div className="text-[10px] font-mono uppercase tracking-widest text-[color:var(--dim)]">v1.1 · AU</div>
         </div>
+        <button className="ml-auto lg:hidden btn btn-ghost !p-1.5" onClick={() => setMobileOpen && setMobileOpen(false)}><X size={16}/></button>
       </div>
-      <div className="px-3 pb-2">
-        <div className="text-[10px] font-mono uppercase tracking-widest text-[color:var(--dim)] px-2 pb-1.5">General</div>
-        <nav className="flex flex-col gap-0.5">
-          {nav.map((n) => {
-            const Icon = n.icon; const active = tab === n.id;
-            return (
-              <button key={n.id} data-testid={`nav-${n.id}`} onClick={() => setTab(n.id)} className={`sidebar-link ${active ? "active" : ""}`}>
-                <Icon size={16} className="sidebar-icon" />
-                <span className="flex-1 text-left">{n.label}</span>
-                {n.badge && <span className="chip chip-primary">{n.badge}</span>}
-              </button>
-            );
-          })}
-        </nav>
+      <div className="px-3 pb-4 overflow-y-auto flex-1">
+        {Object.entries(grouped).map(([g, items]) => (
+          <div key={g} className="mb-4">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-[color:var(--dim)] px-2 pb-1.5">{g}</div>
+            <nav className="flex flex-col gap-0.5">
+              {items.map((n) => {
+                const Icon = n.icon; const active = tab === n.id;
+                return (
+                  <button key={n.id} data-testid={`nav-${n.id}`} onClick={() => setTab(n.id)} className={`sidebar-link ${active ? "active" : ""}`}>
+                    <Icon size={16} className="sidebar-icon" />
+                    <span className="flex-1 text-left">{n.label}</span>
+                    {n.hasSub && <ChevronRight size={13} className={`transition-transform ${active ? "rotate-90 text-indigo-500" : "text-slate-300"}`}/>}
+                    {n.badge && <span className="chip chip-primary">{n.badge}</span>}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        ))}
       </div>
-      <div className="mt-auto p-4">
+      <div className="p-4 border-t hairline">
         <div className="card p-4 bg-gradient-to-br from-indigo-50 to-pink-50 border-indigo-100">
           <div className="flex items-center gap-2 text-indigo-700 font-display font-bold text-sm"><Sparkles size={14}/> Import from eBay</div>
-          <p className="text-xs text-slate-600 mt-1 leading-relaxed">Paste any ebay.com.au URL to add a new product to your catalog.</p>
+          <p className="text-xs text-slate-600 mt-1 leading-relaxed">Paste any ebay.com.au URL to add a new product.</p>
           <button onClick={() => setTab("scraper")} className="btn btn-primary w-full mt-3 text-xs py-2">Open scraper</button>
         </div>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <aside className="hidden lg:flex w-64 shrink-0 flex-col border-r hairline bg-white/80 backdrop-blur-xl sticky top-0 h-screen">{content}</aside>
+      <AnimatePresence>
+        {mobileOpen && (
+          <motion.aside
+            key="mobile-sidebar"
+            initial={{ x: -300 }} animate={{ x: 0 }} exit={{ x: -300 }} transition={{ type: "tween", duration: 0.22 }}
+            className="lg:hidden fixed inset-y-0 left-0 z-50 w-72 bg-white border-r hairline flex flex-col shadow-2xl"
+          >{content}</motion.aside>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
 
-function TopHeader({ tab }) {
-  const titles = {
-    dashboard: "Dashboard", products: "Products", categories: "Categories", scraper: "eBay AU Scraper",
-    orders: "Orders", customers: "Customers", analytics: "Analytics", settings: "Settings",
-  };
+function StoreSideNav({ active, setActive }) {
+  const grouped = STORE_NAV.reduce((acc, n) => { (acc[n.group] = acc[n.group] || []).push(n); return acc; }, {});
   return (
-    <div className="sticky top-0 z-30 backdrop-blur-xl bg-white/75 border-b hairline">
-      <div className="flex items-center justify-between px-6 lg:px-10 h-16">
-        <div className="flex items-center gap-3">
-          <h1 className="font-display text-lg font-bold tracking-tight">{titles[tab]}</h1>
-          <span className="hidden sm:inline chip chip-neutral">AU · AUD</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="hidden md:flex relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--dim)]"/>
-            <input placeholder="Search anything…" className="input pl-9 pr-3 py-2 text-sm w-72" />
+    <>
+      <div className="px-5 py-5 border-b hairline">
+        <div className="flex items-center gap-2 text-slate-500 text-[11px] font-mono uppercase tracking-widest"><Store size={12}/> Store Management</div>
+        <div className="font-display font-bold text-[15px] tracking-tight mt-1">Configure your storefront</div>
+      </div>
+      <div className="px-3 py-4 overflow-y-auto flex-1">
+        {Object.entries(grouped).map(([g, items]) => (
+          <div key={g} className="mb-4">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-[color:var(--dim)] px-2 pb-1.5">{g}</div>
+            <nav className="flex flex-col gap-0.5">
+              {items.map((n) => {
+                const Icon = n.icon; const on = active === n.id;
+                return (
+                  <button key={n.id} data-testid={`store-${n.id}`} onClick={() => setActive(n.id)} className={`sidebar-link ${on ? "active" : ""}`}>
+                    <Icon size={15} className="sidebar-icon"/>
+                    <span className="text-left flex-1">{n.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
           </div>
-          <div className="w-9 h-9 rounded-full grid place-items-center text-white font-bold" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>AK</div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function StoreMobileNav({ active, setActive }) {
+  return (
+    <div className="xl:hidden sticky top-16 z-20 bg-white/85 backdrop-blur-xl border-b hairline overflow-x-auto">
+      <div className="flex items-center gap-1 px-4 py-2 min-w-max">
+        {STORE_NAV.map((n) => {
+          const Icon = n.icon; const on = active === n.id;
+          return (
+            <button key={n.id} data-testid={`store-m-${n.id}`} onClick={() => setActive(n.id)} className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${on ? "bg-indigo-50 text-indigo-600 border border-indigo-100" : "text-slate-500 hover:bg-slate-50"}`}>
+              <Icon size={13}/> {n.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TopHeader({ tab, storeSection, onMenu }) {
+  const titles = {
+    dashboard: "Dashboard", store: "Store Management", products: "Products", categories: "Categories",
+    scraper: "eBay AU Scraper", orders: "Orders", customers: "Customers", analytics: "Analytics", settings: "Settings",
+  };
+  const subTitle = tab === "store" ? STORE_NAV.find((s) => s.id === storeSection)?.label : null;
+
+  return (
+    <div className="sticky top-0 z-30 backdrop-blur-xl bg-white/80 border-b hairline">
+      <div className="flex items-center justify-between px-4 sm:px-6 lg:px-8 h-16 gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <button onClick={onMenu} className="lg:hidden btn btn-ghost !p-2 shrink-0" data-testid="mobile-menu-btn"><Menu size={18}/></button>
+          <div className="flex items-center gap-2 min-w-0">
+            <h1 className="font-display text-base sm:text-lg font-bold tracking-tight truncate">{titles[tab]}</h1>
+            {subTitle && (
+              <>
+                <ChevronRight size={14} className="text-slate-300 shrink-0"/>
+                <span className="text-sm text-slate-600 truncate">{subTitle}</span>
+              </>
+            )}
+          </div>
+          <span className="hidden sm:inline chip chip-neutral shrink-0">AU · AUD</span>
         </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="hidden lg:flex relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--dim)]"/>
+            <input placeholder="Search anything…" className="input pl-9 pr-3 py-2 text-sm w-64"/>
+          </div>
+          <button className="btn btn-ghost !p-2 relative" title="Notifications"><Bell size={16}/></button>
+          <button className="btn btn-ghost !p-2 hidden sm:grid" title="Help"><HelpCircle size={16}/></button>
+          <div className="w-9 h-9 rounded-full grid place-items-center text-white font-bold text-xs" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>AK</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------- Store Management ---------------------------- */
+function StoreManagement({ section, setSection }) {
+  const meta = STORE_NAV.find((s) => s.id === section) || STORE_NAV[0];
+  const Icon = meta.icon;
+
+  const sections = {
+    "store-settings":      { hint: "Store name, brand, contact details, business hours and legal info.", fields: ["Store name","Legal business name","ABN","Contact email","Support phone","Business hours"] },
+    "payment-gateway":     { hint: "Enable/disable payment providers and configure their credentials.", fields: ["Stripe","PayPal","Apple Pay","Google Pay","Afterpay","Zip Pay","Bank transfer","Cash on delivery"] },
+    "shipping-methods":    { hint: "Zones, carriers, rates and free-shipping thresholds.", fields: ["Australia Post — Parcel Post","Australia Post — Express","Sendle","Aramex","Local delivery","Click & collect","Free shipping threshold"] },
+    "tax-rates":           { hint: "GST and location-based tax rules.", fields: ["Australia — GST 10%","New Zealand — GST 15%","Tax-exempt customer groups","B2B / ABN entries"] },
+    "checkout-settings":   { hint: "Fine-tune the buyer journey at checkout.", fields: ["Guest checkout","Require phone","Address auto-complete","Order note field","Marketing opt-in","Terms & conditions box"] },
+    "returns-refunds":     { hint: "Return window, restocking fees and refund policies.", fields: ["Return window (days)","Restocking fee","Return shipping paid by","Refund method","Auto-approve returns"] },
+    "email-notifications": { hint: "Transactional emails sent to customers and staff.", fields: ["Order confirmation","Order shipped","Order delivered","Refund issued","Abandoned cart","New review request","Admin alerts"] },
+    "popup-messages":      { hint: "On-site banners, promos and pop-ups.", fields: ["Announcement bar","Welcome popup","Exit-intent offer","Free-shipping banner","Cookie consent","Age gate"] },
+    "site-menus":          { hint: "Header, footer and mobile navigation menus.", fields: ["Main navigation","Footer — Shop","Footer — Support","Footer — Legal","Mobile drawer","Utility bar"] },
+    "pages":               { hint: "Static content pages (About, Contact, Policies…).", fields: ["Home","About us","Contact","Shipping policy","Returns policy","Privacy policy","Terms of service","FAQ"] },
+    "locations":           { hint: "Physical stores, warehouses and pickup points.", fields: ["Bellara HQ, QLD","Sydney warehouse, NSW","Melbourne showroom, VIC","Pickup: 3rd party locker"] },
+    "seo-settings":        { hint: "Global SEO defaults, sitemaps and social cards.", fields: ["Meta title template","Meta description default","Open Graph image","Twitter card","Sitemap URL","robots.txt"] },
+    "analytics-tracking":  { hint: "Attach analytics and tracking pixels.", fields: ["Google Analytics 4","Google Tag Manager","Meta pixel","TikTok pixel","Hotjar","Server-side conversions"] },
+    "integrations":        { hint: "Third-party apps and API connections.", fields: ["eBay Australia (source)","Xero","MYOB","Klaviyo","Mailchimp","Zapier","Slack","Discord"] },
+    "security":            { hint: "Admin access controls, password rules and audit logs.", fields: ["Two-factor authentication","Session timeout","IP allowlist","Password strength","Failed-login lockout","Audit log retention"] },
+  }[section] || { hint: "", fields: [] };
+
+  return (
+    <div className="grid gap-6">
+      <div className="card p-5 md:p-6 flex items-start gap-4">
+        <div className="w-12 h-12 rounded-xl grid place-items-center text-white shrink-0" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}><Icon size={20}/></div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500">{meta.group}</div>
+          <div className="font-display text-2xl font-bold tracking-tight">{meta.label}</div>
+          <div className="text-sm text-slate-500 mt-1">{sections.hint}</div>
+        </div>
+        <button className="btn btn-primary text-sm hidden sm:inline-flex" data-testid="store-save-btn"><Plus size={14}/> Add new</button>
+      </div>
+
+      <div className="grid gap-3">
+        {sections.fields.length === 0 ? (
+          <div className="card p-10 text-center text-slate-500">Configuration for this section coming soon.</div>
+        ) : sections.fields.map((f, i) => (
+          <div key={f} className="card p-4 md:p-5 flex items-center justify-between gap-4 group hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-lg grid place-items-center shrink-0 bg-indigo-50 text-indigo-500"><Icon size={16}/></div>
+              <div className="min-w-0">
+                <div className="font-medium text-sm truncate">{f}</div>
+                <div className="text-[11px] text-slate-400 font-mono">Not configured</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <label className="flex items-center gap-2 text-[11px] font-mono uppercase text-slate-500 cursor-pointer">
+                <input type="checkbox" defaultChecked={i < 2} className="accent-indigo-600 w-3.5 h-3.5"/>Enabled
+              </label>
+              <button className="btn btn-ghost text-xs !py-1 !px-2">Configure</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="card p-5 border-dashed border-2 text-center text-slate-500 text-sm">
+        <div className="font-display font-bold text-slate-700 mb-1">This is a scaffold — ready for your links & fields</div>
+        Send more sub-links or specific fields for <span className="font-mono text-indigo-600">{meta.label}</span> and I&apos;ll wire them up.
       </div>
     </div>
   );

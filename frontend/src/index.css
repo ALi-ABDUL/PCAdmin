@@ -3,16 +3,16 @@
 @tailwind utilities;
 
 :root {
-    --bg: #F7F7FB;
+    --bg: #F7F8FB;
     --panel: #FFFFFF;
     --panel-2: #FAFAFC;
-    --border: #EAEAF0;
+    --border: #E9EAF1;
     --border-strong: #D8D8E1;
-    --ink: #0F1220;
+    --ink: #0B1020;
     --ink-2: #1F2233;
     --muted: #6B7185;
     --dim: #9AA0B4;
-    --primary: #4F46E5;      /* indigo-600 */
+    --primary: #4F46E5;
     --primary-hover: #4338CA;
     --primary-soft: #EEF0FF;
     --violet: #7C3AED;

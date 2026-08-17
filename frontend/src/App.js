@@ -13,6 +13,7 @@ import {
   Bike, Blocks, Puzzle, Tags, Palette,
   Store, CreditCard, Receipt, Undo2, Mail, MessageSquare, Menu, Layout, FileText, Building2,
   Globe, Activity, Cable, Lock, ChevronDown, Bell, HelpCircle,
+  Factory, UserPlus, Upload, List, Award, ShieldCheck, PackageSearch, ClipboardList, LineChart as LineChartIcon, TrendingDown as TrendingDownIcon, History, BadgeCheck, Star as StarIcon,
 } from "lucide-react";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -31,6 +32,19 @@ const money = (n, cur = "AUD") => (n == null ? "—" : new Intl.NumberFormat("en
 const moneyCents = (n) => (n == null ? "—" : new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n));
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" }); } catch { return iso; } };
 const fmtDay = (iso) => { try { return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short" }); } catch { return iso; } };
+
+const SUPPLIER_NAV = [
+  { id: "create",       label: "Create Supplier",      icon: UserPlus,       group: "Manage" },
+  { id: "import",       label: "Import Suppliers",     icon: Upload,         group: "Manage" },
+  { id: "all",          label: "All Suppliers",        icon: List,           group: "Directory" },
+  { id: "top",          label: "Top Suppliers",        icon: Award,          group: "Directory" },
+  { id: "quality",      label: "Quality Suppliers",    icon: BadgeCheck,     group: "Directory" },
+  { id: "products",     label: "Supplier Products",    icon: PackageSearch,  group: "Sourcing" },
+  { id: "orders",       label: "Supplier Orders",      icon: ClipboardList,  group: "Sourcing" },
+  { id: "pricing",      label: "Supplier Pricing",     icon: Percent,        group: "Sourcing" },
+  { id: "performance",  label: "Supplier Performance", icon: LineChartIcon,  group: "Insights" },
+  { id: "activity",     label: "Supplier Activity",    icon: History,        group: "Insights" },
+];
 
 /* --------------------------- Store Management nav ------------------------- */
 const STORE_NAV = [
@@ -54,6 +68,7 @@ const STORE_NAV = [
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [storeSection, setStoreSection] = useState("store-settings");
+  const [supplierSection, setSupplierSection] = useState("all");
   const [selectedItem, setSelectedItem] = useState(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -81,6 +96,7 @@ export default function App() {
   }, []);
 
   const inStore = tab === "store";
+  const inSuppliers = tab === "suppliers";
   return (
     <div className="min-h-screen flex bg-[color:var(--bg)]">
       <Toaster theme="light" position="bottom-right" />
@@ -109,18 +125,31 @@ export default function App() {
             <StoreSideNav active={storeSection} setActive={setStoreSection} />
           </motion.aside>
         )}
+        {inSuppliers && (
+          <motion.aside
+            key="supplier-sidebar"
+            initial={{ opacity: 0, x: -20, width: 0 }}
+            animate={{ opacity: 1, x: 0, width: 280 }}
+            exit={{ opacity: 0, x: -20, width: 0 }}
+            transition={{ duration: 0.22 }}
+            className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden"
+          >
+            <SupplierSideNav active={supplierSection} setActive={setSupplierSection} />
+          </motion.aside>
+        )}
       </AnimatePresence>
 
       {/* Main content */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopHeader tab={tab} storeSection={storeSection} onMenu={() => setMobileNavOpen(true)}/>
-        {/* On smaller screens, show Store nav as a horizontal scroller above content */}
+        <TopHeader tab={tab} storeSection={storeSection} supplierSection={supplierSection} onMenu={() => setMobileNavOpen(true)}/>
         {inStore && <StoreMobileNav active={storeSection} setActive={setStoreSection} />}
+        {inSuppliers && <SupplierMobileNav active={supplierSection} setActive={setSupplierSection} />}
         <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 xl:p-10">
           <AnimatePresence mode="wait">
-            <motion.div key={inStore ? `store-${storeSection}` : tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
+            <motion.div key={inStore ? `store-${storeSection}` : inSuppliers ? `sup-${supplierSection}` : tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
               {tab === "dashboard" && <Dashboard />}
               {tab === "store"     && <StoreManagement section={storeSection} setSection={setStoreSection}/>}
+              {tab === "suppliers" && <Suppliers section={supplierSection} setSection={setSupplierSection}/>}
               {tab === "products"  && <Products />}
               {tab === "categories" && <Categories />}
               {tab === "scraper"   && <ScraperPage onView={setSelectedItem} />}
@@ -160,6 +189,7 @@ function Sidebar({ tab, setTab, mobileOpen, setMobileOpen }) {
     { id: "store",     label: "Store Management", icon: Store, group: "General", hasSub: true },
     { id: "products",  label: "Products",   icon: Package,        group: "Catalog" },
     { id: "categories", label: "Categories", icon: Tags,          group: "Catalog" },
+    { id: "suppliers", label: "Suppliers",  icon: Factory,        group: "Catalog", hasSub: true },
     { id: "scraper",   label: "eBay AU Scraper", icon: Zap, badge: "AU", group: "Catalog" },
     { id: "orders",    label: "Orders",     icon: ShoppingCart,   group: "Operations" },
     { id: "customers", label: "Customers",  icon: Users,          group: "Operations" },
@@ -271,12 +301,64 @@ function StoreMobileNav({ active, setActive }) {
   );
 }
 
-function TopHeader({ tab, storeSection, onMenu }) {
+function SupplierSideNav({ active, setActive }) {
+  const grouped = SUPPLIER_NAV.reduce((acc, n) => { (acc[n.group] = acc[n.group] || []).push(n); return acc; }, {});
+  return (
+    <>
+      <div className="px-5 py-5 border-b hairline">
+        <div className="flex items-center gap-2 text-slate-500 text-[11px] font-mono uppercase tracking-widest"><Factory size={12}/> Suppliers</div>
+        <div className="font-display font-bold text-[15px] tracking-tight mt-1">Manage your sourcing network</div>
+      </div>
+      <div className="px-3 py-4 overflow-y-auto flex-1">
+        {Object.entries(grouped).map(([g, items]) => (
+          <div key={g} className="mb-4">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-[color:var(--dim)] px-2 pb-1.5">{g}</div>
+            <nav className="flex flex-col gap-0.5">
+              {items.map((n) => {
+                const Icon = n.icon; const on = active === n.id;
+                return (
+                  <button key={n.id} data-testid={`sup-${n.id}`} onClick={() => setActive(n.id)} className={`sidebar-link ${on ? "active" : ""}`}>
+                    <Icon size={15} className="sidebar-icon"/>
+                    <span className="text-left flex-1">{n.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function SupplierMobileNav({ active, setActive }) {
+  return (
+    <div className="xl:hidden sticky top-16 z-20 bg-white/85 backdrop-blur-xl border-b hairline overflow-x-auto">
+      <div className="flex items-center gap-1 px-4 py-2 min-w-max">
+        {SUPPLIER_NAV.map((n) => {
+          const Icon = n.icon; const on = active === n.id;
+          return (
+            <button key={n.id} data-testid={`sup-m-${n.id}`} onClick={() => setActive(n.id)} className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${on ? "bg-indigo-50 text-indigo-600 border border-indigo-100" : "text-slate-500 hover:bg-slate-50"}`}>
+              <Icon size={13}/> {n.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TopHeader({ tab, storeSection, supplierSection, onMenu }) {
   const titles = {
     dashboard: "Dashboard", store: "Store Management", products: "Products", categories: "Categories",
+    suppliers: "Suppliers",
     scraper: "eBay AU Scraper", orders: "Orders", customers: "Customers", analytics: "Analytics", settings: "Settings",
   };
-  const subTitle = tab === "store" ? STORE_NAV.find((s) => s.id === storeSection)?.label : null;
+  const subTitle = tab === "store"
+    ? STORE_NAV.find((s) => s.id === storeSection)?.label
+    : tab === "suppliers"
+    ? SUPPLIER_NAV.find((s) => s.id === supplierSection)?.label
+    : null;
 
   return (
     <div className="sticky top-0 z-30 backdrop-blur-xl bg-white/80 border-b hairline">
@@ -303,6 +385,394 @@ function TopHeader({ tab, storeSection, onMenu }) {
           <button className="btn btn-ghost !p-2 hidden sm:grid" title="Help"><HelpCircle size={16}/></button>
           <div className="w-9 h-9 rounded-full grid place-items-center text-white font-bold text-xs" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>AK</div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------- Suppliers -------------------------------- */
+function Suppliers({ section, setSection }) {
+  const [list, setList] = useState([]); const [total, setTotal] = useState(0);
+  const [tags, setTags] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [q, setQ] = useState(""); const [sort, setSort] = useState("created_at_desc"); const [tag, setTag] = useState("");
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/suppliers`, { params: { q: q || undefined, tag: tag || undefined, sort }});
+    setList(data.suppliers); setTotal(data.total); setTags(data.tags);
+  }, [q, tag, sort]);
+  const loadSummary = useCallback(async () => {
+    const { data } = await axios.get(`${API}/suppliers/summary`); setSummary(data);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadSummary(); }, [loadSummary, list.length]);
+
+  const meta = SUPPLIER_NAV.find((s) => s.id === section) || SUPPLIER_NAV[0];
+  const Icon = meta.icon;
+
+  return (
+    <div className="grid gap-6">
+      <div className="card p-5 md:p-6 flex items-start gap-4">
+        <div className="w-12 h-12 rounded-xl grid place-items-center text-white shrink-0" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}><Icon size={20}/></div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500">{meta.group}</div>
+          <div className="font-display text-2xl font-bold tracking-tight">{meta.label}</div>
+          <div className="text-sm text-slate-500 mt-1">{
+            {
+              create: "Onboard a new supplier with contact, terms and lead time.",
+              import: "Bulk-import suppliers from CSV or JSON.",
+              all: "Every supplier in your directory. Filter, sort and edit inline.",
+              top: "Your best suppliers ranked by spend.",
+              quality: "Suppliers with quality score ≥ 85.",
+              products: "Products sourced through each supplier.",
+              orders: "Purchase orders sent to each supplier.",
+              pricing: "Supplier cost prices, MOQ and price breaks.",
+              performance: "On-time delivery, quality and rating trends.",
+              activity: "Recent activity log across every supplier.",
+            }[section]
+          }</div>
+        </div>
+      </div>
+
+      {section === "create"      && <CreateSupplier onCreated={() => { load(); setSection("all"); }} />}
+      {section === "import"      && <ImportSuppliers onImported={() => { load(); setSection("all"); }} />}
+      {section === "all"         && <AllSuppliers list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} tag={tag} setTag={setTag} tags={tags} onChanged={load}/>}
+      {section === "top"         && <TopSuppliers list={summary?.top_suppliers || []} agg={summary?.aggregate}/>}
+      {section === "quality"     && <QualitySuppliers list={summary?.quality_suppliers || []}/>}
+      {section === "products"    && <SupplierProducts list={list}/>}
+      {section === "orders"      && <SupplierOrders list={list}/>}
+      {section === "pricing"     && <SupplierPricing list={list}/>}
+      {section === "performance" && <SupplierPerformance list={list}/>}
+      {section === "activity"    && <SupplierActivity list={list}/>}
+    </div>
+  );
+}
+
+function SupplierAvatar({ s, size = 40 }) {
+  const initials = (s.name || "").split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
+  return <div className="rounded-full grid place-items-center text-white font-bold shrink-0" style={{ width: size, height: size, background: "linear-gradient(135deg,#4F46E5,#EC4899)", fontSize: size * 0.36 }}>{initials || "S"}</div>;
+}
+
+function CreateSupplier({ onCreated }) {
+  const empty = { name: "", contact_name: "", email: "", phone: "", website: "", country: "Australia", state: "", city: "", address: "", lead_time_days: 7, payment_terms: "Net 30", currency: "AUD", rating: 4, notes: "", tags: [], active: true };
+  const [f, setF] = useState(empty);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!f.name.trim()) return toast.error("Supplier name is required");
+    setSaving(true);
+    try {
+      await axios.post(`${API}/suppliers`, { ...f, tags: typeof f.tags === "string" ? f.tags.split(",").map(t => t.trim()).filter(Boolean) : f.tags });
+      toast.success("Supplier created"); setF(empty); onCreated();
+    } catch (e) { toast.error("Create failed", { description: e?.response?.data?.detail?.slice(0,200) || e.message }); }
+    finally { setSaving(false); }
+  };
+  const tagsStr = Array.isArray(f.tags) ? f.tags.join(", ") : (f.tags || "");
+  return (
+    <div className="card p-6">
+      <div className="font-display font-bold text-lg mb-4">Supplier details</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Field label="Supplier name *"><input className="input px-3 py-2 w-full" value={f.name} onChange={(e)=>setF({...f, name:e.target.value})} data-testid="sup-name"/></Field>
+        <Field label="Contact name"><input className="input px-3 py-2 w-full" value={f.contact_name} onChange={(e)=>setF({...f, contact_name:e.target.value})}/></Field>
+        <Field label="Email"><input type="email" className="input px-3 py-2 w-full" value={f.email} onChange={(e)=>setF({...f, email:e.target.value})}/></Field>
+        <Field label="Phone"><input className="input px-3 py-2 w-full" value={f.phone} onChange={(e)=>setF({...f, phone:e.target.value})}/></Field>
+        <Field label="Website"><input className="input px-3 py-2 w-full" value={f.website} onChange={(e)=>setF({...f, website:e.target.value})}/></Field>
+        <Field label="Country"><input className="input px-3 py-2 w-full" value={f.country} onChange={(e)=>setF({...f, country:e.target.value})}/></Field>
+        <Field label="State">
+          <select className="input px-3 py-2 w-full" value={f.state} onChange={(e)=>setF({...f, state:e.target.value})}>
+            <option value="">—</option>{["NSW","VIC","QLD","WA","SA","TAS","ACT","NT"].map(s=><option key={s}>{s}</option>)}
+          </select>
+        </Field>
+        <Field label="City"><input className="input px-3 py-2 w-full" value={f.city} onChange={(e)=>setF({...f, city:e.target.value})}/></Field>
+        <Field label="Address" className="md:col-span-2"><input className="input px-3 py-2 w-full" value={f.address} onChange={(e)=>setF({...f, address:e.target.value})}/></Field>
+        <Field label="Lead time (days)"><input type="number" className="input px-3 py-2 w-full font-mono" value={f.lead_time_days} onChange={(e)=>setF({...f, lead_time_days: Number(e.target.value)})}/></Field>
+        <Field label="Payment terms">
+          <select className="input px-3 py-2 w-full" value={f.payment_terms} onChange={(e)=>setF({...f, payment_terms:e.target.value})}>
+            {["Prepaid","Net 7","Net 14","Net 30","Net 60","Net 90"].map(t=><option key={t}>{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Currency"><input className="input px-3 py-2 w-full font-mono" value={f.currency} onChange={(e)=>setF({...f, currency:e.target.value})}/></Field>
+        <Field label="Rating (1–5)"><input type="number" step="0.1" min="1" max="5" className="input px-3 py-2 w-full font-mono" value={f.rating} onChange={(e)=>setF({...f, rating: Number(e.target.value)})}/></Field>
+        <Field label="Tags (comma separated)" className="md:col-span-2"><input className="input px-3 py-2 w-full" placeholder="electronics, priority" value={tagsStr} onChange={(e)=>setF({...f, tags: e.target.value})}/></Field>
+        <Field label="Notes" className="md:col-span-2"><textarea className="input px-3 py-2 w-full h-24" value={f.notes} onChange={(e)=>setF({...f, notes:e.target.value})}/></Field>
+      </div>
+      <div className="mt-5 flex justify-end gap-2">
+        <button onClick={() => setF(empty)} className="btn btn-ghost">Reset</button>
+        <button disabled={saving} onClick={save} className="btn btn-primary" data-testid="sup-create-btn">{saving ? <Loader2 className="animate-spin" size={14}/> : <Plus size={14}/>} Create supplier</button>
+      </div>
+    </div>
+  );
+}
+
+function ImportSuppliers({ onImported }) {
+  const [text, setText] = useState(`[
+  { "name": "Example Supplier", "contact_name": "Alex Doe", "email": "alex@example.com", "phone": "+61 3 1234 5678", "state": "VIC", "city": "Melbourne", "lead_time_days": 7, "payment_terms": "Net 30", "rating": 4.2, "tags": ["electronics"] }
+]`);
+  const [busy, setBusy] = useState(false);
+  const doImport = async () => {
+    setBusy(true);
+    try {
+      const parsed = JSON.parse(text);
+      const arr = Array.isArray(parsed) ? parsed : [parsed];
+      const { data } = await axios.post(`${API}/suppliers/import`, { suppliers: arr });
+      toast.success(`Imported ${data.imported} supplier${data.imported === 1 ? "" : "s"}`); onImported();
+    } catch (e) { toast.error("Import failed", { description: (e?.message || "").slice(0, 200) }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="card p-6">
+      <div className="font-display font-bold text-lg mb-1">Bulk import (JSON)</div>
+      <div className="text-xs text-slate-500 mb-4">Paste a JSON array of suppliers. Each object must have at least a <span className="font-mono">name</span> field.</div>
+      <textarea value={text} onChange={(e)=>setText(e.target.value)} className="input px-3 py-2 w-full font-mono text-xs" style={{ height: 260 }}/>
+      <div className="mt-4 flex justify-end gap-2">
+        <button disabled={busy} onClick={doImport} className="btn btn-primary" data-testid="sup-import-btn">{busy ? <Loader2 className="animate-spin" size={14}/> : <Upload size={14}/>} Import suppliers</button>
+      </div>
+    </div>
+  );
+}
+
+function AllSuppliers({ list, total, q, setQ, sort, setSort, tag, setTag, tags, onChanged }) {
+  const del = async (s) => { if (!window.confirm(`Delete "${s.name}"?`)) return; await axios.delete(`${API}/suppliers/${s.id}`); toast.success("Deleted"); onChanged(); };
+  const toggle = async (s) => { await axios.patch(`${API}/suppliers/${s.id}`, { active: !s.active }); onChanged(); };
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-sm text-slate-500 font-mono">{total} supplier{total===1?"":"s"}</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={q} onChange={(e)=>setQ(e.target.value)} data-testid="sup-search" placeholder="Search name / email / code" className="input pl-9 pr-3 py-2 text-sm w-64"/></div>
+          <select value={tag} onChange={(e)=>setTag(e.target.value)} className="input px-3 py-2 text-sm">
+            <option value="">All tags</option>{tags.map(t=><option key={t}>{t}</option>)}
+          </select>
+          <select value={sort} onChange={(e)=>setSort(e.target.value)} className="input px-3 py-2 text-sm">
+            <option value="created_at_desc">Newest</option>
+            <option value="name_asc">Name A→Z</option>
+            <option value="rating_desc">Rating ↓</option>
+            <option value="spend_desc">Spend ↓</option>
+            <option value="on_time_desc">On-time ↓</option>
+            <option value="quality_desc">Quality ↓</option>
+          </select>
+        </div>
+      </div>
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="tbl">
+            <thead><tr><th>Supplier</th><th>Code</th><th>Location</th><th>Lead</th><th>Terms</th><th>Rating</th><th>Spend</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              {list.length === 0 && <tr><td colSpan={9} className="text-center py-10 text-slate-500">No suppliers yet</td></tr>}
+              {list.map((s) => (
+                <tr key={s.id} className={!s.active ? "opacity-50" : ""} data-testid="sup-row">
+                  <td>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <SupplierAvatar s={s} size={36}/>
+                      <div className="min-w-0">
+                        <div className="font-medium text-sm truncate max-w-[240px]">{s.name}</div>
+                        <div className="text-[11px] text-slate-400 truncate">{s.contact_name || "—"} · {s.email || "—"}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="font-mono text-xs text-slate-500">{s.code}</td>
+                  <td className="text-sm text-slate-600">{[s.city, s.state, s.country].filter(Boolean).join(", ")}</td>
+                  <td className="font-mono text-sm">{s.lead_time_days}d</td>
+                  <td className="text-xs">{s.payment_terms}</td>
+                  <td><div className="flex items-center gap-1 text-amber-500"><StarIcon size={12} fill="currentColor"/> <span className="text-slate-700 font-mono">{s.rating?.toFixed?.(1) ?? s.rating}</span></div></td>
+                  <td className="font-mono font-bold text-indigo-600">{moneyCents(s.total_spend)}</td>
+                  <td><label className="flex items-center gap-1.5 text-[11px] font-mono uppercase text-slate-500 cursor-pointer"><input type="checkbox" checked={s.active} onChange={()=>toggle(s)} className="accent-indigo-600 w-3.5 h-3.5"/>Active</label></td>
+                  <td><div className="flex items-center gap-1 justify-end"><button onClick={()=>del(s)} className="btn btn-danger text-xs !py-1 !px-2"><Trash2 size={12}/></button></div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TopSuppliers({ list, agg }) {
+  return (
+    <div className="grid gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatBox label="Total spend" value={moneyCents(agg?.total_spend || 0)}/>
+        <StatBox label="Avg rating" value={`${agg?.avg_rating ?? "—"} / 5`} tone="success"/>
+        <StatBox label="Avg on-time" value={`${agg?.avg_on_time ?? "—"}%`}/>
+        <StatBox label="Avg quality" value={`${agg?.avg_quality ?? "—"}%`}/>
+      </div>
+      <div className="card overflow-hidden">
+        <div className="p-4 border-b hairline font-display font-bold">Top 5 by spend</div>
+        <div className="p-3">
+          {list.length === 0 && <div className="text-sm text-slate-500 py-6 text-center">No suppliers yet</div>}
+          {list.map((s, i) => (
+            <div key={s.id} className="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-lg">
+              <div className="w-8 h-8 grid place-items-center rounded-md font-display font-bold text-white text-xs" style={{ background: `linear-gradient(135deg,#4F46E5,#EC4899)`, opacity: 1 - i*0.12 }}>{i + 1}</div>
+              <SupplierAvatar s={s} size={32}/>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{s.name}</div>
+                <div className="text-xs text-slate-500">{s.orders_count} orders · {s.products_count} products</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="font-mono font-bold text-indigo-600 text-sm">{moneyCents(s.total_spend)}</div>
+                <div className="text-[11px] text-slate-400">{s.on_time_rate}% on-time</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QualitySuppliers({ list }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+      {list.length === 0 && <div className="col-span-full card p-10 text-center text-slate-500">No suppliers meet the 85% quality threshold yet.</div>}
+      {list.map((s) => (
+        <div key={s.id} className="card p-4">
+          <div className="flex items-center gap-3">
+            <SupplierAvatar s={s}/>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium truncate">{s.name}</div>
+              <div className="text-[11px] text-slate-500 truncate">{s.contact_name}</div>
+            </div>
+            <span className="chip chip-success"><BadgeCheck size={11}/> {s.quality_score}%</span>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+            <div><div className="text-xs text-slate-500">Rating</div><div className="font-mono font-bold text-slate-800">{s.rating.toFixed(1)}</div></div>
+            <div><div className="text-xs text-slate-500">On-time</div><div className="font-mono font-bold text-slate-800">{s.on_time_rate}%</div></div>
+            <div><div className="text-xs text-slate-500">Lead</div><div className="font-mono font-bold text-slate-800">{s.lead_time_days}d</div></div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SupplierProducts({ list }) {
+  return (
+    <div className="card overflow-hidden">
+      <div className="overflow-x-auto"><table className="tbl">
+        <thead><tr><th>Supplier</th><th>Products</th><th>Categories</th><th>Avg cost</th><th>MOQ</th></tr></thead>
+        <tbody>
+          {list.map((s) => (
+            <tr key={s.id}>
+              <td><div className="flex items-center gap-2"><SupplierAvatar s={s} size={28}/><span className="text-sm">{s.name}</span></div></td>
+              <td className="font-mono">{s.products_count}</td>
+              <td className="text-xs text-slate-500">{(s.tags || []).slice(0, 3).map(t => <span key={t} className="chip chip-neutral mr-1">{t}</span>)}</td>
+              <td className="font-mono text-slate-500">—</td>
+              <td className="font-mono text-slate-500">—</td>
+            </tr>
+          ))}
+          {list.length === 0 && <tr><td colSpan={5} className="text-center text-slate-500 py-10">No supplier products yet</td></tr>}
+        </tbody>
+      </table></div>
+      <div className="p-4 text-xs text-slate-500 border-t hairline">Link products to suppliers to populate this view (backend endpoint ready).</div>
+    </div>
+  );
+}
+
+function SupplierOrders({ list }) {
+  return (
+    <div className="card overflow-hidden">
+      <div className="overflow-x-auto"><table className="tbl">
+        <thead><tr><th>Supplier</th><th>PO count</th><th>Total spend</th><th>Lead time</th><th>Terms</th></tr></thead>
+        <tbody>
+          {list.map((s) => (
+            <tr key={s.id}>
+              <td><div className="flex items-center gap-2"><SupplierAvatar s={s} size={28}/><span className="text-sm">{s.name}</span></div></td>
+              <td className="font-mono">{s.orders_count}</td>
+              <td className="font-mono font-bold text-indigo-600">{moneyCents(s.total_spend)}</td>
+              <td className="font-mono">{s.lead_time_days}d</td>
+              <td className="text-xs">{s.payment_terms}</td>
+            </tr>
+          ))}
+          {list.length === 0 && <tr><td colSpan={5} className="text-center text-slate-500 py-10">No PO history yet</td></tr>}
+        </tbody>
+      </table></div>
+    </div>
+  );
+}
+
+function SupplierPricing({ list }) {
+  return (
+    <div className="grid gap-3">
+      {list.length === 0 && <div className="card p-10 text-center text-slate-500">No pricing agreements yet</div>}
+      {list.map((s) => (
+        <div key={s.id} className="card p-4 flex items-center gap-4">
+          <SupplierAvatar s={s}/>
+          <div className="flex-1 min-w-0">
+            <div className="font-medium truncate">{s.name}</div>
+            <div className="text-xs text-slate-500 truncate">{s.currency} · {s.payment_terms} · Lead {s.lead_time_days}d</div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="chip chip-neutral">MOQ —</span>
+            <span className="chip chip-neutral">Discount tiers —</span>
+            <button className="btn btn-ghost text-xs !py-1 !px-2">Set pricing</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SupplierPerformance({ list }) {
+  const chartData = list.slice(0, 12).map((s) => ({ name: s.name.length > 14 ? s.name.slice(0, 12) + "…" : s.name, on_time: s.on_time_rate, quality: s.quality_score }));
+  return (
+    <div className="grid gap-4">
+      <div className="card p-5">
+        <div className="font-display font-bold mb-2">On-time vs quality</div>
+        <div className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData}>
+              <CartesianGrid stroke="#EEF0F5" strokeDasharray="3 3" vertical={false}/>
+              <XAxis dataKey="name" tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false}/>
+              <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false} width={30}/>
+              <Tooltip contentStyle={{ background: "#fff", border: "1px solid #EAEAF0", borderRadius: 10, fontSize: 12 }}/>
+              <Bar dataKey="on_time" fill="#4F46E5" radius={[4,4,0,0]}/>
+              <Bar dataKey="quality" fill="#EC4899" radius={[4,4,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        {list.map((s) => (
+          <div key={s.id} className="card p-4">
+            <div className="flex items-center gap-3"><SupplierAvatar s={s}/><div className="min-w-0 flex-1"><div className="font-medium truncate">{s.name}</div><div className="text-[11px] text-slate-500">{s.city}, {s.state}</div></div></div>
+            <div className="mt-3 space-y-2 text-xs">
+              <PerfBar label="On-time" value={s.on_time_rate} color="#4F46E5"/>
+              <PerfBar label="Quality" value={s.quality_score} color="#EC4899"/>
+              <PerfBar label="Rating"  value={(s.rating/5)*100} color="#10B981" labelValue={`${s.rating.toFixed(1)} / 5`}/>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function PerfBar({ label, value, color, labelValue }) {
+  return (<div>
+    <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1"><span>{label}</span><span className="font-mono">{labelValue || `${value?.toFixed?.(0) ?? value}%`}</span></div>
+    <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${Math.min(100, value)}%`, background: color }}/></div>
+  </div>);
+}
+
+function SupplierActivity({ list }) {
+  const events = list.flatMap(s => ([
+    { at: s.updated_at, kind: "updated", supplier: s },
+    { at: s.created_at, kind: "created", supplier: s },
+  ])).sort((a,b) => (a.at < b.at ? 1 : -1)).slice(0, 40);
+  return (
+    <div className="card overflow-hidden">
+      <div className="p-4 border-b hairline font-display font-bold flex items-center gap-2"><History size={16}/> Recent activity</div>
+      <div className="divide-y">
+        {events.length === 0 && <div className="p-10 text-center text-slate-500">No activity yet</div>}
+        {events.map((e, i) => (
+          <div key={i} className="p-4 flex items-center gap-3 hover:bg-slate-50">
+            <SupplierAvatar s={e.supplier} size={32}/>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm"><span className="font-medium">{e.supplier.name}</span> <span className="text-slate-500">was {e.kind}</span></div>
+              <div className="text-[11px] text-slate-400 font-mono">{fmtDate(e.at)}</div>
+            </div>
+            <span className={`chip ${e.kind === "created" ? "chip-success" : "chip-neutral"}`}>{e.kind}</span>
+          </div>
+        ))}
       </div>
     </div>
   );

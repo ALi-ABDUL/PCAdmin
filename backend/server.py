@@ -458,6 +458,7 @@ async def _nightly_refresh_loop():
 @app.on_event("startup")
 async def _start_scheduler():
     await _ensure_categories_seeded()
+    await _ensure_suppliers_seeded()
     asyncio.create_task(_nightly_refresh_loop())
 
 
@@ -535,6 +536,178 @@ async def reseed_categories(force: bool = False):
         await db.categories.delete_many({})
     await _ensure_categories_seeded()
     return await list_categories()
+
+
+# ---------------------------------------------------------------------------
+# Suppliers
+# ---------------------------------------------------------------------------
+
+class SupplierBase(BaseModel):
+    name: str
+    contact_name: Optional[str] = ""
+    email: Optional[str] = ""
+    phone: Optional[str] = ""
+    website: Optional[str] = ""
+    country: str = "Australia"
+    state: Optional[str] = ""
+    city: Optional[str] = ""
+    address: Optional[str] = ""
+    lead_time_days: int = 7
+    payment_terms: str = "Net 30"
+    currency: str = "AUD"
+    rating: float = 4.0
+    notes: Optional[str] = ""
+    tags: List[str] = Field(default_factory=list)
+    active: bool = True
+
+
+class Supplier(SupplierBase):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    code: str = Field(default_factory=lambda: f"SUP-{uuid.uuid4().hex[:6].upper()}")
+    products_count: int = 0
+    orders_count: int = 0
+    total_spend: float = 0.0
+    on_time_rate: float = 0.0
+    quality_score: float = 0.0
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class SupplierUpdate(BaseModel):
+    name: Optional[str] = None
+    contact_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    country: Optional[str] = None
+    state: Optional[str] = None
+    city: Optional[str] = None
+    address: Optional[str] = None
+    lead_time_days: Optional[int] = None
+    payment_terms: Optional[str] = None
+    currency: Optional[str] = None
+    rating: Optional[float] = None
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+    active: Optional[bool] = None
+
+
+SEED_SUPPLIERS = [
+    {"name": "OzTech Wholesale", "contact_name": "James Whitmore", "email": "james@oztech.au", "phone": "+61 2 9000 1122", "state": "NSW", "city": "Sydney", "lead_time_days": 5, "rating": 4.7, "tags": ["electronics", "priority"], "quality_score": 92.0, "on_time_rate": 96.5, "total_spend": 42890.0, "products_count": 18, "orders_count": 34},
+    {"name": "Melbourne Home Goods", "contact_name": "Sarah Nguyen", "email": "sarah@mhg.com.au", "phone": "+61 3 8888 4455", "state": "VIC", "city": "Melbourne", "lead_time_days": 7, "rating": 4.4, "tags": ["home", "kitchen"], "quality_score": 88.0, "on_time_rate": 92.0, "total_spend": 31240.0, "products_count": 24, "orders_count": 41},
+    {"name": "Aussie Tools Direct", "contact_name": "Mark Peters", "email": "mark@aussietools.au", "phone": "+61 7 3200 9911", "state": "QLD", "city": "Brisbane", "lead_time_days": 10, "rating": 4.2, "tags": ["tools", "power-tools"], "quality_score": 85.0, "on_time_rate": 88.0, "total_spend": 22150.0, "products_count": 15, "orders_count": 22},
+    {"name": "PerthPro Supplies", "contact_name": "Emily Zhang", "email": "emily@perthpro.au", "phone": "+61 8 6100 4477", "state": "WA", "city": "Perth", "lead_time_days": 12, "rating": 4.0, "tags": ["electronics", "gadgets"], "quality_score": 80.0, "on_time_rate": 84.0, "total_spend": 15680.0, "products_count": 9, "orders_count": 12},
+    {"name": "Adelaide Fashion Co", "contact_name": "Oliver Brooks", "email": "oliver@adfashion.au", "phone": "+61 8 8000 2233", "state": "SA", "city": "Adelaide", "lead_time_days": 14, "rating": 4.5, "tags": ["apparel"], "quality_score": 90.0, "on_time_rate": 94.0, "total_spend": 27960.0, "products_count": 32, "orders_count": 28},
+    {"name": "Tassie Timber & Tools", "contact_name": "Chloe Harris", "email": "chloe@tassietimber.au", "phone": "+61 3 6200 5566", "state": "TAS", "city": "Hobart", "lead_time_days": 15, "rating": 3.8, "tags": ["tools", "outdoor"], "quality_score": 76.0, "on_time_rate": 82.0, "total_spend": 8920.0, "products_count": 7, "orders_count": 9},
+]
+
+
+async def _ensure_suppliers_seeded() -> None:
+    if await db.suppliers.count_documents({}) > 0:
+        return
+    for s in SEED_SUPPLIERS:
+        sup = Supplier(**s)
+        await db.suppliers.insert_one(sup.model_dump())
+    logger.info(f"Seeded {len(SEED_SUPPLIERS)} suppliers")
+
+
+@api_router.get("/suppliers")
+async def list_suppliers(
+    q: Optional[str] = None,
+    active: Optional[bool] = None,
+    tag: Optional[str] = None,
+    sort: str = "created_at_desc",
+    limit: int = Query(500, le=1000),
+):
+    query: dict[str, Any] = {}
+    if active is not None: query["active"] = active
+    if tag: query["tags"] = tag
+    if q:
+        query["$or"] = [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"contact_name": {"$regex": q, "$options": "i"}},
+            {"email": {"$regex": q, "$options": "i"}},
+            {"code": {"$regex": q, "$options": "i"}},
+        ]
+    sort_map = {
+        "created_at_desc": [("created_at", -1)],
+        "name_asc": [("name", 1)],
+        "rating_desc": [("rating", -1)],
+        "spend_desc": [("total_spend", -1)],
+        "on_time_desc": [("on_time_rate", -1)],
+        "quality_desc": [("quality_score", -1)],
+    }
+    cursor = db.suppliers.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).limit(limit)
+    suppliers = await cursor.to_list(length=limit)
+    total = await db.suppliers.count_documents(query)
+    tags = await db.suppliers.distinct("tags")
+    return {"suppliers": suppliers, "total": total, "tags": sorted(tags)}
+
+
+@api_router.get("/suppliers/summary")
+async def suppliers_summary():
+    total = await db.suppliers.count_documents({})
+    active = await db.suppliers.count_documents({"active": True})
+    top_pipeline = [{"$sort": {"total_spend": -1}}, {"$limit": 5}]
+    top = await db.suppliers.aggregate(top_pipeline).to_list(5)
+    for t in top: t.pop("_id", None)
+    quality = await db.suppliers.find({"quality_score": {"$gte": 85}}, {"_id": 0}).sort("quality_score", -1).limit(10).to_list(10)
+    agg = await db.suppliers.aggregate([{"$group": {"_id": None, "spend": {"$sum": "$total_spend"}, "avg_rating": {"$avg": "$rating"}, "avg_ontime": {"$avg": "$on_time_rate"}, "avg_quality": {"$avg": "$quality_score"}}}]).to_list(1)
+    a = agg[0] if agg else {}
+    a.pop("_id", None)
+    return {
+        "total": total, "active": active,
+        "top_suppliers": top, "quality_suppliers": quality,
+        "aggregate": {
+            "total_spend": round(a.get("spend", 0), 2),
+            "avg_rating":   round(a.get("avg_rating", 0) or 0, 2),
+            "avg_on_time":  round(a.get("avg_ontime", 0) or 0, 1),
+            "avg_quality":  round(a.get("avg_quality", 0) or 0, 1),
+        },
+    }
+
+
+@api_router.post("/suppliers", response_model=Supplier)
+async def create_supplier(body: SupplierBase):
+    sup = Supplier(**body.model_dump())
+    await db.suppliers.insert_one(sup.model_dump())
+    return sup
+
+
+@api_router.get("/suppliers/{sid}")
+async def get_supplier(sid: str):
+    s = await db.suppliers.find_one({"id": sid}, {"_id": 0})
+    if not s: raise HTTPException(status_code=404, detail="Supplier not found")
+    return s
+
+
+@api_router.patch("/suppliers/{sid}")
+async def update_supplier(sid: str, body: SupplierUpdate):
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields: raise HTTPException(status_code=400, detail="No fields")
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    r = await db.suppliers.update_one({"id": sid}, {"$set": fields})
+    if r.matched_count == 0: raise HTTPException(status_code=404, detail="Supplier not found")
+    return await db.suppliers.find_one({"id": sid}, {"_id": 0})
+
+
+@api_router.delete("/suppliers/{sid}")
+async def delete_supplier(sid: str):
+    r = await db.suppliers.delete_one({"id": sid})
+    if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Supplier not found")
+    return {"deleted": True}
+
+
+class SupplierImport(BaseModel):
+    suppliers: List[SupplierBase]
+
+
+@api_router.post("/suppliers/import")
+async def import_suppliers(body: SupplierImport):
+    docs = [Supplier(**s.model_dump()).model_dump() for s in body.suppliers]
+    if docs:
+        await db.suppliers.insert_many(docs)
+    return {"imported": len(docs)}
 
 
 # ---------------------------------------------------------------------------

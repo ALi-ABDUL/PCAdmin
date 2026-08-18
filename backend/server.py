@@ -459,6 +459,9 @@ async def _nightly_refresh_loop():
 async def _start_scheduler():
     await _ensure_categories_seeded()
     await _ensure_suppliers_seeded()
+    # Rebuild customers from existing orders if empty
+    if await db.customers.count_documents({}) == 0:
+        await _rebuild_customers_from_orders()
     asyncio.create_task(_nightly_refresh_loop())
 
 
@@ -536,6 +539,329 @@ async def reseed_categories(force: bool = False):
         await db.categories.delete_many({})
     await _ensure_categories_seeded()
     return await list_categories()
+
+
+# ---------------------------------------------------------------------------
+# Customers (persistent) - complement to derived-from-orders
+# ---------------------------------------------------------------------------
+
+class CustomerBase(BaseModel):
+    name: str
+    email: Optional[str] = ""
+    phone: Optional[str] = ""
+    country: str = "Australia"
+    state: Optional[str] = ""
+    city: Optional[str] = ""
+    address: Optional[str] = ""
+    postcode: Optional[str] = ""
+    status: str = "pending"           # pending | active | blocked
+    type: str = "registered"          # registered | guest
+    group: str = "Retail"             # Retail | VIP | Wholesale | Trade
+    tags: List[str] = Field(default_factory=list)
+    notes: Optional[str] = ""
+
+
+class Customer(CustomerBase):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    code: str = Field(default_factory=lambda: f"CUS-{uuid.uuid4().hex[:6].upper()}")
+    orders_count: int = 0
+    total_spend: float = 0.0
+    wishlist: List[str] = Field(default_factory=list)  # product_ids
+    addresses: List[dict] = Field(default_factory=list)
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class CustomerUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    status: Optional[str] = None
+    type: Optional[str] = None
+    group: Optional[str] = None
+    tags: Optional[List[str]] = None
+    notes: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postcode: Optional[str] = None
+
+
+CUSTOMER_GROUPS = ["Retail", "VIP", "Wholesale", "Trade"]
+
+
+async def _rebuild_customers_from_orders():
+    """Materialise customer records from orders and merge stats."""
+    orders = await db.orders.find({}, {"_id": 0}).to_list(5000)
+    if not orders: return 0
+    by_email: dict[str, dict] = {}
+    for o in orders:
+        key = (o.get("customer_email") or o.get("customer_name") or "").lower().strip()
+        if not key: continue
+        e = by_email.setdefault(key, {
+            "name": o.get("customer_name") or "Guest",
+            "email": o.get("customer_email") or "",
+            "orders_count": 0, "total_spend": 0.0,
+        })
+        e["orders_count"] += 1
+        e["total_spend"] += float(o.get("total") or 0)
+    n = 0
+    for key, agg in by_email.items():
+        existing = await db.customers.find_one({"email": agg["email"]}, {"_id": 0}) if agg["email"] else None
+        if not existing:
+            group = "VIP" if agg["total_spend"] > 500 else "Retail"
+            c = Customer(
+                name=agg["name"], email=agg["email"], group=group,
+                status="active", type="registered",
+                orders_count=agg["orders_count"], total_spend=round(agg["total_spend"], 2),
+            )
+            await db.customers.insert_one(c.model_dump())
+            n += 1
+        else:
+            await db.customers.update_one({"id": existing["id"]}, {"$set": {"orders_count": agg["orders_count"], "total_spend": round(agg["total_spend"], 2), "updated_at": datetime.now(timezone.utc).isoformat()}})
+    return n
+
+
+@api_router.get("/customers")
+async def list_customers(
+    q: Optional[str] = None,
+    status: Optional[str] = None,
+    type: Optional[str] = None,
+    group: Optional[str] = None,
+    sort: str = "created_at_desc",
+    limit: int = Query(500, le=2000),
+):
+    query: dict[str, Any] = {}
+    if status: query["status"] = status
+    if type:   query["type"] = type
+    if group:  query["group"] = group
+    if q:
+        query["$or"] = [
+            {"name":  {"$regex": q, "$options": "i"}},
+            {"email": {"$regex": q, "$options": "i"}},
+            {"phone": {"$regex": q, "$options": "i"}},
+            {"code":  {"$regex": q, "$options": "i"}},
+        ]
+    sort_map = {
+        "created_at_desc": [("created_at", -1)],
+        "name_asc": [("name", 1)],
+        "spend_desc": [("total_spend", -1)],
+        "orders_desc": [("orders_count", -1)],
+    }
+    cursor = db.customers.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).limit(limit)
+    customers = await cursor.to_list(length=limit)
+    total = await db.customers.count_documents(query)
+    return {"customers": customers, "total": total, "groups": CUSTOMER_GROUPS}
+
+
+@api_router.get("/customers/summary")
+async def customers_summary():
+    total = await db.customers.count_documents({})
+    active = await db.customers.count_documents({"status": "active"})
+    pending = await db.customers.count_documents({"status": "pending"})
+    blocked = await db.customers.count_documents({"status": "blocked"})
+    guest = await db.customers.count_documents({"type": "guest"})
+    registered = await db.customers.count_documents({"type": "registered"})
+    top = await db.customers.find({}, {"_id": 0}).sort("total_spend", -1).limit(10).to_list(10)
+    by_group = await db.customers.aggregate([{"$group": {"_id": "$group", "count": {"$sum": 1}, "spend": {"$sum": "$total_spend"}}}]).to_list(50)
+    by_group = [{"group": g["_id"] or "Retail", "count": g["count"], "spend": round(g["spend"], 2)} for g in by_group]
+    return {"total": total, "active": active, "pending": pending, "blocked": blocked, "guest": guest, "registered": registered, "top": top, "by_group": by_group}
+
+
+@api_router.post("/customers", response_model=Customer)
+async def create_customer(body: CustomerBase):
+    c = Customer(**body.model_dump())
+    await db.customers.insert_one(c.model_dump())
+    return c
+
+
+@api_router.patch("/customers/{cid}")
+async def update_customer(cid: str, body: CustomerUpdate):
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields: raise HTTPException(status_code=400, detail="No fields")
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    r = await db.customers.update_one({"id": cid}, {"$set": fields})
+    if r.matched_count == 0: raise HTTPException(status_code=404, detail="Not found")
+    return await db.customers.find_one({"id": cid}, {"_id": 0})
+
+
+@api_router.delete("/customers/{cid}")
+async def delete_customer(cid: str):
+    r = await db.customers.delete_one({"id": cid})
+    if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Not found")
+    return {"deleted": True}
+
+
+@api_router.post("/customers/import")
+async def import_customers(payload: dict):
+    arr = payload.get("customers") or []
+    docs = [Customer(**c).model_dump() for c in arr]
+    if docs: await db.customers.insert_many(docs)
+    return {"imported": len(docs)}
+
+
+@api_router.post("/customers/rebuild-from-orders")
+async def rebuild_from_orders():
+    n = await _rebuild_customers_from_orders()
+    return {"created": n}
+
+
+# ---------------------------------------------------------------------------
+# Coupons + Reviews + Customer messages (light collections)
+# ---------------------------------------------------------------------------
+
+class CouponBase(BaseModel):
+    code: str
+    type: str = "percent"        # percent | fixed
+    value: float = 10.0
+    min_spend: float = 0.0
+    max_uses: int = 100
+    used: int = 0
+    active: bool = True
+    starts_at: Optional[str] = None
+    ends_at: Optional[str] = None
+    description: Optional[str] = ""
+
+
+class Coupon(CouponBase):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+@api_router.get("/coupons")
+async def list_coupons():
+    items = await db.coupons.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"coupons": items, "total": len(items)}
+
+
+@api_router.post("/coupons", response_model=Coupon)
+async def create_coupon(body: CouponBase):
+    c = Coupon(**body.model_dump())
+    await db.coupons.insert_one(c.model_dump())
+    return c
+
+
+@api_router.delete("/coupons/{cid}")
+async def delete_coupon(cid: str):
+    r = await db.coupons.delete_one({"id": cid})
+    if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Not found")
+    return {"deleted": True}
+
+
+class ReviewBase(BaseModel):
+    product_id: str
+    customer_name: str = "Anonymous"
+    rating: int = 5
+    title: Optional[str] = ""
+    body: Optional[str] = ""
+    status: str = "pending"  # pending | approved | rejected
+
+
+class Review(ReviewBase):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+@api_router.get("/reviews")
+async def list_reviews(product_id: Optional[str] = None, status: Optional[str] = None):
+    q: dict[str, Any] = {}
+    if product_id: q["product_id"] = product_id
+    if status:     q["status"] = status
+    items = await db.reviews.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"reviews": items, "total": len(items)}
+
+
+@api_router.post("/reviews", response_model=Review)
+async def create_review(body: ReviewBase):
+    r = Review(**body.model_dump())
+    await db.reviews.insert_one(r.model_dump())
+    return r
+
+
+@api_router.patch("/reviews/{rid}")
+async def update_review(rid: str, body: dict):
+    r = await db.reviews.update_one({"id": rid}, {"$set": body})
+    if r.matched_count == 0: raise HTTPException(status_code=404, detail="Not found")
+    return await db.reviews.find_one({"id": rid}, {"_id": 0})
+
+
+@api_router.delete("/reviews/{rid}")
+async def delete_review(rid: str):
+    r = await db.reviews.delete_one({"id": rid})
+    if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Not found")
+    return {"deleted": True}
+
+
+class MessageBase(BaseModel):
+    customer_name: str
+    customer_email: Optional[str] = ""
+    subject: str = ""
+    body: str = ""
+    status: str = "new"  # new | read | archived
+
+
+class Message(MessageBase):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+@api_router.get("/messages")
+async def list_messages(status: Optional[str] = None):
+    q = {"status": status} if status else {}
+    items = await db.messages.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return {"messages": items, "total": len(items)}
+
+
+@api_router.post("/messages", response_model=Message)
+async def create_message(body: MessageBase):
+    m = Message(**body.model_dump())
+    await db.messages.insert_one(m.model_dump())
+    return m
+
+
+# ---------------------------------------------------------------------------
+# Stock movements & product inventory helpers
+# ---------------------------------------------------------------------------
+
+class StockMove(BaseModel):
+    product_id: str
+    delta: int
+    kind: str = "adjustment"  # opening | count | adjustment | receive | sale | return
+    reason: Optional[str] = ""
+
+
+@api_router.get("/stock/moves")
+async def list_stock_moves(product_id: Optional[str] = None, limit: int = 200):
+    q = {"product_id": product_id} if product_id else {}
+    items = await db.stock_moves.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    return {"moves": items, "total": len(items)}
+
+
+@api_router.post("/stock/moves")
+async def create_stock_move(body: StockMove):
+    p = await db.products.find_one({"id": body.product_id}, {"_id": 0})
+    if not p: raise HTTPException(status_code=404, detail="Product not found")
+    move = body.model_dump()
+    move["id"] = str(uuid.uuid4())
+    move["created_at"] = datetime.now(timezone.utc).isoformat()
+    move["stock_before"] = p.get("stock", 0)
+    move["stock_after"] = p.get("stock", 0) + body.delta
+    await db.stock_moves.insert_one(move)
+    await db.products.update_one({"id": body.product_id}, {"$inc": {"stock": body.delta}, "$set": {"updated_at": move["created_at"]}})
+    move.pop("_id", None)
+    return move
+
+
+@api_router.get("/products/inventory-summary")
+async def inventory_summary():
+    total = await db.products.count_documents({})
+    low = await db.products.count_documents({"stock": {"$gt": 0, "$lte": 3}})
+    out = await db.products.count_documents({"stock": {"$lte": 0}})
+    active = await db.products.count_documents({"active": True})
+    total_stock = 0
+    async for p in db.products.find({}, {"stock": 1}):
+        total_stock += p.get("stock", 0)
+    return {"total_products": total, "active": active, "low_stock": low, "out_of_stock": out, "total_units": total_stock}
 
 
 # ---------------------------------------------------------------------------

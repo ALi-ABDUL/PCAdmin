@@ -14,6 +14,8 @@ import {
   Store, CreditCard, Receipt, Undo2, Mail, MessageSquare, Menu, Layout, FileText, Building2,
   Globe, Activity, Cable, Lock, ChevronDown, Bell, HelpCircle,
   Factory, UserPlus, Upload, List, Award, ShieldCheck, PackageSearch, ClipboardList, LineChart as LineChartIcon, TrendingDown as TrendingDownIcon, History, BadgeCheck, Star as StarIcon,
+  UserCheck, UserX, Users2, Heart, MessageCircle, Ticket, MapPinned, StickyNote, Ban, Layers,
+  Image as ImageLucide, GitBranch, Calculator, Boxes as BoxesIcon, PackagePlus, PackageMinus, PackageX, Warehouse, ClipboardCheck,
 } from "lucide-react";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -46,6 +48,49 @@ const SUPPLIER_NAV = [
   { id: "activity",     label: "Supplier Activity",    icon: History,        group: "Insights" },
 ];
 
+const CUSTOMER_NAV = [
+  { id: "create",     label: "Create Customer",     icon: UserPlus,       group: "Manage" },
+  { id: "import",     label: "Import Customers",    icon: Upload,         group: "Manage" },
+  { id: "all",        label: "All Customers",       icon: List,           group: "Directory" },
+  { id: "pending",    label: "Pending",             icon: History,        group: "Directory" },
+  { id: "active",     label: "Active",              icon: UserCheck,      group: "Directory" },
+  { id: "guest",      label: "Guest customers",     icon: UserIcon,       group: "Directory" },
+  { id: "registered", label: "Registered customers",icon: Users,          group: "Directory" },
+  { id: "messages",   label: "Customer messages",   icon: MessageCircle,  group: "Engagement" },
+  { id: "top",        label: "Top customers",       icon: Award,          group: "Engagement" },
+  { id: "groups",     label: "Customer groups",     icon: Users2,         group: "Engagement" },
+  { id: "addresses",  label: "Addresses",           icon: MapPinned,      group: "Data" },
+  { id: "orders",     label: "Orders",              icon: ShoppingCart,   group: "Data" },
+  { id: "wishlist",   label: "Wishlist",            icon: Heart,          group: "Data" },
+  { id: "reviews",    label: "Reviews",             icon: StarIcon,       group: "Data" },
+  { id: "coupons",    label: "Coupons",             icon: Ticket,         group: "Marketing" },
+  { id: "activity",   label: "Activity",            icon: History,        group: "Marketing" },
+  { id: "notes",      label: "Notes",               icon: StickyNote,     group: "Marketing" },
+  { id: "blocked",    label: "Blocked customers",   icon: Ban,            group: "Security" },
+];
+
+const PRODUCT_NAV = [
+  { id: "create",         label: "Create Product",     icon: PackagePlus,     group: "Manage" },
+  { id: "all",            label: "All Products",       icon: Package,         group: "Manage" },
+  { id: "editing",        label: "Product editing",    icon: Layers,          group: "Manage" },
+  { id: "images",         label: "Product images",     icon: ImageLucide,     group: "Manage" },
+  { id: "categories",     label: "Categories",         icon: Tags,            group: "Taxonomy" },
+  { id: "subcategories",  label: "Subcategories",      icon: GitBranch,       group: "Taxonomy" },
+  { id: "brands",         label: "Brands",             icon: BadgeCheck,      group: "Taxonomy" },
+  { id: "variants",       label: "Product variants",   icon: Layers,          group: "Taxonomy" },
+  { id: "pricing",        label: "Pricing",            icon: DollarSign,      group: "Pricing" },
+  { id: "profit",         label: "Profit calculation", icon: Calculator,      group: "Pricing" },
+  { id: "inventory",      label: "Inventory",          icon: Warehouse,       group: "Inventory" },
+  { id: "opening-stock",  label: "Opening Stock",      icon: BoxesIcon,       group: "Inventory" },
+  { id: "stock-count",    label: "Stock Count",        icon: ClipboardCheck,  group: "Inventory" },
+  { id: "adjustments",    label: "Stock Adjustments",  icon: Activity,        group: "Inventory" },
+  { id: "low-stock",      label: "Low Stock",          icon: PackageMinus,    group: "Inventory" },
+  { id: "out-of-stock",   label: "Out of Stock",       icon: PackageX,        group: "Inventory" },
+  { id: "stock-history",  label: "Stock History",      icon: History,         group: "Inventory" },
+  { id: "reviews",        label: "Product Reviews",    icon: StarIcon,        group: "Content" },
+  { id: "coupons",        label: "Coupons",            icon: Ticket,          group: "Content" },
+];
+
 /* --------------------------- Store Management nav ------------------------- */
 const STORE_NAV = [
   { id: "store-settings",      label: "Store Settings",       icon: Store,        group: "Configuration" },
@@ -69,6 +114,8 @@ export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [storeSection, setStoreSection] = useState("store-settings");
   const [supplierSection, setSupplierSection] = useState("all");
+  const [customerSection, setCustomerSection] = useState("all");
+  const [productSection, setProductSection] = useState("all");
   const [selectedItem, setSelectedItem] = useState(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -97,64 +144,61 @@ export default function App() {
 
   const inStore = tab === "store";
   const inSuppliers = tab === "suppliers";
+  const inCustomers = tab === "customers";
+  const inProducts  = tab === "products";
+  const subKey = inStore ? `store-${storeSection}` : inSuppliers ? `sup-${supplierSection}` : inCustomers ? `cus-${customerSection}` : inProducts ? `prd-${productSection}` : tab;
   return (
     <div className="min-h-screen flex bg-[color:var(--bg)]">
       <Toaster theme="light" position="bottom-right" />
 
-      {/* Mobile overlay backdrop */}
       <AnimatePresence>
         {mobileNavOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMobileNavOpen(false)} className="lg:hidden fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm"/>
         )}
       </AnimatePresence>
 
-      {/* Primary sidebar */}
       <Sidebar tab={tab} setTab={setTab} mobileOpen={mobileNavOpen} setMobileOpen={setMobileNavOpen} />
 
-      {/* Secondary store sidebar */}
       <AnimatePresence>
         {inStore && (
-          <motion.aside
-            key="store-sidebar"
-            initial={{ opacity: 0, x: -20, width: 0 }}
-            animate={{ opacity: 1, x: 0, width: 280 }}
-            exit={{ opacity: 0, x: -20, width: 0 }}
-            transition={{ duration: 0.22 }}
-            className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden"
-          >
-            <StoreSideNav active={storeSection} setActive={setStoreSection} />
+          <motion.aside key="store-sidebar" initial={{ opacity: 0, x: -20, width: 0 }} animate={{ opacity: 1, x: 0, width: 280 }} exit={{ opacity: 0, x: -20, width: 0 }} transition={{ duration: 0.22 }} className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden">
+            <SubSideNav title="Store Management" subtitle="Configure your storefront" icon={Store} nav={STORE_NAV} testPrefix="store" active={storeSection} setActive={setStoreSection}/>
           </motion.aside>
         )}
         {inSuppliers && (
-          <motion.aside
-            key="supplier-sidebar"
-            initial={{ opacity: 0, x: -20, width: 0 }}
-            animate={{ opacity: 1, x: 0, width: 280 }}
-            exit={{ opacity: 0, x: -20, width: 0 }}
-            transition={{ duration: 0.22 }}
-            className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden"
-          >
-            <SupplierSideNav active={supplierSection} setActive={setSupplierSection} />
+          <motion.aside key="supplier-sidebar" initial={{ opacity: 0, x: -20, width: 0 }} animate={{ opacity: 1, x: 0, width: 280 }} exit={{ opacity: 0, x: -20, width: 0 }} transition={{ duration: 0.22 }} className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden">
+            <SubSideNav title="Suppliers" subtitle="Manage your sourcing network" icon={Factory} nav={SUPPLIER_NAV} testPrefix="sup" active={supplierSection} setActive={setSupplierSection}/>
+          </motion.aside>
+        )}
+        {inCustomers && (
+          <motion.aside key="customer-sidebar" initial={{ opacity: 0, x: -20, width: 0 }} animate={{ opacity: 1, x: 0, width: 280 }} exit={{ opacity: 0, x: -20, width: 0 }} transition={{ duration: 0.22 }} className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden">
+            <SubSideNav title="Customers" subtitle="Grow and support your buyers" icon={Users} nav={CUSTOMER_NAV} testPrefix="cus" active={customerSection} setActive={setCustomerSection}/>
+          </motion.aside>
+        )}
+        {inProducts && (
+          <motion.aside key="product-sidebar" initial={{ opacity: 0, x: -20, width: 0 }} animate={{ opacity: 1, x: 0, width: 280 }} exit={{ opacity: 0, x: -20, width: 0 }} transition={{ duration: 0.22 }} className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden">
+            <SubSideNav title="Products" subtitle="Catalog, inventory & pricing" icon={Package} nav={PRODUCT_NAV} testPrefix="prd" active={productSection} setActive={setProductSection}/>
           </motion.aside>
         )}
       </AnimatePresence>
 
-      {/* Main content */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopHeader tab={tab} storeSection={storeSection} supplierSection={supplierSection} onMenu={() => setMobileNavOpen(true)}/>
-        {inStore && <StoreMobileNav active={storeSection} setActive={setStoreSection} />}
-        {inSuppliers && <SupplierMobileNav active={supplierSection} setActive={setSupplierSection} />}
+        <TopHeader tab={tab} storeSection={storeSection} supplierSection={supplierSection} customerSection={customerSection} productSection={productSection} onMenu={() => setMobileNavOpen(true)}/>
+        {inStore     && <SubMobileNav nav={STORE_NAV}    testPrefix="store-m" active={storeSection}    setActive={setStoreSection}/>}
+        {inSuppliers && <SubMobileNav nav={SUPPLIER_NAV} testPrefix="sup-m"   active={supplierSection} setActive={setSupplierSection}/>}
+        {inCustomers && <SubMobileNav nav={CUSTOMER_NAV} testPrefix="cus-m"   active={customerSection} setActive={setCustomerSection}/>}
+        {inProducts  && <SubMobileNav nav={PRODUCT_NAV}  testPrefix="prd-m"   active={productSection}  setActive={setProductSection}/>}
         <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 xl:p-10">
           <AnimatePresence mode="wait">
-            <motion.div key={inStore ? `store-${storeSection}` : inSuppliers ? `sup-${supplierSection}` : tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
+            <motion.div key={subKey} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
               {tab === "dashboard" && <Dashboard />}
               {tab === "store"     && <StoreManagement section={storeSection} setSection={setStoreSection}/>}
               {tab === "suppliers" && <Suppliers section={supplierSection} setSection={setSupplierSection}/>}
-              {tab === "products"  && <Products />}
+              {tab === "customers" && <CustomersModule section={customerSection} setSection={setCustomerSection}/>}
+              {tab === "products"  && <ProductsModule section={productSection} setSection={setProductSection}/>}
               {tab === "categories" && <Categories />}
               {tab === "scraper"   && <ScraperPage onView={setSelectedItem} />}
               {tab === "orders"    && <Orders />}
-              {tab === "customers" && <Customers />}
               {tab === "analytics" && <Analytics />}
               {tab === "settings"  && <SettingsPage />}
             </motion.div>
@@ -187,12 +231,12 @@ function Sidebar({ tab, setTab, mobileOpen, setMobileOpen }) {
   const nav = [
     { id: "dashboard", label: "Dashboard",  icon: LayoutDashboard, group: "General" },
     { id: "store",     label: "Store Management", icon: Store, group: "General", hasSub: true },
-    { id: "products",  label: "Products",   icon: Package,        group: "Catalog" },
+    { id: "products",  label: "Products",   icon: Package,        group: "Catalog", hasSub: true },
     { id: "categories", label: "Categories", icon: Tags,          group: "Catalog" },
     { id: "suppliers", label: "Suppliers",  icon: Factory,        group: "Catalog", hasSub: true },
     { id: "scraper",   label: "eBay AU Scraper", icon: Zap, badge: "AU", group: "Catalog" },
     { id: "orders",    label: "Orders",     icon: ShoppingCart,   group: "Operations" },
-    { id: "customers", label: "Customers",  icon: Users,          group: "Operations" },
+    { id: "customers", label: "Customers",  icon: Users,          group: "Operations", hasSub: true },
     { id: "analytics", label: "Analytics",  icon: BarChart3,      group: "Insights" },
     { id: "settings",  label: "Settings",   icon: Settings2,      group: "System" },
   ];
@@ -254,13 +298,13 @@ function Sidebar({ tab, setTab, mobileOpen, setMobileOpen }) {
   );
 }
 
-function StoreSideNav({ active, setActive }) {
-  const grouped = STORE_NAV.reduce((acc, n) => { (acc[n.group] = acc[n.group] || []).push(n); return acc; }, {});
+function SubSideNav({ title, subtitle, icon: HeaderIcon, nav, testPrefix, active, setActive }) {
+  const grouped = nav.reduce((acc, n) => { (acc[n.group] = acc[n.group] || []).push(n); return acc; }, {});
   return (
     <>
       <div className="px-5 py-5 border-b hairline">
-        <div className="flex items-center gap-2 text-slate-500 text-[11px] font-mono uppercase tracking-widest"><Store size={12}/> Store Management</div>
-        <div className="font-display font-bold text-[15px] tracking-tight mt-1">Configure your storefront</div>
+        <div className="flex items-center gap-2 text-slate-500 text-[11px] font-mono uppercase tracking-widest"><HeaderIcon size={12}/> {title}</div>
+        <div className="font-display font-bold text-[15px] tracking-tight mt-1">{subtitle}</div>
       </div>
       <div className="px-3 py-4 overflow-y-auto flex-1">
         {Object.entries(grouped).map(([g, items]) => (
@@ -270,7 +314,7 @@ function StoreSideNav({ active, setActive }) {
               {items.map((n) => {
                 const Icon = n.icon; const on = active === n.id;
                 return (
-                  <button key={n.id} data-testid={`store-${n.id}`} onClick={() => setActive(n.id)} className={`sidebar-link ${on ? "active" : ""}`}>
+                  <button key={n.id} data-testid={`${testPrefix}-${n.id}`} onClick={() => setActive(n.id)} className={`sidebar-link ${on ? "active" : ""}`}>
                     <Icon size={15} className="sidebar-icon"/>
                     <span className="text-left flex-1">{n.label}</span>
                   </button>
@@ -284,14 +328,14 @@ function StoreSideNav({ active, setActive }) {
   );
 }
 
-function StoreMobileNav({ active, setActive }) {
+function SubMobileNav({ nav, testPrefix, active, setActive }) {
   return (
     <div className="xl:hidden sticky top-16 z-20 bg-white/85 backdrop-blur-xl border-b hairline overflow-x-auto">
       <div className="flex items-center gap-1 px-4 py-2 min-w-max">
-        {STORE_NAV.map((n) => {
+        {nav.map((n) => {
           const Icon = n.icon; const on = active === n.id;
           return (
-            <button key={n.id} data-testid={`store-m-${n.id}`} onClick={() => setActive(n.id)} className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${on ? "bg-indigo-50 text-indigo-600 border border-indigo-100" : "text-slate-500 hover:bg-slate-50"}`}>
+            <button key={n.id} data-testid={`${testPrefix}-${n.id}`} onClick={() => setActive(n.id)} className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${on ? "bg-indigo-50 text-indigo-600 border border-indigo-100" : "text-slate-500 hover:bg-slate-50"}`}>
               <Icon size={13}/> {n.label}
             </button>
           );
@@ -301,63 +345,20 @@ function StoreMobileNav({ active, setActive }) {
   );
 }
 
-function SupplierSideNav({ active, setActive }) {
-  const grouped = SUPPLIER_NAV.reduce((acc, n) => { (acc[n.group] = acc[n.group] || []).push(n); return acc; }, {});
-  return (
-    <>
-      <div className="px-5 py-5 border-b hairline">
-        <div className="flex items-center gap-2 text-slate-500 text-[11px] font-mono uppercase tracking-widest"><Factory size={12}/> Suppliers</div>
-        <div className="font-display font-bold text-[15px] tracking-tight mt-1">Manage your sourcing network</div>
-      </div>
-      <div className="px-3 py-4 overflow-y-auto flex-1">
-        {Object.entries(grouped).map(([g, items]) => (
-          <div key={g} className="mb-4">
-            <div className="text-[10px] font-mono uppercase tracking-widest text-[color:var(--dim)] px-2 pb-1.5">{g}</div>
-            <nav className="flex flex-col gap-0.5">
-              {items.map((n) => {
-                const Icon = n.icon; const on = active === n.id;
-                return (
-                  <button key={n.id} data-testid={`sup-${n.id}`} onClick={() => setActive(n.id)} className={`sidebar-link ${on ? "active" : ""}`}>
-                    <Icon size={15} className="sidebar-icon"/>
-                    <span className="text-left flex-1">{n.label}</span>
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-function SupplierMobileNav({ active, setActive }) {
-  return (
-    <div className="xl:hidden sticky top-16 z-20 bg-white/85 backdrop-blur-xl border-b hairline overflow-x-auto">
-      <div className="flex items-center gap-1 px-4 py-2 min-w-max">
-        {SUPPLIER_NAV.map((n) => {
-          const Icon = n.icon; const on = active === n.id;
-          return (
-            <button key={n.id} data-testid={`sup-m-${n.id}`} onClick={() => setActive(n.id)} className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${on ? "bg-indigo-50 text-indigo-600 border border-indigo-100" : "text-slate-500 hover:bg-slate-50"}`}>
-              <Icon size={13}/> {n.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function TopHeader({ tab, storeSection, supplierSection, onMenu }) {
+function TopHeader({ tab, storeSection, supplierSection, customerSection, productSection, onMenu }) {
   const titles = {
     dashboard: "Dashboard", store: "Store Management", products: "Products", categories: "Categories",
-    suppliers: "Suppliers",
-    scraper: "eBay AU Scraper", orders: "Orders", customers: "Customers", analytics: "Analytics", settings: "Settings",
+    suppliers: "Suppliers", customers: "Customers",
+    scraper: "eBay AU Scraper", orders: "Orders", analytics: "Analytics", settings: "Settings",
   };
   const subTitle = tab === "store"
     ? STORE_NAV.find((s) => s.id === storeSection)?.label
     : tab === "suppliers"
     ? SUPPLIER_NAV.find((s) => s.id === supplierSection)?.label
+    : tab === "customers"
+    ? CUSTOMER_NAV.find((s) => s.id === customerSection)?.label
+    : tab === "products"
+    ? PRODUCT_NAV.find((s) => s.id === productSection)?.label
     : null;
 
   return (
@@ -775,6 +776,564 @@ function SupplierActivity({ list }) {
         ))}
       </div>
     </div>
+  );
+}
+
+/* ------------------------------- Customers -------------------------------- */
+function CustomersModule({ section, setSection }) {
+  const [list, setList] = useState([]); const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState(null);
+  const [q, setQ] = useState(""); const [sort, setSort] = useState("created_at_desc"); const [group, setGroup] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [coupons, setCoupons] = useState([]);
+  const [reviews, setReviews] = useState([]);
+
+  const params = {};
+  if (["pending","active","blocked"].includes(section)) params.status = section;
+  if (section === "guest") params.type = "guest";
+  if (section === "registered") params.type = "registered";
+  if (group) params.group = group;
+  if (q) params.q = q;
+  params.sort = sort;
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/customers`, { params });
+    setList(data.customers); setTotal(data.total);
+  }, [JSON.stringify(params)]); // eslint-disable-line
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { axios.get(`${API}/customers/summary`).then(r => setSummary(r.data)); }, [list.length]);
+  useEffect(() => { if (section === "messages") axios.get(`${API}/messages`).then(r => setMessages(r.data.messages)); }, [section]);
+  useEffect(() => { if (section === "coupons") axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons)); }, [section]);
+  useEffect(() => { if (section === "reviews") axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews)); }, [section]);
+
+  const meta = CUSTOMER_NAV.find((s) => s.id === section) || CUSTOMER_NAV[0];
+  const Icon = meta.icon;
+  const hints = {
+    create:"Add a customer profile manually.", import:"Bulk-import customers via JSON.",
+    all:"Every customer in your database.", pending:"Awaiting verification.", active:"Verified & shopping.",
+    guest:"One-off shoppers without an account.", registered:"Customers with an account.",
+    messages:"Inbound contact-form messages.", top:"Highest lifetime value.", groups:"Segments like VIP, Wholesale, Trade.",
+    addresses:"Customer shipping & billing addresses.", orders:"All orders across all customers.",
+    wishlist:"Products customers have starred.", reviews:"Product reviews left by customers.",
+    coupons:"Discount codes and campaigns.", activity:"Recent customer activity.", notes:"Internal notes on customers.",
+    blocked:"Restricted or blocked customers.",
+  };
+
+  return (
+    <div className="grid gap-6">
+      <SubHero icon={Icon} group={meta.group} label={meta.label} hint={hints[section]}/>
+      {section === "create"     && <CreateCustomer onCreated={() => { load(); setSection("all"); }}/>}
+      {section === "import"     && <ImportCustomers onImported={() => { load(); setSection("all"); }}/>}
+      {(["all","pending","active","guest","registered","blocked"].includes(section)) && <CustomerTable list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} group={group} setGroup={setGroup} groups={summary?.by_group?.map(g=>g.group)||[]} onChanged={load}/>}
+      {section === "top"        && <TopCustomers list={summary?.top || []}/>}
+      {section === "groups"     && <CustomerGroups groups={summary?.by_group || []}/>}
+      {section === "messages"   && <CustomerMessages messages={messages} reload={() => axios.get(`${API}/messages`).then(r => setMessages(r.data.messages))}/>}
+      {section === "coupons"    && <CouponsView coupons={coupons} reload={() => axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons))}/>}
+      {section === "reviews"    && <ReviewsView reviews={reviews} reload={() => axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews))}/>}
+      {section === "orders"     && <CustomerOrdersView/>}
+      {section === "wishlist"   && <ScaffoldList label="Wishlist items" hint="Customers can save products they love to buy later." rows={["Empty for now — hook up when storefront ships."]}/>}
+      {section === "addresses"  && <ScaffoldList label="Saved addresses" hint="Shipping & billing addresses per customer." rows={list.slice(0,5).map(c => `${c.name} · ${[c.city, c.state, c.country].filter(Boolean).join(", ") || "no address"}`)}/>}
+      {section === "activity"   && <CustomerActivity list={list}/>}
+      {section === "notes"      && <NotesView list={list} onChanged={load}/>}
+    </div>
+  );
+}
+
+function SubHero({ icon: Icon, group, label, hint, cta }) {
+  return (
+    <div className="card p-5 md:p-6 flex items-start gap-4">
+      <div className="w-12 h-12 rounded-xl grid place-items-center text-white shrink-0" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}><Icon size={20}/></div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500">{group}</div>
+        <div className="font-display text-2xl font-bold tracking-tight">{label}</div>
+        <div className="text-sm text-slate-500 mt-1">{hint}</div>
+      </div>
+      {cta}
+    </div>
+  );
+}
+
+function CustomerAvatar({ c, size = 36 }) {
+  const initials = (c.name || "").split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
+  return <div className="rounded-full grid place-items-center text-white font-bold shrink-0" style={{ width: size, height: size, background: "linear-gradient(135deg,#4F46E5,#EC4899)", fontSize: size * 0.34 }}>{initials || "C"}</div>;
+}
+
+function CreateCustomer({ onCreated }) {
+  const empty = { name:"", email:"", phone:"", country:"Australia", state:"", city:"", address:"", postcode:"", status:"active", type:"registered", group:"Retail", tags:[], notes:"" };
+  const [f, setF] = useState(empty); const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!f.name.trim()) return toast.error("Name is required");
+    setSaving(true);
+    try {
+      await axios.post(`${API}/customers`, { ...f, tags: typeof f.tags === "string" ? f.tags.split(",").map(t=>t.trim()).filter(Boolean) : f.tags });
+      toast.success("Customer created"); setF(empty); onCreated();
+    } catch (e) { toast.error("Failed", { description: e?.response?.data?.detail?.slice(0,200) }); }
+    finally { setSaving(false); }
+  };
+  const tagsStr = Array.isArray(f.tags) ? f.tags.join(", ") : (f.tags || "");
+  return (
+    <div className="card p-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Field label="Name *"><input className="input px-3 py-2 w-full" value={f.name} onChange={(e)=>setF({...f, name:e.target.value})} data-testid="cus-name"/></Field>
+        <Field label="Email"><input type="email" className="input px-3 py-2 w-full" value={f.email} onChange={(e)=>setF({...f, email:e.target.value})}/></Field>
+        <Field label="Phone"><input className="input px-3 py-2 w-full" value={f.phone} onChange={(e)=>setF({...f, phone:e.target.value})}/></Field>
+        <Field label="Group"><select className="input px-3 py-2 w-full" value={f.group} onChange={(e)=>setF({...f, group:e.target.value})}>{["Retail","VIP","Wholesale","Trade"].map(g=><option key={g}>{g}</option>)}</select></Field>
+        <Field label="Status"><select className="input px-3 py-2 w-full" value={f.status} onChange={(e)=>setF({...f, status:e.target.value})}>{["pending","active","blocked"].map(s=><option key={s}>{s}</option>)}</select></Field>
+        <Field label="Type"><select className="input px-3 py-2 w-full" value={f.type} onChange={(e)=>setF({...f, type:e.target.value})}>{["registered","guest"].map(s=><option key={s}>{s}</option>)}</select></Field>
+        <Field label="City"><input className="input px-3 py-2 w-full" value={f.city} onChange={(e)=>setF({...f, city:e.target.value})}/></Field>
+        <Field label="State"><select className="input px-3 py-2 w-full" value={f.state} onChange={(e)=>setF({...f, state:e.target.value})}><option value="">—</option>{["NSW","VIC","QLD","WA","SA","TAS","ACT","NT"].map(s=><option key={s}>{s}</option>)}</select></Field>
+        <Field label="Postcode"><input className="input px-3 py-2 w-full font-mono" value={f.postcode} onChange={(e)=>setF({...f, postcode:e.target.value})}/></Field>
+        <Field label="Address" className="md:col-span-2"><input className="input px-3 py-2 w-full" value={f.address} onChange={(e)=>setF({...f, address:e.target.value})}/></Field>
+        <Field label="Tags (comma separated)" className="md:col-span-2"><input className="input px-3 py-2 w-full" value={tagsStr} onChange={(e)=>setF({...f, tags:e.target.value})}/></Field>
+        <Field label="Notes" className="md:col-span-2"><textarea className="input px-3 py-2 w-full h-24" value={f.notes} onChange={(e)=>setF({...f, notes:e.target.value})}/></Field>
+      </div>
+      <div className="mt-4 flex justify-end gap-2"><button onClick={()=>setF(empty)} className="btn btn-ghost">Reset</button><button disabled={saving} onClick={save} className="btn btn-primary" data-testid="cus-create-btn">{saving?<Loader2 className="animate-spin" size={14}/>:<Plus size={14}/>} Create customer</button></div>
+    </div>
+  );
+}
+
+function ImportCustomers({ onImported }) {
+  const [text, setText] = useState(`[
+  { "name": "Sample User", "email": "sample@example.com", "group": "Retail", "status": "active", "type": "registered" }
+]`);
+  const [busy, setBusy] = useState(false);
+  const doImport = async () => {
+    setBusy(true);
+    try {
+      const arr = JSON.parse(text);
+      const { data } = await axios.post(`${API}/customers/import`, { customers: Array.isArray(arr) ? arr : [arr] });
+      toast.success(`Imported ${data.imported}`); onImported();
+    } catch (e) { toast.error("Import failed", { description: (e?.message||"").slice(0,200) }); }
+    finally { setBusy(false); }
+  };
+  const rebuild = async () => { const { data } = await axios.post(`${API}/customers/rebuild-from-orders`); toast.success(`Rebuilt · created ${data.created}`); onImported(); };
+  return (
+    <div className="card p-6">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs text-slate-500">Paste a JSON array of customer objects. Only <span className="font-mono">name</span> is required.</div>
+        <button onClick={rebuild} className="btn btn-ghost text-xs"><History size={12}/> Rebuild from orders</button>
+      </div>
+      <textarea value={text} onChange={(e)=>setText(e.target.value)} className="input px-3 py-2 w-full font-mono text-xs" style={{ height: 260 }}/>
+      <div className="mt-4 flex justify-end"><button disabled={busy} onClick={doImport} className="btn btn-primary">{busy?<Loader2 className="animate-spin" size={14}/>:<Upload size={14}/>} Import customers</button></div>
+    </div>
+  );
+}
+
+function CustomerTable({ list, total, q, setQ, sort, setSort, group, setGroup, groups, onChanged }) {
+  const setStatus = async (c, status) => { await axios.patch(`${API}/customers/${c.id}`, { status }); onChanged(); };
+  const del = async (c) => { if (!window.confirm(`Delete ${c.name}?`)) return; await axios.delete(`${API}/customers/${c.id}`); toast.success("Deleted"); onChanged(); };
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-sm text-slate-500 font-mono">{total} customer{total===1?"":"s"}</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search name / email" className="input pl-9 pr-3 py-2 text-sm w-64"/></div>
+          <select value={group} onChange={(e)=>setGroup(e.target.value)} className="input px-3 py-2 text-sm"><option value="">All groups</option>{["Retail","VIP","Wholesale","Trade"].map(g=><option key={g}>{g}</option>)}</select>
+          <select value={sort} onChange={(e)=>setSort(e.target.value)} className="input px-3 py-2 text-sm">
+            <option value="created_at_desc">Newest</option><option value="name_asc">Name A→Z</option><option value="spend_desc">Spend ↓</option><option value="orders_desc">Orders ↓</option>
+          </select>
+        </div>
+      </div>
+      <div className="card overflow-hidden"><div className="overflow-x-auto"><table className="tbl">
+        <thead><tr><th>Customer</th><th>Code</th><th>Group</th><th>Type</th><th>Status</th><th>Orders</th><th>Spend</th><th></th></tr></thead>
+        <tbody>
+          {list.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-slate-500">No customers</td></tr>}
+          {list.map(c => (
+            <tr key={c.id} data-testid="cus-row">
+              <td><div className="flex items-center gap-3"><CustomerAvatar c={c}/><div className="min-w-0"><div className="text-sm font-medium truncate max-w-[240px]">{c.name}</div><div className="text-[11px] text-slate-400 truncate">{c.email || "—"}</div></div></div></td>
+              <td className="font-mono text-xs text-slate-500">{c.code}</td>
+              <td><span className="chip chip-primary">{c.group}</span></td>
+              <td><span className="chip chip-neutral capitalize">{c.type}</span></td>
+              <td>
+                <select value={c.status} onChange={(e)=>setStatus(c, e.target.value)} className="input px-2 py-1 text-xs">
+                  {["pending","active","blocked"].map(s=><option key={s}>{s}</option>)}
+                </select>
+              </td>
+              <td>{c.orders_count}</td>
+              <td className="font-mono font-bold text-indigo-600">{moneyCents(c.total_spend)}</td>
+              <td><button onClick={()=>del(c)} className="btn btn-danger !p-2"><Trash2 size={12}/></button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table></div></div>
+    </div>
+  );
+}
+
+function TopCustomers({ list }) {
+  return (
+    <div className="card overflow-hidden">
+      <div className="p-4 border-b hairline font-display font-bold flex items-center gap-2"><Award size={16}/> Top 10 by lifetime value</div>
+      <div className="p-3">
+        {list.length === 0 && <div className="text-sm text-slate-500 py-6 text-center">No customers yet</div>}
+        {list.map((c, i) => (
+          <div key={c.id} className="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-lg">
+            <div className="w-8 h-8 grid place-items-center rounded-md font-display font-bold text-white text-xs" style={{ background: `linear-gradient(135deg,#4F46E5,#EC4899)`, opacity: 1 - i*0.08 }}>{i + 1}</div>
+            <CustomerAvatar c={c} size={32}/>
+            <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate">{c.name}</div><div className="text-xs text-slate-500 truncate">{c.email || "—"} · {c.orders_count} orders</div></div>
+            <div className="font-mono font-bold text-indigo-600">{moneyCents(c.total_spend)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CustomerGroups({ groups }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {groups.length === 0 && <div className="col-span-full card p-10 text-center text-slate-500">No group data yet</div>}
+      {groups.map(g => (
+        <div key={g.group} className="card p-5">
+          <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500">{g.group}</div>
+          <div className="font-display text-3xl font-bold mt-1">{g.count}</div>
+          <div className="text-sm text-slate-500 mt-1">members · {moneyCents(g.spend)} lifetime</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CustomerMessages({ messages, reload }) {
+  const [f, setF] = useState({ customer_name:"", customer_email:"", subject:"", body:"" });
+  const send = async () => { if(!f.customer_name || !f.body) return toast.error("Name & message required"); await axios.post(`${API}/messages`, f); setF({ customer_name:"", customer_email:"", subject:"", body:"" }); toast.success("Message added"); reload(); };
+  return (
+    <div className="grid gap-4">
+      <div className="card p-5">
+        <div className="font-display font-bold mb-3">Log a message</div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <input placeholder="Customer name" className="input px-3 py-2" value={f.customer_name} onChange={(e)=>setF({...f, customer_name:e.target.value})}/>
+          <input placeholder="Email" className="input px-3 py-2" value={f.customer_email} onChange={(e)=>setF({...f, customer_email:e.target.value})}/>
+          <input placeholder="Subject" className="input px-3 py-2" value={f.subject} onChange={(e)=>setF({...f, subject:e.target.value})}/>
+        </div>
+        <textarea placeholder="Message body" className="input px-3 py-2 mt-2 w-full h-24" value={f.body} onChange={(e)=>setF({...f, body:e.target.value})}/>
+        <div className="mt-3 flex justify-end"><button onClick={send} className="btn btn-primary text-sm"><MessageCircle size={14}/> Add message</button></div>
+      </div>
+      <div className="card overflow-hidden">
+        {messages.length === 0 && <div className="p-10 text-center text-slate-500">No messages yet</div>}
+        {messages.map(m => (
+          <div key={m.id} className="p-4 border-b hairline last:border-0"><div className="flex items-center justify-between"><div className="font-medium text-sm">{m.customer_name} <span className="text-slate-400 text-xs font-mono">· {m.customer_email}</span></div><span className={`chip chip-${m.status==='new'?'primary':'neutral'}`}>{m.status}</span></div><div className="text-sm font-medium mt-1">{m.subject}</div><div className="text-sm text-slate-600 mt-1">{m.body}</div><div className="text-[11px] text-slate-400 mt-1 font-mono">{fmtDate(m.created_at)}</div></div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CouponsView({ coupons, reload }) {
+  const [f, setF] = useState({ code:"", type:"percent", value:10, min_spend:0, max_uses:100, description:"" });
+  const create = async () => { if(!f.code.trim()) return toast.error("Code required"); await axios.post(`${API}/coupons`, f); toast.success("Coupon created"); setF({ code:"", type:"percent", value:10, min_spend:0, max_uses:100, description:"" }); reload(); };
+  const del = async (c) => { await axios.delete(`${API}/coupons/${c.id}`); toast.success("Deleted"); reload(); };
+  return (
+    <div className="grid gap-4">
+      <div className="card p-5">
+        <div className="font-display font-bold mb-3">Create coupon</div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          <input placeholder="CODE" className="input px-3 py-2 font-mono uppercase" value={f.code} onChange={(e)=>setF({...f, code:e.target.value.toUpperCase()})}/>
+          <select className="input px-3 py-2" value={f.type} onChange={(e)=>setF({...f, type:e.target.value})}><option value="percent">%</option><option value="fixed">AU$</option></select>
+          <input type="number" placeholder="Value" className="input px-3 py-2 font-mono" value={f.value} onChange={(e)=>setF({...f, value:Number(e.target.value)})}/>
+          <input type="number" placeholder="Min spend" className="input px-3 py-2 font-mono" value={f.min_spend} onChange={(e)=>setF({...f, min_spend:Number(e.target.value)})}/>
+          <input type="number" placeholder="Max uses" className="input px-3 py-2 font-mono" value={f.max_uses} onChange={(e)=>setF({...f, max_uses:Number(e.target.value)})}/>
+        </div>
+        <input placeholder="Description" className="input px-3 py-2 mt-2 w-full" value={f.description} onChange={(e)=>setF({...f, description:e.target.value})}/>
+        <div className="mt-3 flex justify-end"><button onClick={create} className="btn btn-primary text-sm"><Ticket size={14}/> Create</button></div>
+      </div>
+      <div className="card overflow-hidden"><table className="tbl">
+        <thead><tr><th>Code</th><th>Discount</th><th>Min spend</th><th>Uses</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {coupons.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-500">No coupons yet</td></tr>}
+          {coupons.map(c => (
+            <tr key={c.id}><td className="font-mono font-bold">{c.code}</td><td>{c.type === "percent" ? `${c.value}%` : moneyCents(c.value)}</td><td>{moneyCents(c.min_spend)}</td><td>{c.used}/{c.max_uses}</td><td><span className={`chip ${c.active?"chip-success":"chip-neutral"}`}>{c.active?"active":"disabled"}</span></td><td><button onClick={()=>del(c)} className="btn btn-danger !p-2"><Trash2 size={12}/></button></td></tr>
+          ))}
+        </tbody>
+      </table></div>
+    </div>
+  );
+}
+
+function ReviewsView({ reviews, reload }) {
+  const setStatus = async (r, status) => { await axios.patch(`${API}/reviews/${r.id}`, { status }); reload(); };
+  const del = async (r) => { await axios.delete(`${API}/reviews/${r.id}`); reload(); };
+  return (
+    <div className="card overflow-hidden">
+      {reviews.length === 0 && <div className="p-10 text-center text-slate-500">No reviews yet · Post one via POST /api/reviews</div>}
+      {reviews.map(r => (
+        <div key={r.id} className="p-4 border-b hairline last:border-0 flex items-start gap-4">
+          <div className="flex items-center gap-0.5 text-amber-500">{[1,2,3,4,5].map(i => <StarIcon key={i} size={12} fill={i<=r.rating?"currentColor":"none"}/>)}</div>
+          <div className="flex-1 min-w-0"><div className="text-sm font-medium">{r.title || "Untitled"}</div><div className="text-xs text-slate-500">{r.customer_name} · {fmtDate(r.created_at)}</div><div className="text-sm text-slate-700 mt-1">{r.body}</div></div>
+          <select value={r.status} onChange={(e)=>setStatus(r, e.target.value)} className="input px-2 py-1 text-xs">{["pending","approved","rejected"].map(s=><option key={s}>{s}</option>)}</select>
+          <button onClick={()=>del(r)} className="btn btn-danger !p-2"><Trash2 size={12}/></button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CustomerOrdersView() {
+  const [orders, setOrders] = useState([]);
+  useEffect(() => { axios.get(`${API}/orders`, { params: { limit: 200 }}).then(r => setOrders(r.data.orders)); }, []);
+  return (
+    <div className="card overflow-hidden"><div className="overflow-x-auto"><table className="tbl">
+      <thead><tr><th>Order</th><th>Customer</th><th>Total</th><th>Status</th><th>Date</th></tr></thead>
+      <tbody>
+        {orders.map(o => (
+          <tr key={o.id}><td className="text-sm truncate max-w-[280px]" title={o.product_title}>{o.product_title}</td><td>{o.customer_name}</td><td className="font-mono font-bold text-indigo-600">{moneyCents(o.total)}</td><td><StatusChip status={o.status}/></td><td className="text-xs text-slate-500 font-mono">{fmtDate(o.created_at)}</td></tr>
+        ))}
+      </tbody>
+    </table></div></div>
+  );
+}
+
+function ScaffoldList({ label, hint, rows = [] }) {
+  return (
+    <div className="card p-6">
+      <div className="font-display font-bold">{label}</div>
+      <div className="text-sm text-slate-500 mt-1">{hint}</div>
+      <div className="mt-4 divide-y">
+        {rows.length === 0 && <div className="py-8 text-center text-slate-400 text-sm">No data yet</div>}
+        {rows.map((r, i) => <div key={i} className="py-2 text-sm text-slate-700">{r}</div>)}
+      </div>
+    </div>
+  );
+}
+
+function CustomerActivity({ list }) {
+  const rows = [...list].sort((a,b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 40);
+  return (
+    <div className="card overflow-hidden">
+      {rows.length === 0 && <div className="p-10 text-center text-slate-500">No activity</div>}
+      {rows.map(c => (
+        <div key={c.id} className="p-4 border-b hairline last:border-0 flex items-center gap-3">
+          <CustomerAvatar c={c} size={32}/><div className="flex-1 min-w-0"><div className="text-sm"><span className="font-medium">{c.name}</span> <span className="text-slate-500">joined as {c.group}</span></div><div className="text-[11px] text-slate-400 font-mono">{fmtDate(c.created_at)}</div></div><span className="chip chip-neutral">{c.status}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NotesView({ list, onChanged }) {
+  const [id, setId] = useState(list[0]?.id || "");
+  const cust = list.find(c => c.id === id) || list[0];
+  const [note, setNote] = useState(cust?.notes || "");
+  useEffect(() => { setNote(cust?.notes || ""); }, [cust?.id]); // eslint-disable-line
+  if (!cust) return <div className="card p-10 text-center text-slate-500">No customers</div>;
+  const save = async () => { await axios.patch(`${API}/customers/${cust.id}`, { notes: note }); toast.success("Note saved"); onChanged(); };
+  return (
+    <div className="card p-5 grid gap-3">
+      <select value={id} onChange={(e)=>setId(e.target.value)} className="input px-3 py-2 max-w-md">{list.map(c => <option key={c.id} value={c.id}>{c.name} · {c.email}</option>)}</select>
+      <textarea className="input px-3 py-2 w-full h-40" value={note} onChange={(e)=>setNote(e.target.value)} placeholder="Internal notes about this customer…"/>
+      <div className="flex justify-end"><button onClick={save} className="btn btn-primary text-sm">Save note</button></div>
+    </div>
+  );
+}
+
+/* -------------------------- Products (module wrapper) --------------------- */
+function ProductsModule({ section, setSection }) {
+  const [inv, setInv] = useState(null);
+  const [reviews, setReviews] = useState([]);
+  const [coupons, setCoupons] = useState([]);
+  const [moves, setMoves] = useState([]);
+  const [products, setProducts] = useState([]);
+
+  useEffect(() => { axios.get(`${API}/products/inventory-summary`).then(r => setInv(r.data)); }, [section]);
+  useEffect(() => { axios.get(`${API}/products`).then(r => setProducts(r.data.products)); }, [section]);
+  useEffect(() => { if (section === "reviews") axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews)); }, [section]);
+  useEffect(() => { if (section === "coupons") axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons)); }, [section]);
+  useEffect(() => { if (section === "stock-history") axios.get(`${API}/stock/moves`).then(r => setMoves(r.data.moves)); }, [section]);
+
+  const meta = PRODUCT_NAV.find((s) => s.id === section) || PRODUCT_NAV[0];
+  const Icon = meta.icon;
+  const hints = {
+    create:"Add a new product to your catalog.", all:"Every product in your store.",
+    editing:"Bulk edit product fields inline.", images:"Manage image galleries & alt text.",
+    categories:"Assign products to categories.", subcategories:"Nested groupings under a category.",
+    brands:"Manage brand list & logos.", variants:"Size / colour / material combos per product.",
+    pricing:"Retail price, cost & compare-at.", profit:"Margin & profit calculator.",
+    inventory:"Overall stock health across the catalog.", "opening-stock":"Set initial stock levels for new items.",
+    "stock-count":"Physical stock-take counts.", adjustments:"Log a manual +/- change with reason.",
+    "low-stock":"Items with ≤ 3 in stock.", "out-of-stock":"Items at 0 or below.",
+    "stock-history":"Every movement in the ledger.", reviews:"Customer product reviews.", coupons:"Product-specific discount codes.",
+  };
+  const filtered = section === "low-stock" ? products.filter(p => (p.stock ?? 0) > 0 && (p.stock ?? 0) <= 3)
+    : section === "out-of-stock" ? products.filter(p => (p.stock ?? 0) <= 0)
+    : products;
+
+  return (
+    <div className="grid gap-6">
+      <SubHero icon={Icon} group={meta.group} label={meta.label} hint={hints[section]}/>
+      {section === "create"      && <ProductCreate onCreated={() => setSection("all")}/>}
+      {section === "all"         && <Products />}
+      {section === "editing"     && <Products />}
+      {section === "images"      && <ProductImagesView list={products}/>}
+      {section === "categories"  && <Categories />}
+      {section === "subcategories" && <ScaffoldList label="Subcategories" hint="Nested groupings under each category." rows={["Coming soon — one-level nesting under Categories."]}/>}
+      {section === "brands"      && <BrandsView list={products}/>}
+      {section === "variants"    && <ScaffoldList label="Product variants" hint="Size / colour / material options." rows={["Add variant schema to products to enable."]}/>}
+      {section === "pricing"     && <PricingView list={products}/>}
+      {section === "profit"      && <ProfitView list={products}/>}
+      {section === "inventory"   && <InventoryOverview inv={inv} list={products}/>}
+      {section === "opening-stock" && <StockAdjustPage list={products} kind="opening" title="Opening stock"/>}
+      {section === "stock-count"   && <StockAdjustPage list={products} kind="count" title="Stock count (set-to)"/>}
+      {section === "adjustments"   && <StockAdjustPage list={products} kind="adjustment" title="Stock adjustment"/>}
+      {section === "low-stock"     && <StockList list={filtered} tone="warning"/>}
+      {section === "out-of-stock"  && <StockList list={filtered} tone="danger"/>}
+      {section === "stock-history" && <StockHistoryView moves={moves}/>}
+      {section === "reviews"       && <ReviewsView reviews={reviews} reload={() => axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews))}/>}
+      {section === "coupons"       && <CouponsView coupons={coupons} reload={() => axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons))}/>}
+    </div>
+  );
+}
+
+function ProductCreate({ onCreated }) {
+  const [cats, setCats] = useState([]);
+  const empty = { title:"", price:0, cost:0, stock:10, category:"other", description:"", images:[], sku:"", active:true };
+  const [f, setF] = useState(empty); const [saving, setSaving] = useState(false);
+  useEffect(() => { axios.get(`${API}/categories`, { params: { active: true }}).then(r => { setCats(r.data.categories); setF(x => ({...x, category: r.data.categories[0]?.slug || "other" })); }); }, []);
+  const save = async () => {
+    if (!f.title.trim()) return toast.error("Title required");
+    setSaving(true);
+    try { await axios.post(`${API}/products`, { ...f, price:Number(f.price), cost:Number(f.cost), stock:Number(f.stock) }); toast.success("Product created"); setF(empty); onCreated(); }
+    catch (e) { toast.error("Failed", { description: e?.response?.data?.detail?.slice(0,200) }); }
+    finally { setSaving(false); }
+  };
+  return (
+    <div className="card p-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Field label="Title *" className="md:col-span-2"><input className="input px-3 py-2 w-full" value={f.title} onChange={(e)=>setF({...f, title:e.target.value})}/></Field>
+        <Field label="SKU"><input className="input px-3 py-2 w-full font-mono" value={f.sku} onChange={(e)=>setF({...f, sku:e.target.value})}/></Field>
+        <Field label="Category"><select className="input px-3 py-2 w-full" value={f.category} onChange={(e)=>setF({...f, category:e.target.value})}>{cats.map(c=><option key={c.slug} value={c.slug}>{c.group} · {c.name}</option>)}</select></Field>
+        <Field label="Price (AUD)"><input type="number" className="input px-3 py-2 w-full font-mono" value={f.price} onChange={(e)=>setF({...f, price:e.target.value})}/></Field>
+        <Field label="Cost (AUD)"><input type="number" className="input px-3 py-2 w-full font-mono" value={f.cost} onChange={(e)=>setF({...f, cost:e.target.value})}/></Field>
+        <Field label="Stock"><input type="number" className="input px-3 py-2 w-full font-mono" value={f.stock} onChange={(e)=>setF({...f, stock:e.target.value})}/></Field>
+        <Field label="Active"><select className="input px-3 py-2 w-full" value={f.active?"1":"0"} onChange={(e)=>setF({...f, active:e.target.value==="1"})}><option value="1">Yes</option><option value="0">No</option></select></Field>
+        <Field label="Description" className="md:col-span-2"><textarea className="input px-3 py-2 w-full h-24" value={f.description} onChange={(e)=>setF({...f, description:e.target.value})}/></Field>
+      </div>
+      <div className="mt-4 flex justify-end gap-2"><button onClick={()=>setF(empty)} className="btn btn-ghost">Reset</button><button disabled={saving} onClick={save} className="btn btn-primary">{saving?<Loader2 className="animate-spin" size={14}/>:<Plus size={14}/>} Create product</button></div>
+    </div>
+  );
+}
+
+function ProductImagesView({ list }) {
+  const withImages = list.filter(p => p.images?.length);
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {withImages.length === 0 && <div className="col-span-full card p-10 text-center text-slate-500">No product images yet</div>}
+      {withImages.map(p => (
+        <div key={p.id} className="card overflow-hidden">
+          <div className="aspect-square bg-slate-50"><img src={proxyImg(p.images[0])} alt="" className="w-full h-full object-cover"/></div>
+          <div className="p-3"><div className="text-sm font-medium truncate">{p.title}</div><div className="text-[11px] text-slate-400">{p.images.length} image{p.images.length===1?"":"s"}</div></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BrandsView({ list }) {
+  const brands = Array.from(new Set(list.map(p => (p.specifics?.Brand || p.brand || "Unbranded")))).sort();
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {brands.map(b => (
+        <div key={b} className="card p-4"><div className="w-10 h-10 rounded-xl grid place-items-center bg-indigo-50 text-indigo-600"><BadgeCheck size={16}/></div><div className="mt-2 font-medium">{b}</div><div className="text-xs text-slate-500">{list.filter(p => (p.specifics?.Brand || p.brand || "Unbranded") === b).length} products</div></div>
+      ))}
+    </div>
+  );
+}
+
+function PricingView({ list }) {
+  return (
+    <div className="card overflow-hidden"><div className="overflow-x-auto"><table className="tbl">
+      <thead><tr><th>Product</th><th>Cost</th><th>Price</th><th>Margin</th></tr></thead>
+      <tbody>{list.map(p => { const m = p.price ? ((p.price-(p.cost||0))/p.price)*100 : 0; return (
+        <tr key={p.id}><td className="text-sm truncate max-w-[300px]">{p.title}</td><td className="font-mono">{moneyCents(p.cost)}</td><td className="font-mono font-bold text-indigo-600">{moneyCents(p.price)}</td><td className={`font-mono ${m>=40?"text-emerald-600":m>=20?"text-amber-600":"text-red-600"}`}>{m.toFixed(1)}%</td></tr>
+      );})}</tbody>
+    </table></div></div>
+  );
+}
+
+function ProfitView({ list }) {
+  const totals = list.reduce((a,p) => { const profit = (p.price - (p.cost||0)) * (p.sold_count||0); a.rev += (p.price||0)*(p.sold_count||0); a.profit += profit; a.units += p.sold_count||0; return a; }, { rev:0, profit:0, units:0 });
+  return (
+    <div className="grid gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatBox label="Revenue" value={moneyCents(totals.rev)}/>
+        <StatBox label="Profit" value={moneyCents(totals.profit)} tone="success"/>
+        <StatBox label="Units sold" value={totals.units.toLocaleString()}/>
+        <StatBox label="Avg margin" value={totals.rev ? `${((totals.profit/totals.rev)*100).toFixed(1)}%` : "—"}/>
+      </div>
+      <div className="card overflow-hidden"><table className="tbl">
+        <thead><tr><th>Product</th><th>Sold</th><th>Revenue</th><th>Profit</th></tr></thead>
+        <tbody>{[...list].sort((a,b)=>((b.price-(b.cost||0))*(b.sold_count||0))-((a.price-(a.cost||0))*(a.sold_count||0))).slice(0,20).map(p => { const rev=(p.price||0)*(p.sold_count||0); const prof=(p.price-(p.cost||0))*(p.sold_count||0); return (
+          <tr key={p.id}><td className="text-sm truncate max-w-[300px]">{p.title}</td><td>{p.sold_count||0}</td><td className="font-mono font-bold text-indigo-600">{moneyCents(rev)}</td><td className="font-mono text-emerald-600">{moneyCents(prof)}</td></tr>
+        );})}</tbody>
+      </table></div>
+    </div>
+  );
+}
+
+function InventoryOverview({ inv, list }) {
+  if (!inv) return <div className="text-slate-500">loading…</div>;
+  return (
+    <div className="grid gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatBox label="Products" value={inv.total_products}/>
+        <StatBox label="Active" value={inv.active} tone="success"/>
+        <StatBox label="Low stock" value={inv.low_stock}/>
+        <StatBox label="Out of stock" value={inv.out_of_stock}/>
+      </div>
+      <StockList list={list}/>
+    </div>
+  );
+}
+
+function StockAdjustPage({ list, kind, title }) {
+  const [pid, setPid] = useState(list[0]?.id || "");
+  const [delta, setDelta] = useState(0);
+  const [reason, setReason] = useState("");
+  useEffect(() => { if (!pid && list.length) setPid(list[0].id); }, [list, pid]);
+  const p = list.find(x => x.id === pid);
+  const apply = async () => {
+    if (!pid) return; if (!delta) return toast.error("Enter a non-zero delta");
+    let d = Number(delta);
+    if (kind === "count") d = d - (p?.stock || 0); // set-to
+    if (kind === "opening") d = d - (p?.stock || 0);
+    await axios.post(`${API}/stock/moves`, { product_id: pid, delta: d, kind, reason });
+    toast.success(`${title} applied`); setDelta(0); setReason("");
+  };
+  return (
+    <div className="card p-6 grid gap-3 max-w-2xl">
+      <Field label="Product"><select value={pid} onChange={(e)=>setPid(e.target.value)} className="input px-3 py-2 w-full">{list.map(x=><option key={x.id} value={x.id}>{x.title} · stock {x.stock??0}</option>)}</select></Field>
+      <Field label={kind === "adjustment" ? "Delta (+/-)" : "New stock value"}><input type="number" value={delta} onChange={(e)=>setDelta(e.target.value)} className="input px-3 py-2 w-full font-mono"/></Field>
+      <Field label="Reason / reference"><input value={reason} onChange={(e)=>setReason(e.target.value)} className="input px-3 py-2 w-full" placeholder="Damage / return / stock-take etc."/></Field>
+      <div className="flex justify-end"><button onClick={apply} className="btn btn-primary"><Activity size={14}/> Apply</button></div>
+      <div className="text-xs text-slate-500">Current stock: <b>{p?.stock ?? 0}</b> → target: <b>{kind === "adjustment" ? (Number(p?.stock||0)+Number(delta||0)) : Number(delta||0)}</b></div>
+    </div>
+  );
+}
+
+function StockList({ list, tone }) {
+  return (
+    <div className="card overflow-hidden"><div className="overflow-x-auto"><table className="tbl">
+      <thead><tr><th>Product</th><th>SKU</th><th>Stock</th><th>Sold</th></tr></thead>
+      <tbody>
+        {list.length === 0 && <tr><td colSpan={4} className="text-center py-10 text-slate-500">No products in this bucket</td></tr>}
+        {list.map(p => (
+          <tr key={p.id}><td className="text-sm truncate max-w-[320px]">{p.title}</td><td className="font-mono text-xs text-slate-500">{p.sku||"—"}</td><td className={`font-mono ${tone==="danger"?"text-red-600 font-bold":tone==="warning"?"text-amber-600 font-bold":"text-slate-800"}`}>{p.stock ?? 0}</td><td>{p.sold_count||0}</td></tr>
+        ))}
+      </tbody>
+    </table></div></div>
+  );
+}
+
+function StockHistoryView({ moves }) {
+  return (
+    <div className="card overflow-hidden"><div className="overflow-x-auto"><table className="tbl">
+      <thead><tr><th>When</th><th>Kind</th><th>Δ</th><th>Before</th><th>After</th><th>Reason</th></tr></thead>
+      <tbody>
+        {moves.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-500">No stock moves yet</td></tr>}
+        {moves.map(m => (
+          <tr key={m.id}><td className="text-xs font-mono text-slate-500">{fmtDate(m.created_at)}</td><td><span className="chip chip-neutral capitalize">{m.kind}</span></td><td className={`font-mono font-bold ${m.delta>0?"text-emerald-600":"text-red-600"}`}>{m.delta>0?`+${m.delta}`:m.delta}</td><td className="font-mono">{m.stock_before}</td><td className="font-mono">{m.stock_after}</td><td className="text-xs text-slate-500 truncate max-w-[240px]">{m.reason||"—"}</td></tr>
+        ))}
+      </tbody>
+    </table></div></div>
   );
 }
 
@@ -1527,37 +2086,6 @@ function Orders() {
 }
 
 /* -------------------------------- Customers ------------------------------- */
-function Customers() {
-  const [orders, setOrders] = useState([]);
-  useEffect(() => { axios.get(`${API}/orders`, { params: { limit: 1000 }}).then(r => setOrders(r.data.orders)); }, []);
-  const byCustomer = {};
-  orders.forEach(o => {
-    if (!o.customer_name) return;
-    if (!byCustomer[o.customer_name]) byCustomer[o.customer_name] = { name: o.customer_name, email: o.customer_email, orders: 0, revenue: 0 };
-    byCustomer[o.customer_name].orders += 1; byCustomer[o.customer_name].revenue += o.total;
-  });
-  const rows = Object.values(byCustomer).sort((a,b) => b.revenue - a.revenue).slice(0, 200);
-  return (
-    <div className="grid gap-4">
-      <div className="text-sm text-slate-500 font-mono">{rows.length} unique customers · derived from orders</div>
-      <div className="card overflow-hidden"><div className="overflow-x-auto"><table className="tbl">
-        <thead><tr><th>Customer</th><th>Email</th><th>Orders</th><th>Lifetime value</th></tr></thead>
-        <tbody>
-          {rows.length === 0 && <tr><td colSpan={4} className="text-center py-10 text-slate-500">No customers yet</td></tr>}
-          {rows.map((c, i) => (
-            <tr key={i}>
-              <td><div className="flex items-center gap-3"><div className="w-8 h-8 rounded-full grid place-items-center text-white font-bold text-xs" style={{background:"linear-gradient(135deg,#4F46E5,#EC4899)"}}>{c.name.split(" ").map(s=>s[0]).join("").slice(0,2)}</div><span className="font-medium">{c.name}</span></div></td>
-              <td className="text-slate-500 text-xs font-mono">{c.email}</td>
-              <td>{c.orders}</td>
-              <td className="font-mono font-bold text-indigo-600">{moneyCents(c.revenue)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table></div></div>
-    </div>
-  );
-}
-
 /* ------------------------------- Analytics -------------------------------- */
 function Analytics() {
   const [data, setData] = useState(null);

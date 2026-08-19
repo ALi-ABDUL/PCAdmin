@@ -18,6 +18,17 @@ Light, modern theme.
   `category_performance` (revenue+profit+margin per category), `best_margin_products`
   (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
 
+### Profit / pricing calculator (2026-02-19)
+- **Pricing rule**: `sell = eBay × 1.20 + $20` (20% margin + $20 minimum profit floor).
+  `profit = sell − eBay`.
+- Backend helper `calc_pricing(ebay_price, margin_pct, min_profit)` + endpoint
+  `GET /api/pricing/calc?ebay_price=…` for on-demand manual calls.
+- `POST /api/products/from-item/{id}` now uses the rule (dropped the old 25% markup).
+- **Product Sourcing card**: 3-tile inline pricing (eBay / Sell / Profit).
+- **All Products table**: added three right-aligned columns — eBay / Sell / Profit.
+- **Dashboard "Profit calculator" widget**: manual eBay-price input → live eBay / Sell /
+  Profit + ROI %. Positioned right after the KPI rows for immediate visibility.
+
 ## Features implemented (through 2026-02-19)
 ### Automatic category detection (2026-02-19)
 - `scraper.py` now extracts eBay's own category breadcrumb from JSON-LD `BreadcrumbList`

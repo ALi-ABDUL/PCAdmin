@@ -35,6 +35,15 @@ const moneyCents = (n) => (n == null ? "—" : new Intl.NumberFormat("en-AU", { 
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" }); } catch { return iso; } };
 const fmtDay = (iso) => { try { return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short" }); } catch { return iso; } };
 
+// Pricing rule: sell = eBay * 1.20 + $20; profit = sell - eBay.
+const PRICING = { marginPct: 20, minProfit: 20 };
+const calcPricing = (ebayPrice) => {
+  const ebay = Number(ebayPrice) || 0;
+  if (ebay <= 0) return { ebay: 0, sell: 0, profit: 0 };
+  const sell = Math.round((ebay * (1 + PRICING.marginPct / 100) + PRICING.minProfit) * 100) / 100;
+  return { ebay, sell, profit: Math.round((sell - ebay) * 100) / 100 };
+};
+
 const ORDERS_NAV = [
   { id: "all",       label: "All Orders",         icon: ClipboardList, group: "Orders" },
   { id: "returns",   label: "Returns & Refunds",  icon: Undo2,         group: "Orders" },
@@ -1652,6 +1661,63 @@ function StoreManagement({ section, setSection }) {
 }
 
 /* ------------------------------- Dashboard -------------------------------- */
+function ProfitCalculator() {
+  const [ebay, setEbay] = useState("");
+  const num = parseFloat(ebay);
+  const valid = !isNaN(num) && num > 0;
+  const c = valid ? calcPricing(num) : { ebay: 0, sell: 0, profit: 0 };
+  const roi = valid ? (c.profit / num) * 100 : 0;
+
+  return (
+    <div className="card p-5" data-testid="profit-calculator">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <div className="w-9 h-9 grid place-items-center rounded-lg text-white" style={{ background: "linear-gradient(135deg,#4F46E5,#EC4899)" }}><Calculator size={16}/></div>
+          <div>
+            <div className="font-display font-bold text-lg">Profit calculator</div>
+            <div className="text-xs text-slate-500 font-mono">Sell = eBay × 1.20 + $20  ·  Profit = Sell − eBay</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-stretch">
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Enter eBay price (AUD)</span>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-sm">$</span>
+            <input
+              data-testid="pcalc-input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={ebay}
+              onChange={(e) => setEbay(e.target.value)}
+              placeholder="0.00"
+              className="input pl-7 pr-3 py-2 w-full text-lg font-mono font-bold"
+            />
+          </div>
+        </label>
+
+        <div className="rounded-lg bg-slate-50 border hairline p-3 flex flex-col justify-center">
+          <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">eBay price</div>
+          <div className="font-display text-2xl font-bold text-slate-800 mt-1" data-testid="pcalc-ebay">{valid ? moneyCents(c.ebay) : "—"}</div>
+        </div>
+
+        <div className="rounded-lg bg-indigo-50 border border-indigo-100 p-3 flex flex-col justify-center">
+          <div className="text-[10px] font-mono uppercase tracking-widest text-indigo-500">Suggested sell price</div>
+          <div className="font-display text-2xl font-bold text-indigo-700 mt-1" data-testid="pcalc-sell">{valid ? moneyCents(c.sell) : "—"}</div>
+        </div>
+
+        <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 flex flex-col justify-center">
+          <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-600">Expected profit</div>
+          <div className="font-display text-2xl font-bold text-emerald-700 mt-1" data-testid="pcalc-profit">{valid ? moneyCents(c.profit) : "—"}</div>
+          {valid && <div className="text-[11px] font-mono text-emerald-600/70 mt-0.5">{roi.toFixed(1)}% ROI</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1719,6 +1785,9 @@ function Dashboard() {
           </div>
         ))}
       </div>
+
+      {/* Profit calculator */}
+      <ProfitCalculator/>
 
       {/* Revenue chart + category donut */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -1903,12 +1972,15 @@ function Products() {
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tbl">
-            <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Price</th><th>Stock</th><th>Sold</th><th></th></tr></thead>
+            <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th className="text-right">eBay</th><th className="text-right">Sell</th><th className="text-right">Profit</th><th className="text-right">Stock</th><th className="text-right">Sold</th><th></th></tr></thead>
             <tbody>
               {list.length === 0
-                ? <tr><td colSpan={7} className="text-center py-10 text-slate-500">No products yet. Head to <b>Product Sourcing</b> and import your first one.</td></tr>
+                ? <tr><td colSpan={9} className="text-center py-10 text-slate-500">No products yet. Head to <b>Product Sourcing</b> and import your first one.</td></tr>
                 : list.map((p) => {
                     const c = catByslug(p.category);
+                    const ebay = Number(p.cost) || 0;
+                    const sell = Number(p.price) || 0;
+                    const profit = ebay > 0 ? Math.round((sell - ebay) * 100) / 100 : 0;
                     return (
                   <tr key={p.id} data-testid="product-row" className={p.is_sold || !p.active ? "opacity-50" : ""}>
                     <td>
@@ -1930,9 +2002,11 @@ function Products() {
                         </span>
                       ) : <span className="chip chip-neutral capitalize">{p.category || "—"}</span>}
                     </td>
-                    <td className="font-mono font-bold text-indigo-600">{moneyCents(p.price)}</td>
-                    <td className={p.stock <= 3 ? "text-red-600 font-bold" : "text-slate-700"}>{p.stock}</td>
-                    <td>{p.sold_count || 0}</td>
+                    <td className="text-right font-mono text-slate-500">{ebay > 0 ? moneyCents(ebay) : "—"}</td>
+                    <td className="text-right font-mono font-bold text-indigo-600">{moneyCents(sell)}</td>
+                    <td className="text-right font-mono font-bold text-emerald-600">{ebay > 0 ? moneyCents(profit) : "—"}</td>
+                    <td className={`text-right ${p.stock <= 3 ? "text-red-600 font-bold" : "text-slate-700"}`}>{p.stock}</td>
+                    <td className="text-right">{p.sold_count || 0}</td>
                     <td>
                       <div className="flex items-center gap-1 justify-end">
                         <button onClick={() => setEditing(p)} className="btn btn-ghost text-xs !py-1 !px-2">Edit</button>
@@ -2300,6 +2374,25 @@ function ScraperPage({ onView }) {
                     <span className="font-mono text-lg font-bold text-indigo-600">{it.price_display || "—"}</span>
                     {it.condition && <span className="chip chip-neutral">{it.condition.split(" ").slice(0, 2).join(" ")}</span>}
                   </div>
+                  {(() => {
+                    const c = calcPricing(it.price_value);
+                    return c.ebay > 0 && (
+                      <div className="mt-2 grid grid-cols-3 gap-1 text-[10px] font-mono" data-testid="scraped-card-pricing">
+                        <div className="rounded-md bg-slate-50 border hairline p-1.5">
+                          <div className="text-slate-400 uppercase tracking-widest text-[9px]">eBay</div>
+                          <div className="text-slate-700 font-bold">${c.ebay.toFixed(2)}</div>
+                        </div>
+                        <div className="rounded-md bg-indigo-50 border border-indigo-100 p-1.5">
+                          <div className="text-indigo-500 uppercase tracking-widest text-[9px]">Sell</div>
+                          <div className="text-indigo-700 font-bold">${c.sell.toFixed(2)}</div>
+                        </div>
+                        <div className="rounded-md bg-emerald-50 border border-emerald-100 p-1.5">
+                          <div className="text-emerald-600 uppercase tracking-widest text-[9px]">Profit</div>
+                          <div className="text-emerald-700 font-bold">${c.profit.toFixed(2)}</div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                     {it.category && <span className="chip chip-primary text-[10px]" data-testid="scraped-card-category" title={(it.ebay_category_path || []).join(" › ")}><Tags size={10}/> {it.category}</span>}
                   </div>

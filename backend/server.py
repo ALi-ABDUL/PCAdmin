@@ -1298,16 +1298,31 @@ def _guess_category(
     return hit or "other"
 
 
+def calc_pricing(ebay_price: float, margin_pct: float = 20.0, min_profit: float = 20.0) -> dict:
+    """Sell rule: sell = ebay * (1 + margin_pct/100) + min_profit. Profit = sell - ebay."""
+    ebay = round(float(ebay_price or 0), 2)
+    sell = round(ebay * (1 + margin_pct / 100.0) + min_profit, 2) if ebay > 0 else 0.0
+    profit = round(sell - ebay, 2)
+    return {"ebay_price": ebay, "sell_price": sell, "profit": profit,
+            "margin_pct": margin_pct, "min_profit": min_profit}
+
+
+@api_router.get("/pricing/calc")
+async def pricing_calc(ebay_price: float, margin_pct: float = 20.0, min_profit: float = 20.0):
+    """Manual profit calculator: given an eBay price, return the suggested sell price + profit."""
+    return calc_pricing(ebay_price, margin_pct, min_profit)
+
+
 @api_router.post("/products/from-item/{item_id}")
-async def create_product_from_item(item_id: str, markup_pct: float = 25.0):
+async def create_product_from_item(item_id: str):
     it = await db.items.find_one({"id": item_id}, {"_id": 0})
     if not it:
         raise HTTPException(status_code=404, detail="Scraped item not found")
     cost = it.get("price_value") or 0.0
-    price = round(cost * (1 + markup_pct / 100.0), 2) if cost else 0.0
+    pricing = calc_pricing(cost)
     prod = Product(
         title=it.get("title") or "Untitled",
-        price=price,
+        price=pricing["sell_price"],
         cost=cost,
         stock=10,
         category=it.get("category") or _guess_category(

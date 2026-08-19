@@ -1454,6 +1454,97 @@ async def analytics_overview():
     }
 
 
+@api_router.get("/analytics/report")
+async def analytics_report():
+    """Deeper reporting: top sellers, margin trend, category perf, best margin products."""
+    now = datetime.now(timezone.utc)
+    d30 = (now - timedelta(days=30)).isoformat()
+
+    # --- Top 5 suppliers by revenue_generated (reuses seller derivation)
+    sellers = await _build_sellers()
+    top_suppliers = sorted(sellers, key=lambda s: -s["revenue_generated"])[:5]
+
+    # --- Margin trend over last 30 days (per-day margin %)
+    daily_pipeline = [
+        {"$match": {"status": {"$ne": "cancelled"}, "created_at": {"$gte": d30}}},
+        {"$addFields": {"day": {"$substr": ["$created_at", 0, 10]}}},
+        {"$group": {"_id": "$day",
+                    "revenue": {"$sum": "$total"},
+                    "profit":  {"$sum": "$profit"},
+                    "orders":  {"$sum": 1}}},
+        {"$sort": {"_id": 1}},
+    ]
+    daily_raw = await db.orders.aggregate(daily_pipeline).to_list(100)
+    day_map = {d["_id"]: d for d in daily_raw}
+    margin_trend = []
+    for i in range(29, -1, -1):
+        day = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        d = day_map.get(day, {"revenue": 0, "profit": 0, "orders": 0})
+        rev = d.get("revenue", 0) or 0
+        prof = d.get("profit", 0) or 0
+        margin_pct = round((prof / rev) * 100, 2) if rev > 0 else 0.0
+        margin_trend.append({
+            "day": day,
+            "margin_pct": margin_pct,
+            "revenue": round(rev, 2),
+            "profit": round(prof, 2),
+        })
+
+    # --- Category performance: revenue + profit per category
+    cat_pipeline = [
+        {"$lookup": {"from": "products", "localField": "product_id",
+                     "foreignField": "id", "as": "p"}},
+        {"$unwind": "$p"},
+        {"$match": {"status": {"$ne": "cancelled"}}},
+        {"$group": {"_id": "$p.category",
+                    "revenue": {"$sum": "$total"},
+                    "profit":  {"$sum": "$profit"},
+                    "units":   {"$sum": "$quantity"}}},
+        {"$sort": {"revenue": -1}},
+    ]
+    cat_raw = await db.orders.aggregate(cat_pipeline).to_list(50)
+    category_performance = []
+    for c in cat_raw:
+        rev = c.get("revenue", 0) or 0
+        prof = c.get("profit", 0) or 0
+        category_performance.append({
+            "category": c["_id"] or "other",
+            "revenue": round(rev, 2),
+            "profit": round(prof, 2),
+            "margin_pct": round((prof / rev) * 100, 2) if rev > 0 else 0.0,
+            "units": c.get("units", 0),
+        })
+
+    # --- Best margin products (need sold_count > 0 and price > 0)
+    products = await db.products.find(
+        {"sold_count": {"$gt": 0}, "price": {"$gt": 0}}, {"_id": 0}
+    ).to_list(1000)
+    best_margin = []
+    for p in products:
+        price = float(p.get("price") or 0)
+        cost = float(p.get("cost") or 0)
+        if price <= 0:
+            continue
+        margin_pct = round(((price - cost) / price) * 100, 2)
+        best_margin.append({
+            "product_id": p.get("id"),
+            "title": p.get("title"),
+            "buy_price": round(cost, 2),
+            "sell_price": round(price, 2),
+            "margin_pct": margin_pct,
+            "units_sold": int(p.get("sold_count") or 0),
+        })
+    best_margin.sort(key=lambda x: -x["margin_pct"])
+    best_margin = best_margin[:20]
+
+    return {
+        "top_suppliers": top_suppliers,
+        "margin_trend": margin_trend,
+        "category_performance": category_performance,
+        "best_margin_products": best_margin,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Demo seed - creates realistic-looking orders for products so analytics is populated
 # ---------------------------------------------------------------------------

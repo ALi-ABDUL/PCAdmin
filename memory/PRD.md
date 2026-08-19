@@ -12,6 +12,12 @@ Light, modern theme.
 - Frontend: React 19 + Tailwind + Framer Motion + Recharts + Sonner. Light theme
   (#F7F7FB background, indigo/pink accents, Outfit/Inter/JetBrains Mono fonts).
 
+### Backend endpoints
+- `GET /api/analytics/report` (2026-02-19) — supplies the new Reporting page:
+  `top_suppliers` (top 5 by revenue), `margin_trend` (30 days with margin %),
+  `category_performance` (revenue+profit+margin per category), `best_margin_products`
+  (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
+
 ## Features implemented (through 2026-02-19)
 ### Scraper
 - eBay AU scraper with curl_cffi Chrome TLS impersonation, warm-up cookies, rotating UAs,

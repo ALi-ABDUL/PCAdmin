@@ -65,15 +65,10 @@ const TRANSACTION_STATUS_TABS = [
 ];
 
 const SUPPLIER_NAV = [
-  { id: "create",       label: "Create Supplier",      icon: UserPlus,       group: "Manage" },
-  { id: "import",       label: "Import Suppliers",     icon: Upload,         group: "Manage" },
   { id: "all",          label: "All Suppliers",        icon: List,           group: "Directory" },
   { id: "top",          label: "Top Suppliers",        icon: Award,          group: "Directory" },
-  { id: "quality",      label: "Quality Suppliers",    icon: BadgeCheck,     group: "Directory" },
   { id: "products",     label: "Supplier Products",    icon: PackageSearch,  group: "Sourcing" },
   { id: "orders",       label: "Supplier Orders",      icon: ClipboardList,  group: "Sourcing" },
-  { id: "pricing",      label: "Supplier Pricing",     icon: Percent,        group: "Sourcing" },
-  { id: "performance",  label: "Supplier Performance", icon: LineChartIcon,  group: "Insights" },
   { id: "activity",     label: "Supplier Activity",    icon: History,        group: "Insights" },
 ];
 
@@ -99,25 +94,10 @@ const CUSTOMER_NAV = [
 ];
 
 const PRODUCT_NAV = [
-  { id: "create",         label: "Create Product",     icon: PackagePlus,     group: "Manage" },
-  { id: "all",            label: "All Products",       icon: Package,         group: "Manage" },
-  { id: "editing",        label: "Product editing",    icon: Layers,          group: "Manage" },
-  { id: "images",         label: "Product images",     icon: ImageLucide,     group: "Manage" },
-  { id: "categories",     label: "Categories",         icon: Tags,            group: "Taxonomy" },
-  { id: "subcategories",  label: "Subcategories",      icon: GitBranch,       group: "Taxonomy" },
-  { id: "brands",         label: "Brands",             icon: BadgeCheck,      group: "Taxonomy" },
-  { id: "variants",       label: "Product variants",   icon: Layers,          group: "Taxonomy" },
-  { id: "pricing",        label: "Pricing",            icon: DollarSign,      group: "Pricing" },
-  { id: "profit",         label: "Profit calculation", icon: Calculator,      group: "Pricing" },
-  { id: "inventory",      label: "Inventory",          icon: Warehouse,       group: "Inventory" },
-  { id: "opening-stock",  label: "Opening Stock",      icon: BoxesIcon,       group: "Inventory" },
-  { id: "stock-count",    label: "Stock Count",        icon: ClipboardCheck,  group: "Inventory" },
-  { id: "adjustments",    label: "Stock Adjustments",  icon: Activity,        group: "Inventory" },
+  { id: "all",            label: "All Products",       icon: Package,         group: "Catalog" },
   { id: "low-stock",      label: "Low Stock",          icon: PackageMinus,    group: "Inventory" },
   { id: "out-of-stock",   label: "Out of Stock",       icon: PackageX,        group: "Inventory" },
-  { id: "stock-history",  label: "Stock History",      icon: History,         group: "Inventory" },
-  { id: "reviews",        label: "Product Reviews",    icon: StarIcon,        group: "Content" },
-  { id: "coupons",        label: "Coupons",            icon: Ticket,          group: "Content" },
+  { id: "price-alerts",   label: "Price Alerts",       icon: TrendingDownIcon, group: "Insights" },
 ];
 
 /* --------------------------- Store Management nav ------------------------- */
@@ -444,23 +424,34 @@ function TopHeader({ tab, storeSection, supplierSection, customerSection, produc
 
 /* ------------------------------- Suppliers -------------------------------- */
 function Suppliers({ section, setSection }) {
-  const [list, setList] = useState([]); const [total, setTotal] = useState(0);
-  const [tags, setTags] = useState([]);
+  const [list, setList] = useState([]);
+  const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
-  const [q, setQ] = useState(""); const [sort, setSort] = useState("created_at_desc"); const [tag, setTag] = useState("");
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("revenue_desc");
+  const [status, setStatus] = useState("");
 
   const load = useCallback(async () => {
-    const { data } = await axios.get(`${API}/suppliers`, { params: { q: q || undefined, tag: tag || undefined, sort }});
-    setList(data.suppliers); setTotal(data.total); setTags(data.tags);
-  }, [q, tag, sort]);
+    const { data } = await axios.get(`${API}/suppliers`, { params: { q: q || undefined, status: status || undefined, sort } });
+    setList(data.suppliers);
+    setTotal(data.total);
+  }, [q, status, sort]);
   const loadSummary = useCallback(async () => {
-    const { data } = await axios.get(`${API}/suppliers/summary`); setSummary(data);
+    const { data } = await axios.get(`${API}/suppliers/summary`);
+    setSummary(data);
   }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadSummary(); }, [loadSummary, list.length]);
 
   const meta = SUPPLIER_NAV.find((s) => s.id === section) || SUPPLIER_NAV[0];
   const Icon = meta.icon;
+  const descriptions = {
+    all:      "Every eBay AU seller you have imported items from, with live product, order and revenue stats.",
+    top:      "Top 5 sellers ranked by revenue generated from their imported items.",
+    products: "Products sourced through each eBay seller.",
+    orders:   "Orders fulfilled from products sourced via each seller.",
+    activity: "Recent seller activity, driven by scrape / refresh times.",
+  };
 
   return (
     <div className="grid gap-6">
@@ -469,166 +460,79 @@ function Suppliers({ section, setSection }) {
         <div className="min-w-0 flex-1">
           <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500">{meta.group}</div>
           <div className="font-display text-2xl font-bold tracking-tight">{meta.label}</div>
-          <div className="text-sm text-slate-500 mt-1">{
-            {
-              create: "Onboard a new supplier with contact, terms and lead time.",
-              import: "Bulk-import suppliers from CSV or JSON.",
-              all: "Every supplier in your directory. Filter, sort and edit inline.",
-              top: "Your best suppliers ranked by spend.",
-              quality: "Suppliers with quality score ≥ 85.",
-              products: "Products sourced through each supplier.",
-              orders: "Purchase orders sent to each supplier.",
-              pricing: "Supplier cost prices, MOQ and price breaks.",
-              performance: "On-time delivery, quality and rating trends.",
-              activity: "Recent activity log across every supplier.",
-            }[section]
-          }</div>
+          <div className="text-sm text-slate-500 mt-1">{descriptions[section]}</div>
         </div>
       </div>
 
-      {section === "create"      && <CreateSupplier onCreated={() => { load(); setSection("all"); }} />}
-      {section === "import"      && <ImportSuppliers onImported={() => { load(); setSection("all"); }} />}
-      {section === "all"         && <AllSuppliers list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} tag={tag} setTag={setTag} tags={tags} onChanged={load}/>}
-      {section === "top"         && <TopSuppliers list={summary?.top_suppliers || []} agg={summary?.aggregate}/>}
-      {section === "quality"     && <QualitySuppliers list={summary?.quality_suppliers || []}/>}
-      {section === "products"    && <SupplierProducts list={list}/>}
-      {section === "orders"      && <SupplierOrders list={list}/>}
-      {section === "pricing"     && <SupplierPricing list={list}/>}
-      {section === "performance" && <SupplierPerformance list={list}/>}
-      {section === "activity"    && <SupplierActivity list={list}/>}
+      {section === "all"      && <AllSuppliers list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} status={status} setStatus={setStatus}/>}
+      {section === "top"      && <TopSuppliers list={summary?.top_suppliers || []} agg={summary?.aggregate}/>}
+      {section === "products" && <SupplierProducts list={list}/>}
+      {section === "orders"   && <SupplierOrders list={list}/>}
+      {section === "activity" && <SupplierActivity list={list}/>}
     </div>
   );
 }
 
 function SupplierAvatar({ s, size = 40 }) {
-  const initials = (s.name || "").split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
+  const initials = (s.name || "").replace(/\(.*\)/, "").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   return <div className="rounded-full grid place-items-center text-white font-bold shrink-0" style={{ width: size, height: size, background: "linear-gradient(135deg,#4F46E5,#EC4899)", fontSize: size * 0.36 }}>{initials || "S"}</div>;
 }
 
-function CreateSupplier({ onCreated }) {
-  const empty = { name: "", contact_name: "", email: "", phone: "", website: "", country: "Australia", state: "", city: "", address: "", lead_time_days: 7, payment_terms: "Net 30", currency: "AUD", rating: 4, notes: "", tags: [], active: true };
-  const [f, setF] = useState(empty);
-  const [saving, setSaving] = useState(false);
-  const save = async () => {
-    if (!f.name.trim()) return toast.error("Supplier name is required");
-    setSaving(true);
-    try {
-      await axios.post(`${API}/suppliers`, { ...f, tags: typeof f.tags === "string" ? f.tags.split(",").map(t => t.trim()).filter(Boolean) : f.tags });
-      toast.success("Supplier created"); setF(empty); onCreated();
-    } catch (e) { toast.error("Create failed", { description: e?.response?.data?.detail?.slice(0,200) || e.message }); }
-    finally { setSaving(false); }
-  };
-  const tagsStr = Array.isArray(f.tags) ? f.tags.join(", ") : (f.tags || "");
-  return (
-    <div className="card p-6">
-      <div className="font-display font-bold text-lg mb-4">Supplier details</div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Field label="Supplier name *"><input className="input px-3 py-2 w-full" value={f.name} onChange={(e)=>setF({...f, name:e.target.value})} data-testid="sup-name"/></Field>
-        <Field label="Contact name"><input className="input px-3 py-2 w-full" value={f.contact_name} onChange={(e)=>setF({...f, contact_name:e.target.value})}/></Field>
-        <Field label="Email"><input type="email" className="input px-3 py-2 w-full" value={f.email} onChange={(e)=>setF({...f, email:e.target.value})}/></Field>
-        <Field label="Phone"><input className="input px-3 py-2 w-full" value={f.phone} onChange={(e)=>setF({...f, phone:e.target.value})}/></Field>
-        <Field label="Website"><input className="input px-3 py-2 w-full" value={f.website} onChange={(e)=>setF({...f, website:e.target.value})}/></Field>
-        <Field label="Country"><input className="input px-3 py-2 w-full" value={f.country} onChange={(e)=>setF({...f, country:e.target.value})}/></Field>
-        <Field label="State">
-          <select className="input px-3 py-2 w-full" value={f.state} onChange={(e)=>setF({...f, state:e.target.value})}>
-            <option value="">—</option>{["NSW","VIC","QLD","WA","SA","TAS","ACT","NT"].map(s=><option key={s}>{s}</option>)}
-          </select>
-        </Field>
-        <Field label="City"><input className="input px-3 py-2 w-full" value={f.city} onChange={(e)=>setF({...f, city:e.target.value})}/></Field>
-        <Field label="Address" className="md:col-span-2"><input className="input px-3 py-2 w-full" value={f.address} onChange={(e)=>setF({...f, address:e.target.value})}/></Field>
-        <Field label="Lead time (days)"><input type="number" className="input px-3 py-2 w-full font-mono" value={f.lead_time_days} onChange={(e)=>setF({...f, lead_time_days: Number(e.target.value)})}/></Field>
-        <Field label="Payment terms">
-          <select className="input px-3 py-2 w-full" value={f.payment_terms} onChange={(e)=>setF({...f, payment_terms:e.target.value})}>
-            {["Prepaid","Net 7","Net 14","Net 30","Net 60","Net 90"].map(t=><option key={t}>{t}</option>)}
-          </select>
-        </Field>
-        <Field label="Currency"><input className="input px-3 py-2 w-full font-mono" value={f.currency} onChange={(e)=>setF({...f, currency:e.target.value})}/></Field>
-        <Field label="Rating (1–5)"><input type="number" step="0.1" min="1" max="5" className="input px-3 py-2 w-full font-mono" value={f.rating} onChange={(e)=>setF({...f, rating: Number(e.target.value)})}/></Field>
-        <Field label="Tags (comma separated)" className="md:col-span-2"><input className="input px-3 py-2 w-full" placeholder="electronics, priority" value={tagsStr} onChange={(e)=>setF({...f, tags: e.target.value})}/></Field>
-        <Field label="Notes" className="md:col-span-2"><textarea className="input px-3 py-2 w-full h-24" value={f.notes} onChange={(e)=>setF({...f, notes:e.target.value})}/></Field>
-      </div>
-      <div className="mt-5 flex justify-end gap-2">
-        <button onClick={() => setF(empty)} className="btn btn-ghost">Reset</button>
-        <button disabled={saving} onClick={save} className="btn btn-primary" data-testid="sup-create-btn">{saving ? <Loader2 className="animate-spin" size={14}/> : <Plus size={14}/>} Create supplier</button>
-      </div>
-    </div>
-  );
+function SellerStatusChip({ status }) {
+  const active = status === "active";
+  return <span className={`chip ${active ? "chip-success" : "chip-neutral"}`} data-testid="sup-status">{active ? <BadgeCheck size={11}/> : <Ban size={11}/>} {active ? "Active" : "Inactive"}</span>;
 }
 
-function ImportSuppliers({ onImported }) {
-  const [text, setText] = useState(`[
-  { "name": "Example Supplier", "contact_name": "Alex Doe", "email": "alex@example.com", "phone": "+61 3 1234 5678", "state": "VIC", "city": "Melbourne", "lead_time_days": 7, "payment_terms": "Net 30", "rating": 4.2, "tags": ["electronics"] }
-]`);
-  const [busy, setBusy] = useState(false);
-  const doImport = async () => {
-    setBusy(true);
-    try {
-      const parsed = JSON.parse(text);
-      const arr = Array.isArray(parsed) ? parsed : [parsed];
-      const { data } = await axios.post(`${API}/suppliers/import`, { suppliers: arr });
-      toast.success(`Imported ${data.imported} supplier${data.imported === 1 ? "" : "s"}`); onImported();
-    } catch (e) { toast.error("Import failed", { description: (e?.message || "").slice(0, 200) }); }
-    finally { setBusy(false); }
-  };
-  return (
-    <div className="card p-6">
-      <div className="font-display font-bold text-lg mb-1">Bulk import (JSON)</div>
-      <div className="text-xs text-slate-500 mb-4">Paste a JSON array of suppliers. Each object must have at least a <span className="font-mono">name</span> field.</div>
-      <textarea value={text} onChange={(e)=>setText(e.target.value)} className="input px-3 py-2 w-full font-mono text-xs" style={{ height: 260 }}/>
-      <div className="mt-4 flex justify-end gap-2">
-        <button disabled={busy} onClick={doImport} className="btn btn-primary" data-testid="sup-import-btn">{busy ? <Loader2 className="animate-spin" size={14}/> : <Upload size={14}/>} Import suppliers</button>
-      </div>
-    </div>
-  );
-}
-
-function AllSuppliers({ list, total, q, setQ, sort, setSort, tag, setTag, tags, onChanged }) {
-  const del = async (s) => { if (!window.confirm(`Delete "${s.name}"?`)) return; await axios.delete(`${API}/suppliers/${s.id}`); toast.success("Deleted"); onChanged(); };
-  const toggle = async (s) => { await axios.patch(`${API}/suppliers/${s.id}`, { active: !s.active }); onChanged(); };
+function AllSuppliers({ list, total, q, setQ, sort, setSort, status, setStatus }) {
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="text-sm text-slate-500 font-mono">{total} supplier{total===1?"":"s"}</div>
+        <div className="text-sm text-slate-500 font-mono">{total} seller{total===1?"":"s"}</div>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={q} onChange={(e)=>setQ(e.target.value)} data-testid="sup-search" placeholder="Search name / email / code" className="input pl-9 pr-3 py-2 text-sm w-64"/></div>
-          <select value={tag} onChange={(e)=>setTag(e.target.value)} className="input px-3 py-2 text-sm">
-            <option value="">All tags</option>{tags.map(t=><option key={t}>{t}</option>)}
+          <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={q} onChange={(e)=>setQ(e.target.value)} data-testid="sup-search" placeholder="Search seller or location" className="input pl-9 pr-3 py-2 text-sm w-64"/></div>
+          <select value={status} onChange={(e)=>setStatus(e.target.value)} className="input px-3 py-2 text-sm" data-testid="sup-status-filter">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
           </select>
-          <select value={sort} onChange={(e)=>setSort(e.target.value)} className="input px-3 py-2 text-sm">
-            <option value="created_at_desc">Newest</option>
-            <option value="name_asc">Name A→Z</option>
-            <option value="rating_desc">Rating ↓</option>
-            <option value="spend_desc">Spend ↓</option>
-            <option value="on_time_desc">On-time ↓</option>
-            <option value="quality_desc">Quality ↓</option>
+          <select value={sort} onChange={(e)=>setSort(e.target.value)} className="input px-3 py-2 text-sm" data-testid="sup-sort">
+            <option value="revenue_desc">Revenue ↓</option>
+            <option value="orders_desc">Total orders ↓</option>
+            <option value="products_desc">Total products ↓</option>
+            <option value="last_active_desc">Last active ↓</option>
+            <option value="name_asc">Seller A→Z</option>
           </select>
         </div>
       </div>
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tbl">
-            <thead><tr><th>Supplier</th><th>Code</th><th>Location</th><th>Lead</th><th>Terms</th><th>Rating</th><th>Spend</th><th>Status</th><th></th></tr></thead>
+            <thead><tr>
+              <th>Seller Name</th>
+              <th className="text-right">Total Products</th>
+              <th className="text-right">Total Orders</th>
+              <th className="text-right">Revenue Generated</th>
+              <th>Last Active</th>
+              <th>Status</th>
+            </tr></thead>
             <tbody>
-              {list.length === 0 && <tr><td colSpan={9} className="text-center py-10 text-slate-500">No suppliers yet</td></tr>}
+              {list.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-500">No eBay sellers yet — import a listing on the eBay Scraper page.</td></tr>}
               {list.map((s) => (
-                <tr key={s.id} className={!s.active ? "opacity-50" : ""} data-testid="sup-row">
+                <tr key={s.id} className={s.status === "inactive" ? "opacity-60" : ""} data-testid="sup-row">
                   <td>
                     <div className="flex items-center gap-3 min-w-0">
                       <SupplierAvatar s={s} size={36}/>
                       <div className="min-w-0">
-                        <div className="font-medium text-sm truncate max-w-[240px]">{s.name}</div>
-                        <div className="text-[11px] text-slate-400 truncate">{s.contact_name || "—"} · {s.email || "—"}</div>
+                        <div className="font-medium text-sm truncate max-w-[280px]">{s.name}</div>
+                        <div className="text-[11px] text-slate-400 truncate">{s.location}</div>
                       </div>
                     </div>
                   </td>
-                  <td className="font-mono text-xs text-slate-500">{s.code}</td>
-                  <td className="text-sm text-slate-600">{[s.city, s.state, s.country].filter(Boolean).join(", ")}</td>
-                  <td className="font-mono text-sm">{s.lead_time_days}d</td>
-                  <td className="text-xs">{s.payment_terms}</td>
-                  <td><div className="flex items-center gap-1 text-amber-500"><StarIcon size={12} fill="currentColor"/> <span className="text-slate-700 font-mono">{s.rating?.toFixed?.(1) ?? s.rating}</span></div></td>
-                  <td className="font-mono font-bold text-indigo-600">{moneyCents(s.total_spend)}</td>
-                  <td><label className="flex items-center gap-1.5 text-[11px] font-mono uppercase text-slate-500 cursor-pointer"><input type="checkbox" checked={s.active} onChange={()=>toggle(s)} className="accent-indigo-600 w-3.5 h-3.5"/>Active</label></td>
-                  <td><div className="flex items-center gap-1 justify-end"><button onClick={()=>del(s)} className="btn btn-danger text-xs !py-1 !px-2"><Trash2 size={12}/></button></div></td>
+                  <td className="text-right font-mono">{s.total_products}</td>
+                  <td className="text-right font-mono">{s.total_orders}</td>
+                  <td className="text-right font-mono font-bold text-indigo-600">{moneyCents(s.revenue_generated)}</td>
+                  <td className="text-xs text-slate-500 font-mono">{s.last_active ? fmtDate(s.last_active) : "—"}</td>
+                  <td><SellerStatusChip status={s.status}/></td>
                 </tr>
               ))}
             </tbody>
@@ -642,57 +546,31 @@ function AllSuppliers({ list, total, q, setQ, sort, setSort, tag, setTag, tags, 
 function TopSuppliers({ list, agg }) {
   return (
     <div className="grid gap-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatBox label="Total spend" value={moneyCents(agg?.total_spend || 0)}/>
-        <StatBox label="Avg rating" value={`${agg?.avg_rating ?? "—"} / 5`} tone="success"/>
-        <StatBox label="Avg on-time" value={`${agg?.avg_on_time ?? "—"}%`}/>
-        <StatBox label="Avg quality" value={`${agg?.avg_quality ?? "—"}%`}/>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <StatBox label="Total revenue"  value={moneyCents(agg?.total_revenue || 0)} tone="success"/>
+        <StatBox label="Total orders"   value={agg?.total_orders ?? 0}/>
+        <StatBox label="Total products" value={agg?.total_products ?? 0}/>
       </div>
       <div className="card overflow-hidden">
-        <div className="p-4 border-b hairline font-display font-bold">Top 5 by spend</div>
+        <div className="p-4 border-b hairline font-display font-bold">Top 5 by revenue</div>
         <div className="p-3">
-          {list.length === 0 && <div className="text-sm text-slate-500 py-6 text-center">No suppliers yet</div>}
+          {list.length === 0 && <div className="text-sm text-slate-500 py-6 text-center">No eBay sellers yet</div>}
           {list.map((s, i) => (
             <div key={s.id} className="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-lg">
               <div className="w-8 h-8 grid place-items-center rounded-md font-display font-bold text-white text-xs" style={{ background: `linear-gradient(135deg,#4F46E5,#EC4899)`, opacity: 1 - i*0.12 }}>{i + 1}</div>
               <SupplierAvatar s={s} size={32}/>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium truncate">{s.name}</div>
-                <div className="text-xs text-slate-500">{s.orders_count} orders · {s.products_count} products</div>
+                <div className="text-xs text-slate-500">{s.total_orders} orders · {s.total_products} products</div>
               </div>
               <div className="text-right shrink-0">
-                <div className="font-mono font-bold text-indigo-600 text-sm">{moneyCents(s.total_spend)}</div>
-                <div className="text-[11px] text-slate-400">{s.on_time_rate}% on-time</div>
+                <div className="font-mono font-bold text-indigo-600 text-sm">{moneyCents(s.revenue_generated)}</div>
+                <div className="text-[11px] text-slate-400">{s.location}</div>
               </div>
             </div>
           ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-function QualitySuppliers({ list }) {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-      {list.length === 0 && <div className="col-span-full card p-10 text-center text-slate-500">No suppliers meet the 85% quality threshold yet.</div>}
-      {list.map((s) => (
-        <div key={s.id} className="card p-4">
-          <div className="flex items-center gap-3">
-            <SupplierAvatar s={s}/>
-            <div className="min-w-0 flex-1">
-              <div className="font-medium truncate">{s.name}</div>
-              <div className="text-[11px] text-slate-500 truncate">{s.contact_name}</div>
-            </div>
-            <span className="chip chip-success"><BadgeCheck size={11}/> {s.quality_score}%</span>
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-            <div><div className="text-xs text-slate-500">Rating</div><div className="font-mono font-bold text-slate-800">{s.rating.toFixed(1)}</div></div>
-            <div><div className="text-xs text-slate-500">On-time</div><div className="font-mono font-bold text-slate-800">{s.on_time_rate}%</div></div>
-            <div><div className="text-xs text-slate-500">Lead</div><div className="font-mono font-bold text-slate-800">{s.lead_time_days}d</div></div>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
@@ -701,21 +579,19 @@ function SupplierProducts({ list }) {
   return (
     <div className="card overflow-hidden">
       <div className="overflow-x-auto"><table className="tbl">
-        <thead><tr><th>Supplier</th><th>Products</th><th>Categories</th><th>Avg cost</th><th>MOQ</th></tr></thead>
+        <thead><tr><th>Seller</th><th>Location</th><th className="text-right">Total products</th><th>Status</th></tr></thead>
         <tbody>
           {list.map((s) => (
             <tr key={s.id}>
-              <td><div className="flex items-center gap-2"><SupplierAvatar s={s} size={28}/><span className="text-sm">{s.name}</span></div></td>
-              <td className="font-mono">{s.products_count}</td>
-              <td className="text-xs text-slate-500">{(s.tags || []).slice(0, 3).map(t => <span key={t} className="chip chip-neutral mr-1">{t}</span>)}</td>
-              <td className="font-mono text-slate-500">—</td>
-              <td className="font-mono text-slate-500">—</td>
+              <td><div className="flex items-center gap-2"><SupplierAvatar s={s} size={28}/><span className="text-sm truncate max-w-[260px]">{s.name}</span></div></td>
+              <td className="text-xs text-slate-500">{s.location}</td>
+              <td className="text-right font-mono">{s.total_products}</td>
+              <td><SellerStatusChip status={s.status}/></td>
             </tr>
           ))}
-          {list.length === 0 && <tr><td colSpan={5} className="text-center text-slate-500 py-10">No supplier products yet</td></tr>}
+          {list.length === 0 && <tr><td colSpan={4} className="text-center text-slate-500 py-10">No seller products yet</td></tr>}
         </tbody>
       </table></div>
-      <div className="p-4 text-xs text-slate-500 border-t hairline">Link products to suppliers to populate this view (backend endpoint ready).</div>
     </div>
   );
 }
@@ -724,105 +600,42 @@ function SupplierOrders({ list }) {
   return (
     <div className="card overflow-hidden">
       <div className="overflow-x-auto"><table className="tbl">
-        <thead><tr><th>Supplier</th><th>PO count</th><th>Total spend</th><th>Lead time</th><th>Terms</th></tr></thead>
+        <thead><tr><th>Seller</th><th className="text-right">Total orders</th><th className="text-right">Revenue</th><th>Status</th></tr></thead>
         <tbody>
           {list.map((s) => (
             <tr key={s.id}>
-              <td><div className="flex items-center gap-2"><SupplierAvatar s={s} size={28}/><span className="text-sm">{s.name}</span></div></td>
-              <td className="font-mono">{s.orders_count}</td>
-              <td className="font-mono font-bold text-indigo-600">{moneyCents(s.total_spend)}</td>
-              <td className="font-mono">{s.lead_time_days}d</td>
-              <td className="text-xs">{s.payment_terms}</td>
+              <td><div className="flex items-center gap-2"><SupplierAvatar s={s} size={28}/><span className="text-sm truncate max-w-[280px]">{s.name}</span></div></td>
+              <td className="text-right font-mono">{s.total_orders}</td>
+              <td className="text-right font-mono font-bold text-indigo-600">{moneyCents(s.revenue_generated)}</td>
+              <td><SellerStatusChip status={s.status}/></td>
             </tr>
           ))}
-          {list.length === 0 && <tr><td colSpan={5} className="text-center text-slate-500 py-10">No PO history yet</td></tr>}
+          {list.length === 0 && <tr><td colSpan={4} className="text-center text-slate-500 py-10">No orders sourced from sellers yet</td></tr>}
         </tbody>
       </table></div>
     </div>
   );
 }
 
-function SupplierPricing({ list }) {
-  return (
-    <div className="grid gap-3">
-      {list.length === 0 && <div className="card p-10 text-center text-slate-500">No pricing agreements yet</div>}
-      {list.map((s) => (
-        <div key={s.id} className="card p-4 flex items-center gap-4">
-          <SupplierAvatar s={s}/>
-          <div className="flex-1 min-w-0">
-            <div className="font-medium truncate">{s.name}</div>
-            <div className="text-xs text-slate-500 truncate">{s.currency} · {s.payment_terms} · Lead {s.lead_time_days}d</div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="chip chip-neutral">MOQ —</span>
-            <span className="chip chip-neutral">Discount tiers —</span>
-            <button className="btn btn-ghost text-xs !py-1 !px-2">Set pricing</button>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SupplierPerformance({ list }) {
-  const chartData = list.slice(0, 12).map((s) => ({ name: s.name.length > 14 ? s.name.slice(0, 12) + "…" : s.name, on_time: s.on_time_rate, quality: s.quality_score }));
-  return (
-    <div className="grid gap-4">
-      <div className="card p-5">
-        <div className="font-display font-bold mb-2">On-time vs quality</div>
-        <div className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData}>
-              <CartesianGrid stroke="#EEF0F5" strokeDasharray="3 3" vertical={false}/>
-              <XAxis dataKey="name" tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false}/>
-              <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false} width={30}/>
-              <Tooltip contentStyle={{ background: "#fff", border: "1px solid #EAEAF0", borderRadius: 10, fontSize: 12 }}/>
-              <Bar dataKey="on_time" fill="#4F46E5" radius={[4,4,0,0]}/>
-              <Bar dataKey="quality" fill="#EC4899" radius={[4,4,0,0]}/>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-        {list.map((s) => (
-          <div key={s.id} className="card p-4">
-            <div className="flex items-center gap-3"><SupplierAvatar s={s}/><div className="min-w-0 flex-1"><div className="font-medium truncate">{s.name}</div><div className="text-[11px] text-slate-500">{s.city}, {s.state}</div></div></div>
-            <div className="mt-3 space-y-2 text-xs">
-              <PerfBar label="On-time" value={s.on_time_rate} color="#4F46E5"/>
-              <PerfBar label="Quality" value={s.quality_score} color="#EC4899"/>
-              <PerfBar label="Rating"  value={(s.rating/5)*100} color="#10B981" labelValue={`${s.rating.toFixed(1)} / 5`}/>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-function PerfBar({ label, value, color, labelValue }) {
-  return (<div>
-    <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1"><span>{label}</span><span className="font-mono">{labelValue || `${value?.toFixed?.(0) ?? value}%`}</span></div>
-    <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${Math.min(100, value)}%`, background: color }}/></div>
-  </div>);
-}
-
 function SupplierActivity({ list }) {
-  const events = list.flatMap(s => ([
-    { at: s.updated_at, kind: "updated", supplier: s },
-    { at: s.created_at, kind: "created", supplier: s },
-  ])).sort((a,b) => (a.at < b.at ? 1 : -1)).slice(0, 40);
+  const events = list
+    .filter((s) => s.last_active)
+    .map((s) => ({ at: s.last_active, supplier: s }))
+    .sort((a, b) => (a.at < b.at ? 1 : -1))
+    .slice(0, 40);
   return (
     <div className="card overflow-hidden">
-      <div className="p-4 border-b hairline font-display font-bold flex items-center gap-2"><History size={16}/> Recent activity</div>
+      <div className="p-4 border-b hairline font-display font-bold flex items-center gap-2"><History size={16}/> Recent seller activity</div>
       <div className="divide-y">
         {events.length === 0 && <div className="p-10 text-center text-slate-500">No activity yet</div>}
         {events.map((e, i) => (
           <div key={i} className="p-4 flex items-center gap-3 hover:bg-slate-50">
             <SupplierAvatar s={e.supplier} size={32}/>
             <div className="flex-1 min-w-0">
-              <div className="text-sm"><span className="font-medium">{e.supplier.name}</span> <span className="text-slate-500">was {e.kind}</span></div>
+              <div className="text-sm"><span className="font-medium truncate">{e.supplier.name}</span> <span className="text-slate-500"> · last item refreshed</span></div>
               <div className="text-[11px] text-slate-400 font-mono">{fmtDate(e.at)}</div>
             </div>
-            <span className={`chip ${e.kind === "created" ? "chip-success" : "chip-neutral"}`}>{e.kind}</span>
+            <SellerStatusChip status={e.supplier.status}/>
           </div>
         ))}
       </div>
@@ -1179,30 +992,23 @@ function NotesView({ list, onChanged }) {
 
 /* -------------------------- Products (module wrapper) --------------------- */
 function ProductsModule({ section, setSection }) {
-  const [inv, setInv] = useState(null);
-  const [reviews, setReviews] = useState([]);
-  const [coupons, setCoupons] = useState([]);
-  const [moves, setMoves] = useState([]);
   const [products, setProducts] = useState([]);
+  const [priceAlertItems, setPriceAlertItems] = useState([]);
 
-  useEffect(() => { axios.get(`${API}/products/inventory-summary`).then(r => setInv(r.data)); }, [section]);
   useEffect(() => { axios.get(`${API}/products`).then(r => setProducts(r.data.products)); }, [section]);
-  useEffect(() => { if (section === "reviews") axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews)); }, [section]);
-  useEffect(() => { if (section === "coupons") axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons)); }, [section]);
-  useEffect(() => { if (section === "stock-history") axios.get(`${API}/stock/moves`).then(r => setMoves(r.data.moves)); }, [section]);
+  useEffect(() => {
+    if (section === "price-alerts") {
+      axios.get(`${API}/items`, { params: { limit: 300 }}).then(r => setPriceAlertItems(r.data.items));
+    }
+  }, [section]);
 
   const meta = PRODUCT_NAV.find((s) => s.id === section) || PRODUCT_NAV[0];
   const Icon = meta.icon;
   const hints = {
-    create:"Add a new product to your catalog.", all:"Every product in your store.",
-    editing:"Bulk edit product fields inline.", images:"Manage image galleries & alt text.",
-    categories:"Assign products to categories.", subcategories:"Nested groupings under a category.",
-    brands:"Manage brand list & logos.", variants:"Size / colour / material combos per product.",
-    pricing:"Retail price, cost & compare-at.", profit:"Margin & profit calculator.",
-    inventory:"Overall stock health across the catalog.", "opening-stock":"Set initial stock levels for new items.",
-    "stock-count":"Physical stock-take counts.", adjustments:"Log a manual +/- change with reason.",
-    "low-stock":"Items with ≤ 3 in stock.", "out-of-stock":"Items at 0 or below.",
-    "stock-history":"Every movement in the ledger.", reviews:"Customer product reviews.", coupons:"Product-specific discount codes.",
+    all: "Every product in your store.",
+    "low-stock": "Items with 1–3 units remaining. Restock soon.",
+    "out-of-stock": "Items at 0 or below. Hidden from storefront.",
+    "price-alerts": "Scraped eBay AU items whose seller changed the price. Adjust your retail price to stay competitive.",
   };
   const filtered = section === "low-stock" ? products.filter(p => (p.stock ?? 0) > 0 && (p.stock ?? 0) <= 3)
     : section === "out-of-stock" ? products.filter(p => (p.stock ?? 0) <= 0)
@@ -1211,25 +1017,67 @@ function ProductsModule({ section, setSection }) {
   return (
     <div className="grid gap-6">
       <SubHero icon={Icon} group={meta.group} label={meta.label} hint={hints[section]}/>
-      {section === "create"      && <ProductCreate onCreated={() => setSection("all")}/>}
-      {section === "all"         && <Products />}
-      {section === "editing"     && <Products />}
-      {section === "images"      && <ProductImagesView list={products}/>}
-      {section === "categories"  && <Categories />}
-      {section === "subcategories" && <ScaffoldList label="Subcategories" hint="Nested groupings under each category." rows={["Coming soon — one-level nesting under Categories."]}/>}
-      {section === "brands"      && <BrandsView list={products}/>}
-      {section === "variants"    && <ScaffoldList label="Product variants" hint="Size / colour / material options." rows={["Add variant schema to products to enable."]}/>}
-      {section === "pricing"     && <PricingView list={products}/>}
-      {section === "profit"      && <ProfitView list={products}/>}
-      {section === "inventory"   && <InventoryOverview inv={inv} list={products}/>}
-      {section === "opening-stock" && <StockAdjustPage list={products} kind="opening" title="Opening stock"/>}
-      {section === "stock-count"   && <StockAdjustPage list={products} kind="count" title="Stock count (set-to)"/>}
-      {section === "adjustments"   && <StockAdjustPage list={products} kind="adjustment" title="Stock adjustment"/>}
+      {section === "all"           && <Products />}
       {section === "low-stock"     && <StockList list={filtered} tone="warning"/>}
       {section === "out-of-stock"  && <StockList list={filtered} tone="danger"/>}
-      {section === "stock-history" && <StockHistoryView moves={moves}/>}
-      {section === "reviews"       && <ReviewsView reviews={reviews} reload={() => axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews))}/>}
-      {section === "coupons"       && <CouponsView coupons={coupons} reload={() => axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons))}/>}
+      {section === "price-alerts"  && <PriceAlertsView items={priceAlertItems}/>}
+    </div>
+  );
+}
+
+function PriceAlertsView({ items }) {
+  const alerts = items
+    .map(it => {
+      const h = (it.price_history || []).filter(p => p.value != null);
+      if (h.length < 2) return null;
+      const first = h[0].value, last = h[h.length - 1].value;
+      const delta = last - first;
+      if (Math.abs(delta) < 0.01) return null;
+      const pct = first ? (delta / first) * 100 : 0;
+      return { it, first, last, delta, pct, changes: h.length - 1 };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
+
+  const drops = alerts.filter(a => a.delta < 0).length;
+  const rises = alerts.filter(a => a.delta > 0).length;
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatBox label="Alerts" value={alerts.length}/>
+        <StatBox label="Price drops" value={drops} tone="success"/>
+        <StatBox label="Price rises" value={rises}/>
+        <StatBox label="Items tracked" value={items.length}/>
+      </div>
+      <div className="card overflow-hidden">
+        {alerts.length === 0 && <div className="p-10 text-center text-slate-500">No price changes yet. Once the nightly refresh detects a change, alerts will appear here.</div>}
+        <div className="overflow-x-auto"><table className="tbl">
+          <thead><tr><th>eBay AU item</th><th>Seller</th><th>First price</th><th>Latest</th><th>Change</th><th>Data points</th><th></th></tr></thead>
+          <tbody>
+            {alerts.slice(0, 100).map(({ it, first, last, delta, pct, changes }) => (
+              <tr key={it.id} data-testid="price-alert-row">
+                <td>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border hairline shrink-0">
+                      {it.images?.[0] ? <img src={proxyImg(it.images[0])} alt="" className="w-full h-full object-contain p-1"/> : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={14}/></div>}
+                    </div>
+                    <div className="min-w-0"><div className="text-sm font-medium truncate max-w-[280px]" title={it.title}>{it.title}</div><div className="text-[11px] text-slate-400 font-mono truncate">#{it.item_id}</div></div>
+                  </div>
+                </td>
+                <td className="text-sm text-slate-600 truncate max-w-[160px]">{it.seller || "—"}</td>
+                <td className="font-mono text-slate-500">AU ${first.toFixed(2)}</td>
+                <td className="font-mono font-bold text-indigo-600">AU ${last.toFixed(2)}</td>
+                <td className={`font-mono font-bold ${delta > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                  {delta > 0 ? "▲" : "▼"} AU ${Math.abs(delta).toFixed(2)} <span className="text-xs">({pct.toFixed(1)}%)</span>
+                </td>
+                <td className="text-xs text-slate-500">{changes} change{changes===1?"":"s"}</td>
+                <td><a href={it.url} target="_blank" rel="noreferrer" className="btn btn-ghost text-xs !py-1 !px-2"><ExternalLink size={12}/> View</a></td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+      </div>
     </div>
   );
 }
@@ -2310,11 +2158,13 @@ function ScraperPage({ onView }) {
   const [url, setUrl] = useState(""); const [method, setMethod] = useState(loadKeys().method);
   const [loading, setLoading] = useState(false); const [status, setStatus] = useState("");
   const [items, setItems] = useState([]); const [q, setQ] = useState("");
+  const [sortBy, setSortBy] = useState("created_at_desc");
+  const [statusFilter, setStatusFilter] = useState("");
 
   const load = useCallback(async () => {
-    const { data } = await axios.get(`${API}/items`, { params: { q: q || undefined, sort: "created_at_desc" }});
+    const { data } = await axios.get(`${API}/items`, { params: { q: q || undefined, sort: sortBy, status: statusFilter || undefined }});
     setItems(data.items);
-  }, [q]);
+  }, [q, sortBy, statusFilter]);
   useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
@@ -2405,12 +2255,26 @@ function ScraperPage({ onView }) {
       </section>
 
       <section>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
           <div>
             <div className="font-display font-bold text-lg">Scraped items</div>
             <div className="text-xs text-slate-500">{items.length} imported · click to view details, then add to products</div>
           </div>
-          <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search…" className="input pl-9 pr-3 py-2 text-sm w-56"/></div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input data-testid="scraper-search" value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search title, seller, location" className="input pl-9 pr-3 py-2 text-sm w-64"/></div>
+            <select data-testid="scraper-status-filter" value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value)} className="input px-3 py-2 text-sm">
+              <option value="">All statuses</option>
+              <option value="live">Live</option>
+              <option value="sold">Sold</option>
+            </select>
+            <select data-testid="scraper-sort" value={sortBy} onChange={(e)=>setSortBy(e.target.value)} className="input px-3 py-2 text-sm">
+              <option value="created_at_desc">Newest</option>
+              <option value="created_at_asc">Oldest</option>
+              <option value="price_desc">Price ↓</option>
+              <option value="price_asc">Price ↑</option>
+              <option value="title_asc">Title A→Z</option>
+            </select>
+          </div>
         </div>
 
         {items.length === 0 ? (
@@ -2675,6 +2539,9 @@ function ItemModal({ item, onClose }) {
               )}
             </div>
 
+            {/* Price history */}
+            <PriceHistoryChart history={it.price_history}/>
+
             {it.description && ff.show_description !== false && (
               <div className="mt-6">
                 <div className="flex items-center justify-between mb-2">
@@ -2713,6 +2580,56 @@ function InfoBox({ icon, label, value, mono }) {
     <div className="card-flat p-3 min-w-0">
       <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 flex items-center gap-1.5">{icon}{label}</div>
       <div className={`mt-1 text-sm text-slate-800 truncate ${mono?"font-mono":""}`} title={value||""}>{value || "—"}</div>
+    </div>
+  );
+}
+
+function PriceHistoryChart({ history }) {
+  const points = (history || []).filter(p => p && p.value != null);
+  if (points.length < 2) {
+    return (
+      <div className="mt-6 card-flat p-4" data-testid="price-history-chart">
+        <div className="font-display font-bold text-sm mb-1">Price history</div>
+        <div className="text-xs text-slate-500">Only one data point so far. Refresh this item over time to build a price trend.</div>
+      </div>
+    );
+  }
+  const data = points.map(p => ({ at: p.at, value: p.value, label: (p.at || "").slice(5, 10) }));
+  const first = points[0].value, last = points[points.length - 1].value;
+  const delta = last - first;
+  const pct = first ? (delta / first) * 100 : 0;
+  const trending = delta === 0 ? "flat" : delta < 0 ? "down" : "up";
+  const min = Math.min(...points.map(p => p.value));
+  const max = Math.max(...points.map(p => p.value));
+  return (
+    <div className="mt-6 card-flat p-4" data-testid="price-history-chart">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <div className="font-display font-bold text-sm flex items-center gap-2">
+          {trending === "down" ? <TrendingDown size={14} className="text-emerald-600"/> : trending === "up" ? <TrendingUp size={14} className="text-amber-600"/> : <LineChartIcon size={14} className="text-slate-500"/>}
+          Price history
+        </div>
+        <div className="text-[11px] font-mono text-slate-500">
+          {points.length} points · min AU ${min.toFixed(2)} · max AU ${max.toFixed(2)}
+          <span className={`ml-2 font-bold ${delta < 0 ? "text-emerald-600" : delta > 0 ? "text-amber-600" : "text-slate-500"}`}>
+            {delta === 0 ? "no change" : `${delta > 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}%`}
+          </span>
+        </div>
+      </div>
+      <div className="h-40">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+            <CartesianGrid stroke="#EEF0F5" strokeDasharray="3 3" vertical={false}/>
+            <XAxis dataKey="label" tick={{ fill: "#94A3B8", fontSize: 10 }} tickLine={false} axisLine={false}/>
+            <YAxis tick={{ fill: "#94A3B8", fontSize: 10 }} tickLine={false} axisLine={false} width={44} tickFormatter={(v) => `$${v}`}/>
+            <Tooltip
+              contentStyle={{ background: "#fff", border: "1px solid #EAEAF0", borderRadius: 10, fontSize: 12 }}
+              formatter={(v) => [`AU $${Number(v).toFixed(2)}`, "Price"]}
+              labelFormatter={(l, payload) => payload?.[0]?.payload?.at ? fmtDate(payload[0].payload.at) : l}
+            />
+            <Line type="monotone" dataKey="value" stroke="#4F46E5" strokeWidth={2} dot={{ r: 3, fill: "#4F46E5" }} activeDot={{ r: 5 }}/>
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }

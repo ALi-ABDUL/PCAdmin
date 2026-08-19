@@ -1,35 +1,72 @@
-# Aussie Admin Dashboard - PRD
+# Aussie Admin Dashboard — PRD
 
 ## Problem statement
-Build an eBay Australia scraper (ebay.com.au only) with manual + auto (ScrapingBee/ScraperAPI) methods, anti-bot tactics, item detail import, and a full-featured admin dashboard for an ecommerce store (electronics, home, tools). Products imported from eBay flow into the catalog. Light, fancy, modern theme.
+Build an eBay Australia scraper (ebay.com.au only) with manual + auto scraping methods,
+anti-bot tactics, item detail import, and a full-featured admin dashboard for an e-commerce
+store (electronics, home, tools). Products imported from eBay flow into the catalog.
+Light, modern theme.
 
 ## Architecture
-- Backend: FastAPI + MongoDB (motor). curl_cffi for browser TLS impersonation (Chrome131 etc.) to defeat eBay anti-bot. httpx + BeautifulSoup fallback. ScrapingBee & ScraperAPI as external fallbacks.
-- Frontend: React 19 + Tailwind + Framer Motion + Recharts + Sonner. Light theme (#F7F7FB background, indigo/pink accents, Outfit/Inter/JetBrains Mono fonts).
+- Backend: FastAPI + MongoDB (motor). `curl_cffi` for browser TLS impersonation to defeat
+  eBay anti-bot. `httpx` + BeautifulSoup fallback. ScrapingBee & ScraperAPI as external fallbacks.
+- Frontend: React 19 + Tailwind + Framer Motion + Recharts + Sonner. Light theme
+  (#F7F7FB background, indigo/pink accents, Outfit/Inter/JetBrains Mono fonts).
 
-## Features implemented (2026-01-13)
-- Sidebar-based admin dashboard shell (Dashboard/Products/eBay Scraper/Orders/Customers/Analytics/Settings)
-- Dashboard KPIs: YTD/MTD/7d revenue, profit, units, AOV, low stock, product counts. Revenue+profit area chart (30d), category donut, top products, recent orders
-- Products: full CRUD, category filter, sort by price/stock/best sellers, edit modal
-- eBay AU scraper: paste URL → import, method selector (auto/manual/scrapingbee/scraperapi), rotating UAs + Chrome TLS impersonation, warm-up cookies, retry with jitter, description iframe fetching (real seller description), image extraction (up to 20 images), item specifics parsing
-- One-click "Add to products" from any scraped item (auto-categorises, 25% markup, generates SKU)
-- Orders: list, filter by status. Customers: derived from orders with LTV
-- Analytics: all-time revenue/profit/orders/margin + daily bar chart
-- Settings: store settings (name, email, currency, country, tax rate) + scraper API keys (localStorage) + default method
-- Demo seed endpoint (/api/demo/seed) creates realistic 4-month order history against seeded products so dashboard is populated
+## Features implemented (through 2026-02-19)
+### Scraper
+- eBay AU scraper with curl_cffi Chrome TLS impersonation, warm-up cookies, rotating UAs,
+  retry+jitter. Description iframe fetch, up to 20 images, item specifics parsing.
+- Extracts postage_display, postage_fee, delivery_estimate, collection, returns_policy,
+  payment_methods.
+- Sold detection: `is_sold` flag grays out card and auto-deactivates linked product; fires
+  toast via `/api/sold-events`.
+- Nightly asyncio auto-refresh of every item + `POST /api/items/refresh-all` button.
+- **Search & filter on the Scraper page**: search box, status filter (Live/Sold),
+  sort dropdown (Newest / Oldest / Price ↓ / Price ↑ / Title A→Z). Backend `GET /api/items`
+  now accepts `status=live|sold` and multiple sort keys.
+- Per-item `feature_flags` toggled inline in modal.
 
-## Backlog
-- Bulk import (paste multiple URLs)
-- CSV/JSON export
-- Watchlist price tracking with cron auto-refresh
-- Authentication for admin
-- Real customer accounts (currently derived)
-- Public storefront that reads /api/products
+### Admin Dashboard
+- Sidebar shell with grouped sections + slide-in secondary sidebars for Store Management,
+  Products, Suppliers, Customers, Orders, Payments.
+- Dashboard KPIs, 30-day revenue+profit chart, category donut, top products, recent orders.
+- Products: CRUD, category filter, sort by price/stock/best sellers; nav trimmed to
+  **All Products / Low Stock / Out of Stock / Price Alerts**.
+- **Price Alerts (2026-02-19)** — real backend data. Every item.price_history change is
+  captured on refresh; the Price Alerts view lists top movers with drop/rise chips.
+- **Price History chart in ItemModal (2026-02-19)** — Recharts line chart over the full
+  price_history; single-point items show a helpful placeholder.
+- **Suppliers module refactored to eBay AU Sellers (2026-02-19)** — auto-populated from
+  scraped items. Table columns are exactly: Seller Name / Total Products / Total Orders /
+  Revenue Generated / Last Active / Status. Sub-nav trimmed to 5 links:
+  All / Top / Products / Orders / Activity. Backend endpoints `POST/PATCH/DELETE/import`
+  removed; only `GET /api/suppliers`, `GET /api/suppliers/summary`, `GET /api/suppliers/{id}`
+  remain (all derived on-the-fly from `db.items`).
+- Categories: auto-seeded 29 categories with icon/colour + CRUD.
+- Customers: 18 sub-links, 177 auto-derived from orders on first startup.
+- Orders: All (with 7 status tabs + inline edit), Returns & Refunds, Abandoned Carts.
+- Payments: All Transactions (with 3 status tabs), Refunds & Chargebacks.
+- Store Management: 15 sub-links across 5 groups.
+- Analytics: all-time KPIs + daily bar chart.
+- Settings: store settings + scraper API keys (localStorage) + default method.
 
-## Update (2026-01-14)
-- Extracts postage_display, postage_fee, delivery_estimate, collection, returns_policy, payment_methods (with regex fallbacks — visibility depends on eBay's page for that listing/user location)
-- Sold detection: is_sold flag set when eBay page shows "listing ended" / "sold" markers; grays out card in scraper AND auto-deactivates linked product
-- Per-item feature_flags: show_postage, show_delivery, show_collection, show_returns, show_payments, show_seller, show_description, show_specifics, visible — toggled inline in the item modal
-- Manual "Refresh all now" button in eBay AU Scraper header
-- Background asyncio task (_nightly_refresh_loop) re-scrapes every item every 24h + writes summary to db.system.nightly
-- New endpoints: PATCH /api/items/{id}/features, POST /api/items/refresh-all, GET /api/items/refresh-status
+## Backlog / roadmap
+### P1
+- Bulk import (paste multiple eBay URLs)
+- CSV/JSON export for products & orders
+- Watchlist tag/toggle explicit (watchlist column already in schema, not yet exposed
+  in UI beyond the general items list)
+
+### P2
+- Real customer accounts (currently derived from orders)
+- Public storefront reading /api/products
+- Admin authentication
+- Product ↔ supplier linking (kept minimal after suppliers refactor)
+- Refactor `App.js` (2600+ lines) into per-module files: `Suppliers.jsx`,
+  `ScraperPage.jsx`, `ProductsPage.jsx`, `PriceHistoryChart.jsx`, `nav.js`.
+- Replace N+1 pattern in `_build_sellers()` with a single `$lookup` aggregation
+  when seller count grows beyond ~500.
+
+## Test coverage
+- `/app/backend/tests/test_suppliers_and_items.py` — 12 pytest cases (all pass).
+- Latest iteration report: `/app/test_reports/iteration_1.json` (100% backend & frontend).

@@ -19,6 +19,22 @@ Light, modern theme.
   (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
 
 ## Features implemented (through 2026-02-19)
+### Automatic category detection (2026-02-19)
+- `scraper.py` now extracts eBay's own category breadcrumb from JSON-LD `BreadcrumbList`
+  first, then falls back to the visible breadcrumb widget (`nav.breadcrumbs`,
+  `#vi-VR-brumb-lnkLst`, `.breadcrumbs a`, `.seo-breadcrumb-text`).
+- `_guess_category(title, breadcrumbs, specifics)` is a 3-signal guesser: it walks the
+  breadcrumb leaf→root against `_EBAY_BREADCRUMB_MAP` (30 top eBay AU categories), then
+  falls back to keyword rules on the crumb text; if still unmatched, checks item
+  specifics keys `Category / Sub-Type / Type / Product Type / Model / Brand`; last
+  resort is the title. Falls back to `"other"` only when nothing matches.
+- Every scraped item now stores `category` and `ebay_category_path`. "Add to products"
+  inherits the item's category (falls back to a re-guess if missing).
+- Backfilled the 34 existing items (title-only signal available): 8 → "other" and 26
+  auto-classified across cycling / automotive / furniture / vacuums-cleaning / cameras-photo etc.
+- Scraper card shows a category chip (`[data-testid=scraped-card-category]`). Item modal
+  shows both the detected slug and the full eBay breadcrumb path.
+
 ### Scraper
 - eBay AU scraper with curl_cffi Chrome TLS impersonation, warm-up cookies, rotating UAs,
   retry+jitter. Description iframe fetch, up to 20 images, item specifics parsing.

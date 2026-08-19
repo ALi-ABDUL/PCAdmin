@@ -124,6 +124,8 @@ class ScrapedItem(BaseModel):
     })
     images: List[str] = Field(default_factory=list)
     specifics: dict = Field(default_factory=dict)
+    ebay_category_path: List[str] = Field(default_factory=list)
+    category: Optional[str] = None
     method_used: Optional[str] = None
     watchlisted: bool = False
     price_history: List[dict] = Field(default_factory=list)
@@ -274,6 +276,12 @@ async def scrape(req: ScrapeRequest) -> dict:
         data["delivery_estimate_updated_at"] = now_iso
     if data.get("is_sold"):
         data["sold_detected_at"] = now_iso
+    # Auto-detect store category from breadcrumbs > specifics > title
+    data["category"] = _guess_category(
+        title=data.get("title") or "",
+        breadcrumbs=data.get("ebay_category_path") or [],
+        specifics=data.get("specifics") or {},
+    )
 
     if req.save:
         query = {"item_id": data["item_id"]} if data.get("item_id") else {"url": url}
@@ -1178,42 +1186,116 @@ async def get_supplier(sid: str):
 # Products
 # ---------------------------------------------------------------------------
 
-def _guess_category(title: str) -> str:
-    t = (title or "").lower()
-    rules = [
-        (["iphone", "samsung galaxy", "pixel", "smartphone", "ipad", "tablet"], "phones-tablets"),
-        (["laptop", "macbook", "notebook", "monitor", "keyboard", "mouse", "ssd", "gpu", "desktop", "pc"], "laptops-computers"),
-        (["tv", "television", "projector", "soundbar", "home theatre"], "tvs-home-theatre"),
-        (["headphone", "earbud", "airpods", "speaker", "hi-fi", "hifi", "amp"], "audio-headphones"),
-        (["camera", "lens", "gopro", "drone"], "cameras-photo"),
-        (["playstation", "ps5", "xbox", "nintendo", "switch", "controller", "gaming"], "gaming"),
-        (["smart watch", "smartwatch", "fitbit", "garmin", "smart home", "echo", "alexa"], "wearables-smart-home"),
-        (["kitchen", "cookware", "coffee", "espresso", "kettle", "toaster", "microwave", "blender"], "kitchen-dining"),
-        (["sofa", "couch", "chair", "desk", "table", "wardrobe"], "furniture"),
-        (["rug", "wall art", "mirror", "lamp", "candle", "vase"], "home-decor-lighting"),
-        (["mattress", "linen", "towel", "quilt", "duvet", "pillow"], "bedroom-bath"),
-        (["vacuum", "robot vac", "mop", "cleaner"], "vacuums-cleaning"),
-        (["bbq", "garden", "outdoor", "lawn", "mower", "shed"], "garden-outdoor"),
-        (["drill", "impact driver", "grinder", "sander", "circular saw", "power tool"], "power-tools"),
-        (["hammer", "spanner", "wrench", "screwdriver", "plier", "tape measure"], "hand-tools"),
-        (["dash cam", "car ", "auto ", "tyre", "engine oil"], "automotive"),
-        (["workbench", "tool cabinet", "tool box", "workshop"], "workshop-storage"),
-        (["hi-vis", "safety boot", "ppe", "helmet", "gloves"], "safety-workwear"),
-        (["men's ", "mens shirt", "mens jeans", "mens jacket", "mens hoodie"], "mens-clothing"),
-        (["women's ", "womens dress", "womens top", "womens jeans"], "womens-clothing"),
-        (["shoe", "sneaker", "boot", "sandal"], "shoes-sneakers"),
-        (["watch", "ring ", "necklace", "bracelet", "earring"], "watches-jewellery"),
-        (["dumbbell", "bench press", "treadmill", "yoga", "gym"], "fitness-gym"),
-        (["tent", "sleeping bag", "hiking", "camping"], "outdoor-camping"),
-        (["bike", "bicycle", "cycling", "mtb"], "cycling"),
-        (["lego", "building block", "brick"], "lego-building"),
-        (["board game", "card game", "puzzle"], "board-games-puzzles"),
-        (["pokemon", "trading card", "figurine", "funko", "collectible"], "collectibles-trading-cards"),
-    ]
-    for keywords, slug in rules:
+_CATEGORY_RULES: list[tuple[list[str], str]] = [
+    (["iphone", "samsung galaxy", "pixel", "smartphone", "mobile phone", "ipad", "tablet"], "phones-tablets"),
+    (["laptop", "macbook", "notebook", "monitor", "keyboard", "mouse", "ssd", "gpu", "desktop", "pc "], "laptops-computers"),
+    (["tv", "television", "projector", "soundbar", "home theatre", "home theater"], "tvs-home-theatre"),
+    (["headphone", "earbud", "airpods", "speaker", "hi-fi", "hifi", " amp "], "audio-headphones"),
+    (["camera", "lens", "gopro", "drone"], "cameras-photo"),
+    (["playstation", "ps5", "xbox", "nintendo", "switch", "controller", "gaming"], "gaming"),
+    (["smart watch", "smartwatch", "fitbit", "garmin", "smart home", "echo", "alexa"], "wearables-smart-home"),
+    (["kitchen", "cookware", "coffee", "espresso", "kettle", "toaster", "microwave", "blender"], "kitchen-dining"),
+    (["sofa", "couch", "chair", "desk", "table", "wardrobe"], "furniture"),
+    (["rug", "wall art", "mirror", "lamp", "candle", "vase"], "home-decor-lighting"),
+    (["mattress", "linen", "towel", "quilt", "duvet", "pillow"], "bedroom-bath"),
+    (["vacuum", "robot vac", "mop", "cleaner"], "vacuums-cleaning"),
+    (["bbq", "garden", "outdoor", "lawn", "mower", "shed"], "garden-outdoor"),
+    (["drill", "impact driver", "grinder", "sander", "circular saw", "power tool"], "power-tools"),
+    (["hammer", "spanner", "wrench", "screwdriver", "plier", "tape measure"], "hand-tools"),
+    (["dash cam", "car ", "auto ", "tyre", "engine oil", "towbar"], "automotive"),
+    (["workbench", "tool cabinet", "tool box", "workshop"], "workshop-storage"),
+    (["hi-vis", "safety boot", "ppe", "helmet", "gloves"], "safety-workwear"),
+    (["men's ", "mens shirt", "mens jeans", "mens jacket", "mens hoodie"], "mens-clothing"),
+    (["women's ", "womens dress", "womens top", "womens jeans"], "womens-clothing"),
+    (["shoe", "sneaker", "boot", "sandal"], "shoes-sneakers"),
+    (["watch", "ring ", "necklace", "bracelet", "earring"], "watches-jewellery"),
+    (["dumbbell", "bench press", "treadmill", "yoga", "gym", "exercise bike"], "fitness-gym"),
+    (["tent", "sleeping bag", "hiking", "camping"], "outdoor-camping"),
+    (["bike", "bicycle", "cycling", "mtb"], "cycling"),
+    (["lego", "building block", "brick"], "lego-building"),
+    (["board game", "card game", "puzzle"], "board-games-puzzles"),
+    (["pokemon", "trading card", "figurine", "funko", "collectible"], "collectibles-trading-cards"),
+]
+
+# Map eBay's own top-level breadcrumb crumbs to the closest store slug.
+_EBAY_BREADCRUMB_MAP: dict[str, str] = {
+    "cell phones & accessories": "phones-tablets",
+    "mobile phones & communication": "phones-tablets",
+    "computers/tablets & networking": "laptops-computers",
+    "computers, tablets & network hardware": "laptops-computers",
+    "tv, video & home audio": "tvs-home-theatre",
+    "sound & vision": "tvs-home-theatre",
+    "cameras & photo": "cameras-photo",
+    "video games & consoles": "gaming",
+    "smart home": "wearables-smart-home",
+    "jewellery & watches": "watches-jewellery",
+    "jewelry & watches": "watches-jewellery",
+    "home & garden": "home-decor-lighting",
+    "kitchen, dining & bar": "kitchen-dining",
+    "small kitchen appliances": "kitchen-dining",
+    "furniture": "furniture",
+    "bedding": "bedroom-bath",
+    "vehicle parts & accessories": "automotive",
+    "auto parts & accessories": "automotive",
+    "business & industrial": "workshop-storage",
+    "power tools": "power-tools",
+    "hand tools": "hand-tools",
+    "clothing, shoes & accessories": "shoes-sneakers",
+    "men's clothing": "mens-clothing",
+    "women's clothing": "womens-clothing",
+    "sporting goods": "fitness-gym",
+    "cycling": "cycling",
+    "outdoor sports": "outdoor-camping",
+    "toys & hobbies": "lego-building",
+    "toys, hobbies": "lego-building",
+    "collectables": "collectibles-trading-cards",
+    "collectibles": "collectibles-trading-cards",
+    "trading card games": "collectibles-trading-cards",
+}
+
+
+def _match_rules(text: str) -> Optional[str]:
+    t = (text or "").lower()
+    if not t:
+        return None
+    for keywords, slug in _CATEGORY_RULES:
         if any(k in t for k in keywords):
             return slug
-    return "other"
+    return None
+
+
+def _guess_category(
+    title: Optional[str] = None,
+    breadcrumbs: Optional[list[str]] = None,
+    specifics: Optional[dict] = None,
+) -> str:
+    """Guess a store category slug from (in priority): breadcrumbs, specifics, title."""
+    # 1. eBay breadcrumb — walk from leaf → root, prefer more specific matches
+    for crumb in reversed(breadcrumbs or []):
+        c = crumb.lower().strip()
+        if c in _EBAY_BREADCRUMB_MAP:
+            return _EBAY_BREADCRUMB_MAP[c]
+        # Try partial match against the map keys
+        for key, slug in _EBAY_BREADCRUMB_MAP.items():
+            if key in c or c in key:
+                return slug
+        # Fall back to keyword rules on the crumb text
+        hit = _match_rules(c)
+        if hit:
+            return hit
+
+    # 2. Item specifics — Brand / Type / Category / Model / Sub-Type
+    if specifics:
+        for key in ("Category", "Sub-Type", "Type", "Product Type", "Model", "Brand"):
+            v = specifics.get(key)
+            if v:
+                hit = _match_rules(str(v))
+                if hit:
+                    return hit
+
+    # 3. Title
+    hit = _match_rules(title or "")
+    return hit or "other"
 
 
 @api_router.post("/products/from-item/{item_id}")
@@ -1228,7 +1310,11 @@ async def create_product_from_item(item_id: str, markup_pct: float = 25.0):
         price=price,
         cost=cost,
         stock=10,
-        category=_guess_category(it.get("title") or ""),
+        category=it.get("category") or _guess_category(
+            title=it.get("title") or "",
+            breadcrumbs=it.get("ebay_category_path") or [],
+            specifics=it.get("specifics") or {},
+        ),
         description=it.get("description") or "",
         images=it.get("images") or [],
         source_url=it.get("url"),

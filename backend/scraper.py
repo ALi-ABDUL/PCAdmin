@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import re
 from typing import Any, Optional
@@ -387,6 +388,53 @@ def _extract_specifics(soup: BeautifulSoup) -> dict[str, str]:
     return specs
 
 
+def _extract_breadcrumbs(soup: BeautifulSoup, html: str) -> list[str]:
+    """Extract the eBay category breadcrumb path.
+
+    eBay renders breadcrumbs in a few ways; we try structured data first (JSON-LD
+    BreadcrumbList), then the visible breadcrumb widget, then a legacy fallback.
+    """
+    # 1. JSON-LD BreadcrumbList
+    for script in soup.select('script[type="application/ld+json"]'):
+        try:
+            payload = json.loads(script.string or "")
+        except Exception:
+            continue
+        candidates = payload if isinstance(payload, list) else [payload]
+        for node in candidates:
+            if isinstance(node, dict) and node.get("@type") == "BreadcrumbList":
+                items = node.get("itemListElement") or []
+                names: list[str] = []
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    item = it.get("item") or {}
+                    name = it.get("name") or (item.get("name") if isinstance(item, dict) else None)
+                    if name and name.lower() not in {"ebay", "home"}:
+                        names.append(str(name).strip())
+                if names:
+                    return names
+
+    # 2. Modern visible breadcrumb widget
+    for sel in [
+        "nav.breadcrumbs a span",
+        "nav.breadcrumbs a",
+        "#vi-VR-brumb-lnkLst a",
+        ".breadcrumbs a",
+        ".seo-breadcrumb-text",
+    ]:
+        nodes = soup.select(sel)
+        if nodes:
+            names = [
+                _text(n) for n in nodes
+                if _text(n) and _text(n).lower() not in {"ebay", "home", "back to home page"}
+            ]
+            if names:
+                return names
+
+    return []
+
+
 async def fetch_description_iframe(iframe_url: str) -> str:
     """Fetch the seller's HTML description from the eBay description iframe (vi.raptor.ebaydesc.com)."""
     try:
@@ -614,6 +662,7 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
 
     images = _extract_images(soup, html)
     specifics = _extract_specifics(soup)
+    ebay_category_path = _extract_breadcrumbs(soup, html)
 
     return {
         "url": url,
@@ -638,4 +687,5 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
         "is_sold": is_sold,
         "images": images,
         "specifics": specifics,
+        "ebay_category_path": ebay_category_path,
     }

@@ -2300,6 +2300,9 @@ function ScraperPage({ onView }) {
                     <span className="font-mono text-lg font-bold text-indigo-600">{it.price_display || "—"}</span>
                     {it.condition && <span className="chip chip-neutral">{it.condition.split(" ").slice(0, 2).join(" ")}</span>}
                   </div>
+                  <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                    {it.category && <span className="chip chip-primary text-[10px]" data-testid="scraped-card-category" title={(it.ebay_category_path || []).join(" › ")}><Tags size={10}/> {it.category}</span>}
+                  </div>
                   <div className="mt-2 text-xs text-slate-500 truncate"><MapPin size={11} className="inline"/> {it.location || "—"}</div>
                   <div className="mt-3 flex items-center gap-1">
                     <button onClick={()=>addToProducts(it)} disabled={it.added_to_products} className="btn btn-primary text-xs !py-1.5 flex-1"><Plus size={12}/> {it.added_to_products ? "Added" : "Add to products"}</button>
@@ -2640,7 +2643,20 @@ function ItemModal({ item, onClose }) {
               {ff.show_seller !== false && <InfoBox icon={<UserIcon size={14}/>} label="Seller" value={it.seller}/>}
               <InfoBox icon={<MapPin size={14}/>} label="Located in" value={it.location}/>
               <InfoBox icon={<Box size={14}/>} label="Item ID" value={it.item_id} mono/>
+              <InfoBox icon={<Tags size={14}/>} label="Detected category" value={it.category || "—"}/>
             </div>
+
+            {(it.ebay_category_path || []).length > 0 && (
+              <div className="mt-3 text-[11px] text-slate-500 font-mono flex items-center gap-1 flex-wrap" data-testid="ebay-breadcrumbs">
+                <Tags size={11}/>
+                {it.ebay_category_path.map((crumb, i) => (
+                  <span key={i} className="flex items-center gap-1">
+                    <span>{crumb}</span>
+                    {i < it.ebay_category_path.length - 1 && <span className="text-slate-300">›</span>}
+                  </span>
+                ))}
+              </div>
+            )}
 
             {/* Postage, returns and payments */}
             <div className="mt-6 card-flat p-4">

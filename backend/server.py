@@ -459,9 +459,9 @@ async def _nightly_refresh_loop():
 async def _start_scheduler():
     await _ensure_categories_seeded()
     await _ensure_suppliers_seeded()
-    # Rebuild customers from existing orders if empty
     if await db.customers.count_documents({}) == 0:
         await _rebuild_customers_from_orders()
+    await _seed_transactions_and_returns()
     asyncio.create_task(_nightly_refresh_loop())
 
 
@@ -539,6 +539,190 @@ async def reseed_categories(force: bool = False):
         await db.categories.delete_many({})
     await _ensure_categories_seeded()
     return await list_categories()
+
+
+# ---------------------------------------------------------------------------
+# Returns, Abandoned Carts, Transactions
+# ---------------------------------------------------------------------------
+
+ORDER_STATUSES = ["new", "pending", "processing", "ready_to_ship", "shipped", "delivered", "cancelled"]
+
+
+class ReturnRequest(BaseModel):
+    order_id: Optional[str] = None
+    product_id: Optional[str] = None
+    product_title: str = ""
+    customer_name: str = "Customer"
+    reason: str = "Not as described"
+    amount: float = 0.0
+    status: str = "pending"  # pending | approved | rejected | refunded
+
+
+class AbandonedCart(BaseModel):
+    customer_name: str = "Guest"
+    customer_email: Optional[str] = ""
+    items: int = 1
+    subtotal: float = 0.0
+    step: str = "cart"  # cart | shipping | payment
+    recovered: bool = False
+
+
+class Transaction(BaseModel):
+    order_id: Optional[str] = None
+    customer_name: str = "Customer"
+    amount: float = 0.0
+    method: str = "card"  # card | paypal | applepay | afterpay | bank
+    status: str = "successful"  # successful | pending | failed
+    kind: str = "charge"  # charge | refund | chargeback
+    reference: Optional[str] = None
+
+
+def _now_iso() -> str: return datetime.now(timezone.utc).isoformat()
+
+
+async def _seed_transactions_and_returns():
+    if await db.transactions.count_documents({}) > 0:
+        return
+    orders = await db.orders.find({}, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
+    rng = random.Random(7)
+    tx_docs = []
+    for o in orders:
+        status = rng.choices(["successful", "pending", "failed"], weights=[85, 8, 7])[0]
+        tx_docs.append({
+            "id": str(uuid.uuid4()),
+            "order_id": o["id"],
+            "customer_name": o.get("customer_name") or "Customer",
+            "amount": o.get("total") or 0,
+            "method": rng.choice(["card", "paypal", "applepay", "afterpay", "bank"]),
+            "status": status,
+            "kind": "charge",
+            "reference": f"txn_{uuid.uuid4().hex[:10]}",
+            "created_at": o.get("created_at") or _now_iso(),
+        })
+    # Refunds & chargebacks
+    for o in rng.sample(orders, min(12, len(orders))):
+        tx_docs.append({
+            "id": str(uuid.uuid4()),
+            "order_id": o["id"],
+            "customer_name": o.get("customer_name") or "Customer",
+            "amount": round((o.get("total") or 0) * rng.uniform(0.25, 1.0), 2),
+            "method": rng.choice(["card", "paypal"]),
+            "status": "successful",
+            "kind": rng.choices(["refund", "chargeback"], weights=[4, 1])[0],
+            "reference": f"txn_{uuid.uuid4().hex[:10]}",
+            "created_at": _now_iso(),
+        })
+    if tx_docs:
+        await db.transactions.insert_many(tx_docs)
+
+    # Returns
+    ret_docs = []
+    for o in rng.sample(orders, min(10, len(orders))):
+        ret_docs.append({
+            "id": str(uuid.uuid4()),
+            "order_id": o["id"],
+            "product_id": o.get("product_id"),
+            "product_title": o.get("product_title") or "",
+            "customer_name": o.get("customer_name") or "Customer",
+            "reason": rng.choice(["Not as described", "Faulty on arrival", "Changed mind", "Wrong size", "Damaged in transit"]),
+            "amount": o.get("total") or 0,
+            "status": rng.choice(["pending", "pending", "approved", "refunded", "rejected"]),
+            "created_at": _now_iso(),
+        })
+    if ret_docs:
+        await db.returns.insert_many(ret_docs)
+
+    # Abandoned carts
+    cart_docs = []
+    names = ["Amelia Wilson", "Jack Harris", "Olivia Nguyen", "Liam Brown", "Ava Smith", "Noah Taylor", "Emma Anderson", "Charlie Wilson", "Isla Walker", "Ethan Nguyen"]
+    for i in range(24):
+        cart_docs.append({
+            "id": str(uuid.uuid4()),
+            "customer_name": rng.choice(names),
+            "customer_email": f"cart{i}@example.com",
+            "items": rng.randint(1, 5),
+            "subtotal": round(rng.uniform(29, 899), 2),
+            "step": rng.choice(["cart", "shipping", "payment"]),
+            "recovered": rng.random() < 0.15,
+            "created_at": (datetime.now(timezone.utc) - timedelta(hours=rng.randint(1, 240))).isoformat(),
+        })
+    if cart_docs:
+        await db.abandoned_carts.insert_many(cart_docs)
+
+
+@api_router.patch("/orders/{oid}")
+async def update_order(oid: str, body: dict):
+    r = await db.orders.update_one({"id": oid}, {"$set": body})
+    if r.matched_count == 0: raise HTTPException(status_code=404, detail="Not found")
+    return await db.orders.find_one({"id": oid}, {"_id": 0})
+
+
+@api_router.get("/orders/status-counts")
+async def order_status_counts():
+    pipeline = [{"$group": {"_id": "$status", "count": {"$sum": 1}}}]
+    rows = await db.orders.aggregate(pipeline).to_list(50)
+    counts = {r["_id"]: r["count"] for r in rows}
+    total = sum(counts.values())
+    return {"total": total, "counts": counts}
+
+
+@api_router.get("/returns")
+async def list_returns(status: Optional[str] = None):
+    q = {"status": status} if status else {}
+    items = await db.returns.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    total = await db.returns.count_documents(q)
+    return {"returns": items, "total": total}
+
+
+@api_router.post("/returns", response_model=ReturnRequest)
+async def create_return(body: ReturnRequest):
+    doc = body.model_dump(); doc["id"] = str(uuid.uuid4()); doc["created_at"] = _now_iso()
+    await db.returns.insert_one(doc)
+    doc.pop("_id", None); return doc
+
+
+@api_router.patch("/returns/{rid}")
+async def update_return(rid: str, body: dict):
+    r = await db.returns.update_one({"id": rid}, {"$set": body})
+    if r.matched_count == 0: raise HTTPException(status_code=404, detail="Not found")
+    return await db.returns.find_one({"id": rid}, {"_id": 0})
+
+
+@api_router.get("/abandoned-carts")
+async def list_abandoned_carts(recovered: Optional[bool] = None):
+    q: dict[str, Any] = {}
+    if recovered is not None: q["recovered"] = recovered
+    items = await db.abandoned_carts.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    total = await db.abandoned_carts.count_documents(q)
+    total_value = sum(c.get("subtotal", 0) for c in items)
+    return {"carts": items, "total": total, "total_value": round(total_value, 2)}
+
+
+@api_router.patch("/abandoned-carts/{cid}")
+async def update_abandoned_cart(cid: str, body: dict):
+    r = await db.abandoned_carts.update_one({"id": cid}, {"$set": body})
+    if r.matched_count == 0: raise HTTPException(status_code=404, detail="Not found")
+    return await db.abandoned_carts.find_one({"id": cid}, {"_id": 0})
+
+
+@api_router.get("/transactions")
+async def list_transactions(status: Optional[str] = None, kind: Optional[str] = None):
+    q: dict[str, Any] = {}
+    if status: q["status"] = status
+    if kind:   q["kind"] = kind
+    items = await db.transactions.find(q, {"_id": 0}).sort("created_at", -1).limit(500).to_list(500)
+    total = await db.transactions.count_documents(q)
+    counts_pipeline = [{"$group": {"_id": "$status", "count": {"$sum": 1}, "amount": {"$sum": "$amount"}}}]
+    counts_rows = await db.transactions.aggregate(counts_pipeline).to_list(20)
+    counts = {r["_id"]: {"count": r["count"], "amount": round(r["amount"], 2)} for r in counts_rows}
+    return {"transactions": items, "total": total, "counts": counts}
+
+
+@api_router.post("/transactions", response_model=Transaction)
+async def create_transaction(body: Transaction):
+    doc = body.model_dump(); doc["id"] = str(uuid.uuid4()); doc["created_at"] = _now_iso()
+    await db.transactions.insert_one(doc)
+    doc.pop("_id", None); return doc
 
 
 # ---------------------------------------------------------------------------
@@ -1370,7 +1554,7 @@ async def demo_seed(reset: bool = False):
             first_names = ["Liam", "Noah", "Olivia", "Emma", "Chloe", "Jack", "Ava", "Charlie", "Mia", "Ethan", "Zoe", "Lucas", "Amelia", "Oliver", "Isla"]
             last_names = ["Nguyen", "Smith", "Wilson", "Brown", "Taylor", "Anderson", "Thomas", "Walker", "White", "Harris", "Martin", "Thompson"]
             name = f"{rng.choice(first_names)} {rng.choice(last_names)}"
-            status = rng.choices(["paid", "shipped", "delivered", "refunded", "cancelled"], weights=[3, 3, 8, 1, 1])[0]
+            status = rng.choices(["new", "pending", "processing", "ready_to_ship", "shipped", "delivered", "cancelled"], weights=[2, 2, 3, 2, 4, 8, 1])[0]
             order = {
                 "id": str(uuid.uuid4()),
                 "product_id": p["id"],

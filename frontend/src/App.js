@@ -4,7 +4,7 @@ import axios from "axios";
 import { Toaster, toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  LayoutDashboard, Package, Zap, ShoppingCart, Users, BarChart3, Settings2, Search,
+  LayoutDashboard, Package, Zap, ShoppingCart, Users, BarChart3, Settings2, Search, Eye,
   Loader2, Trash2, Star, RefreshCw, MapPin, Truck, User as UserIcon, Box, ExternalLink,
   X, ChevronLeft, ChevronRight, ClipboardPaste, Plus, TrendingUp, TrendingDown, DollarSign,
   ShoppingBag, Percent, Boxes, ArrowUpRight, Filter, Download, ImageIcon, Sparkles,
@@ -34,6 +34,35 @@ const money = (n, cur = "AUD") => (n == null ? "—" : new Intl.NumberFormat("en
 const moneyCents = (n) => (n == null ? "—" : new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n));
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" }); } catch { return iso; } };
 const fmtDay = (iso) => { try { return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short" }); } catch { return iso; } };
+
+const ORDERS_NAV = [
+  { id: "all",       label: "All Orders",         icon: ClipboardList, group: "Orders" },
+  { id: "returns",   label: "Returns & Refunds",  icon: Undo2,         group: "Orders" },
+  { id: "abandoned", label: "Abandoned Carts",    icon: ShoppingCart,  group: "Orders" },
+];
+
+const PAYMENTS_NAV = [
+  { id: "transactions", label: "All Transactions",       icon: Receipt,     group: "Payments" },
+  { id: "refunds",      label: "Refunds & Chargebacks",  icon: Undo2,       group: "Payments" },
+];
+
+const ORDER_STATUS_TABS = [
+  { id: "",              label: "All" },
+  { id: "new",           label: "New" },
+  { id: "pending",       label: "Pending" },
+  { id: "processing",    label: "Processing" },
+  { id: "ready_to_ship", label: "Ready to Ship" },
+  { id: "shipped",       label: "Shipped" },
+  { id: "delivered",     label: "Delivered" },
+  { id: "cancelled",     label: "Cancelled" },
+];
+
+const TRANSACTION_STATUS_TABS = [
+  { id: "",           label: "All" },
+  { id: "successful", label: "Successful" },
+  { id: "pending",    label: "Pending" },
+  { id: "failed",     label: "Failed" },
+];
 
 const SUPPLIER_NAV = [
   { id: "create",       label: "Create Supplier",      icon: UserPlus,       group: "Manage" },
@@ -116,6 +145,8 @@ export default function App() {
   const [supplierSection, setSupplierSection] = useState("all");
   const [customerSection, setCustomerSection] = useState("all");
   const [productSection, setProductSection] = useState("all");
+  const [ordersSection, setOrdersSection] = useState("all");
+  const [paymentsSection, setPaymentsSection] = useState("transactions");
   const [selectedItem, setSelectedItem] = useState(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -146,7 +177,9 @@ export default function App() {
   const inSuppliers = tab === "suppliers";
   const inCustomers = tab === "customers";
   const inProducts  = tab === "products";
-  const subKey = inStore ? `store-${storeSection}` : inSuppliers ? `sup-${supplierSection}` : inCustomers ? `cus-${customerSection}` : inProducts ? `prd-${productSection}` : tab;
+  const inOrders    = tab === "orders";
+  const inPayments  = tab === "payments";
+  const subKey = inStore ? `store-${storeSection}` : inSuppliers ? `sup-${supplierSection}` : inCustomers ? `cus-${customerSection}` : inProducts ? `prd-${productSection}` : inOrders ? `ord-${ordersSection}` : inPayments ? `pay-${paymentsSection}` : tab;
   return (
     <div className="min-h-screen flex bg-[color:var(--bg)]">
       <Toaster theme="light" position="bottom-right" />
@@ -180,14 +213,26 @@ export default function App() {
             <SubSideNav title="Products" subtitle="Catalog, inventory & pricing" icon={Package} nav={PRODUCT_NAV} testPrefix="prd" active={productSection} setActive={setProductSection}/>
           </motion.aside>
         )}
+        {inOrders && (
+          <motion.aside key="orders-sidebar" initial={{ opacity: 0, x: -20, width: 0 }} animate={{ opacity: 1, x: 0, width: 280 }} exit={{ opacity: 0, x: -20, width: 0 }} transition={{ duration: 0.22 }} className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden">
+            <SubSideNav title="Orders" subtitle="Fulfilment & returns" icon={ShoppingCart} nav={ORDERS_NAV} testPrefix="ord" active={ordersSection} setActive={setOrdersSection}/>
+          </motion.aside>
+        )}
+        {inPayments && (
+          <motion.aside key="payments-sidebar" initial={{ opacity: 0, x: -20, width: 0 }} animate={{ opacity: 1, x: 0, width: 280 }} exit={{ opacity: 0, x: -20, width: 0 }} transition={{ duration: 0.22 }} className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden">
+            <SubSideNav title="Payments" subtitle="Transactions & refunds" icon={CreditCard} nav={PAYMENTS_NAV} testPrefix="pay" active={paymentsSection} setActive={setPaymentsSection}/>
+          </motion.aside>
+        )}
       </AnimatePresence>
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopHeader tab={tab} storeSection={storeSection} supplierSection={supplierSection} customerSection={customerSection} productSection={productSection} onMenu={() => setMobileNavOpen(true)}/>
+        <TopHeader tab={tab} storeSection={storeSection} supplierSection={supplierSection} customerSection={customerSection} productSection={productSection} ordersSection={ordersSection} paymentsSection={paymentsSection} onMenu={() => setMobileNavOpen(true)}/>
         {inStore     && <SubMobileNav nav={STORE_NAV}    testPrefix="store-m" active={storeSection}    setActive={setStoreSection}/>}
         {inSuppliers && <SubMobileNav nav={SUPPLIER_NAV} testPrefix="sup-m"   active={supplierSection} setActive={setSupplierSection}/>}
         {inCustomers && <SubMobileNav nav={CUSTOMER_NAV} testPrefix="cus-m"   active={customerSection} setActive={setCustomerSection}/>}
         {inProducts  && <SubMobileNav nav={PRODUCT_NAV}  testPrefix="prd-m"   active={productSection}  setActive={setProductSection}/>}
+        {inOrders    && <SubMobileNav nav={ORDERS_NAV}   testPrefix="ord-m"   active={ordersSection}   setActive={setOrdersSection}/>}
+        {inPayments  && <SubMobileNav nav={PAYMENTS_NAV} testPrefix="pay-m"   active={paymentsSection} setActive={setPaymentsSection}/>}
         <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 xl:p-10">
           <AnimatePresence mode="wait">
             <motion.div key={subKey} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
@@ -196,9 +241,10 @@ export default function App() {
               {tab === "suppliers" && <Suppliers section={supplierSection} setSection={setSupplierSection}/>}
               {tab === "customers" && <CustomersModule section={customerSection} setSection={setCustomerSection}/>}
               {tab === "products"  && <ProductsModule section={productSection} setSection={setProductSection}/>}
+              {tab === "orders"    && <OrdersModule section={ordersSection} setSection={setOrdersSection}/>}
+              {tab === "payments"  && <PaymentsModule section={paymentsSection} setSection={setPaymentsSection}/>}
               {tab === "categories" && <Categories />}
               {tab === "scraper"   && <ScraperPage onView={setSelectedItem} />}
-              {tab === "orders"    && <Orders />}
               {tab === "analytics" && <Analytics />}
               {tab === "settings"  && <SettingsPage />}
             </motion.div>
@@ -235,7 +281,8 @@ function Sidebar({ tab, setTab, mobileOpen, setMobileOpen }) {
     { id: "categories", label: "Categories", icon: Tags,          group: "Catalog" },
     { id: "suppliers", label: "Suppliers",  icon: Factory,        group: "Catalog", hasSub: true },
     { id: "scraper",   label: "eBay AU Scraper", icon: Zap, badge: "AU", group: "Catalog" },
-    { id: "orders",    label: "Orders",     icon: ShoppingCart,   group: "Operations" },
+    { id: "orders",    label: "Orders",     icon: ShoppingCart,   group: "Operations", hasSub: true },
+    { id: "payments",  label: "Payments",   icon: CreditCard,     group: "Operations", hasSub: true },
     { id: "customers", label: "Customers",  icon: Users,          group: "Operations", hasSub: true },
     { id: "analytics", label: "Analytics",  icon: BarChart3,      group: "Insights" },
     { id: "settings",  label: "Settings",   icon: Settings2,      group: "System" },
@@ -345,11 +392,11 @@ function SubMobileNav({ nav, testPrefix, active, setActive }) {
   );
 }
 
-function TopHeader({ tab, storeSection, supplierSection, customerSection, productSection, onMenu }) {
+function TopHeader({ tab, storeSection, supplierSection, customerSection, productSection, ordersSection, paymentsSection, onMenu }) {
   const titles = {
     dashboard: "Dashboard", store: "Store Management", products: "Products", categories: "Categories",
     suppliers: "Suppliers", customers: "Customers",
-    scraper: "eBay AU Scraper", orders: "Orders", analytics: "Analytics", settings: "Settings",
+    scraper: "eBay AU Scraper", orders: "Orders", payments: "Payments", analytics: "Analytics", settings: "Settings",
   };
   const subTitle = tab === "store"
     ? STORE_NAV.find((s) => s.id === storeSection)?.label
@@ -359,6 +406,10 @@ function TopHeader({ tab, storeSection, supplierSection, customerSection, produc
     ? CUSTOMER_NAV.find((s) => s.id === customerSection)?.label
     : tab === "products"
     ? PRODUCT_NAV.find((s) => s.id === productSection)?.label
+    : tab === "orders"
+    ? ORDERS_NAV.find((s) => s.id === ordersSection)?.label
+    : tab === "payments"
+    ? PAYMENTS_NAV.find((s) => s.id === paymentsSection)?.label
     : null;
 
   return (
@@ -1334,6 +1385,356 @@ function StockHistoryView({ moves }) {
         ))}
       </tbody>
     </table></div></div>
+  );
+}
+
+/* --------------------------------- Orders --------------------------------- */
+function OrdersModule({ section, setSection }) {
+  const meta = ORDERS_NAV.find((s) => s.id === section) || ORDERS_NAV[0];
+  const Icon = meta.icon;
+  const hints = {
+    all: "Every order across every status. Filter with the tabs.",
+    returns: "Customer return requests & refunds.",
+    abandoned: "Carts your buyers created but didn't complete — recover them.",
+  };
+  return (
+    <div className="grid gap-6">
+      <SubHero icon={Icon} group={meta.group} label={meta.label} hint={hints[section]}/>
+      {section === "all"       && <AllOrdersView/>}
+      {section === "returns"   && <ReturnsView/>}
+      {section === "abandoned" && <AbandonedCartsView/>}
+    </div>
+  );
+}
+
+const ORDER_STATUS_STYLE = {
+  new:           "chip-primary",
+  pending:       "chip-warning",
+  processing:    "chip-primary",
+  ready_to_ship: "chip-warning",
+  shipped:       "chip-primary",
+  delivered:     "chip-success",
+  cancelled:     "chip-danger",
+  paid:          "chip-primary",
+  refunded:      "chip-warning",
+};
+const humaniseStatus = (s) => (s || "").replace(/_/g, " ");
+
+function AllOrdersView() {
+  const [status, setStatus] = useState("");
+  const [orders, setOrders] = useState([]);
+  const [counts, setCounts] = useState({});
+  const [total, setTotal] = useState(0);
+  const [selected, setSelected] = useState(null);
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/orders`, { params: { status: status || undefined, limit: 300 }});
+    setOrders(data.orders); setTotal(data.total);
+  }, [status]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { axios.get(`${API}/orders/status-counts`).then(r => setCounts(r.data.counts || {})); }, [orders.length]);
+
+  const setOrderStatus = async (o, s) => {
+    try { await axios.patch(`${API}/orders/${o.id}`, { status: s }); toast.success(`Marked ${humaniseStatus(s)}`); await load(); }
+    catch { toast.error("Update failed"); }
+  };
+
+  return (
+    <div className="grid gap-4">
+      <div className="card p-2 flex items-center gap-1 overflow-x-auto">
+        {ORDER_STATUS_TABS.map(t => {
+          const on = status === t.id;
+          const count = t.id ? (counts[t.id] || 0) : Object.values(counts).reduce((a,b)=>a+b,0);
+          return (
+            <button key={t.id || "all"} data-testid={`ord-tab-${t.id || "all"}`} onClick={() => setStatus(t.id)}
+              className={`shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${on ? "bg-indigo-50 text-indigo-600 border border-indigo-100" : "text-slate-600 hover:bg-slate-50"}`}>
+              {t.label}
+              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${on ? "bg-indigo-100 text-indigo-600" : "bg-slate-100 text-slate-500"}`}>{count}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="text-xs text-slate-500 font-mono">{total} order{total===1?"":"s"} shown</div>
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="tbl">
+            <thead><tr><th>Order ID</th><th>Product</th><th>Customer</th><th>Qty</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead>
+            <tbody>
+              {orders.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-slate-500">No orders in this bucket</td></tr>}
+              {orders.map(o => (
+                <tr key={o.id} data-testid="ord-row">
+                  <td className="font-mono text-xs text-slate-500">{o.id.slice(0,8)}</td>
+                  <td className="text-sm truncate max-w-[280px]" title={o.product_title}>{o.product_title}</td>
+                  <td>{o.customer_name}</td>
+                  <td>{o.quantity}</td>
+                  <td className="font-mono font-bold text-indigo-600">{moneyCents(o.total)}</td>
+                  <td>
+                    <select value={o.status} onChange={(e)=>setOrderStatus(o, e.target.value)} className="input px-2 py-1 text-xs">
+                      {ORDER_STATUSES.map(s => <option key={s} value={s}>{humaniseStatus(s)}</option>)}
+                    </select>
+                  </td>
+                  <td className="text-xs text-slate-500 font-mono">{fmtDate(o.created_at)}</td>
+                  <td><button onClick={()=>setSelected(o)} className="btn btn-ghost text-xs !py-1 !px-2"><Eye size={12}/> View</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <AnimatePresence>{selected && <OrderDetailsModal order={selected} onClose={()=>setSelected(null)} onStatus={setOrderStatus}/>}</AnimatePresence>
+    </div>
+  );
+}
+
+const ORDER_STATUSES = ["new", "pending", "processing", "ready_to_ship", "shipped", "delivered", "cancelled"];
+
+function OrderDetailsModal({ order, onClose, onStatus }) {
+  return (
+    <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md overflow-y-auto" onClick={onClose}>
+      <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} exit={{opacity:0, y:20}} onClick={(e)=>e.stopPropagation()} className="card max-w-2xl mx-auto my-10 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div><div className="text-[11px] font-mono text-slate-400">ORDER · #{order.id.slice(0,8)}</div><div className="font-display font-bold text-xl">{order.product_title}</div></div>
+          <button onClick={onClose} className="btn btn-ghost !p-2"><X size={16}/></button>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+          <StatBox label="Total" value={moneyCents(order.total)}/>
+          <StatBox label="Profit" value={moneyCents(order.profit)} tone="success"/>
+          <StatBox label="Qty" value={order.quantity}/>
+          <StatBox label="Date" value={fmtDate(order.created_at).split(",")[0]}/>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <InfoBox icon={<UserIcon size={14}/>} label="Customer" value={order.customer_name}/>
+          <InfoBox icon={<Mail size={14}/>} label="Email" value={order.customer_email} mono/>
+          <InfoBox icon={<Receipt size={14}/>} label="Unit price" value={moneyCents(order.unit_price)}/>
+          <InfoBox icon={<Percent size={14}/>} label="Unit cost" value={moneyCents(order.unit_cost)}/>
+        </div>
+        <div className="mt-4">
+          <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2">Update status</div>
+          <div className="flex flex-wrap gap-2">
+            {ORDER_STATUSES.map(s => (
+              <button key={s} onClick={()=>onStatus(order, s)} className={`chip ${order.status === s ? ORDER_STATUS_STYLE[s] || "chip-primary" : "chip-neutral"} capitalize cursor-pointer`}>{humaniseStatus(s)}</button>
+            ))}
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function ReturnsView() {
+  const [returns, setReturns] = useState([]);
+  const [status, setStatus] = useState("");
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/returns`, { params: { status: status || undefined }});
+    setReturns(data.returns);
+  }, [status]);
+  useEffect(() => { load(); }, [load]);
+  const setStatusFor = async (r, s) => { await axios.patch(`${API}/returns/${r.id}`, { status: s }); toast.success(`Marked ${s}`); load(); };
+  const stats = returns.reduce((a,r) => { a.total++; a.amount += r.amount || 0; if (r.status === "refunded") a.refunded += r.amount || 0; return a; }, { total:0, amount:0, refunded:0 });
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatBox label="Return requests" value={stats.total}/>
+        <StatBox label="Refunded value" value={moneyCents(stats.refunded)} tone="success"/>
+        <StatBox label="Pending" value={returns.filter(r=>r.status==='pending').length}/>
+        <StatBox label="Rejected" value={returns.filter(r=>r.status==='rejected').length}/>
+      </div>
+      <div className="card p-2 flex items-center gap-1 overflow-x-auto">
+        {["", "pending", "approved", "refunded", "rejected"].map(s => (
+          <button key={s||"all"} onClick={()=>setStatus(s)} className={`shrink-0 px-3 py-2 rounded-lg text-sm font-medium capitalize ${status===s?"bg-indigo-50 text-indigo-600 border border-indigo-100":"text-slate-600 hover:bg-slate-50"}`}>{s || "All"}</button>
+        ))}
+      </div>
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto"><table className="tbl">
+          <thead><tr><th>Product</th><th>Customer</th><th>Reason</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody>
+            {returns.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-500">No returns</td></tr>}
+            {returns.map(r => (
+              <tr key={r.id}>
+                <td className="text-sm truncate max-w-[280px]">{r.product_title}</td>
+                <td>{r.customer_name}</td>
+                <td className="text-xs text-slate-500">{r.reason}</td>
+                <td className="font-mono font-bold text-indigo-600">{moneyCents(r.amount)}</td>
+                <td><select value={r.status} onChange={(e)=>setStatusFor(r, e.target.value)} className="input px-2 py-1 text-xs">{["pending","approved","refunded","rejected"].map(s=><option key={s}>{s}</option>)}</select></td>
+                <td className="text-xs text-slate-500 font-mono">{fmtDate(r.created_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+  );
+}
+
+function AbandonedCartsView() {
+  const [carts, setCarts] = useState([]); const [totalValue, setTotalValue] = useState(0);
+  const [recovered, setRecovered] = useState("");
+  const load = useCallback(async () => {
+    const params = recovered === "" ? {} : { recovered: recovered === "yes" };
+    const { data } = await axios.get(`${API}/abandoned-carts`, { params });
+    setCarts(data.carts); setTotalValue(data.total_value);
+  }, [recovered]);
+  useEffect(() => { load(); }, [load]);
+  const markRecovered = async (c) => { await axios.patch(`${API}/abandoned-carts/${c.id}`, { recovered: true }); toast.success("Marked recovered"); load(); };
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatBox label="Abandoned carts" value={carts.length}/>
+        <StatBox label="Recoverable value" value={moneyCents(totalValue)}/>
+        <StatBox label="Recovered" value={carts.filter(c=>c.recovered).length} tone="success"/>
+        <StatBox label="Recovery rate" value={carts.length ? `${((carts.filter(c=>c.recovered).length / carts.length)*100).toFixed(1)}%` : "—"}/>
+      </div>
+      <div className="card p-2 flex items-center gap-1 overflow-x-auto">
+        {[["","All"],["no","Not recovered"],["yes","Recovered"]].map(([v,l]) => (
+          <button key={v||"all"} onClick={()=>setRecovered(v)} className={`shrink-0 px-3 py-2 rounded-lg text-sm font-medium ${recovered===v?"bg-indigo-50 text-indigo-600 border border-indigo-100":"text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+        ))}
+      </div>
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto"><table className="tbl">
+          <thead><tr><th>Customer</th><th>Email</th><th>Items</th><th>Subtotal</th><th>Step</th><th>Age</th><th></th></tr></thead>
+          <tbody>
+            {carts.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-slate-500">No abandoned carts</td></tr>}
+            {carts.map(c => {
+              const hours = Math.round((Date.now() - new Date(c.created_at).getTime()) / 3600000);
+              return (
+                <tr key={c.id} className={c.recovered ? "opacity-50" : ""}>
+                  <td>{c.customer_name}</td>
+                  <td className="font-mono text-xs text-slate-500">{c.customer_email}</td>
+                  <td>{c.items}</td>
+                  <td className="font-mono font-bold text-indigo-600">{moneyCents(c.subtotal)}</td>
+                  <td><span className="chip chip-neutral capitalize">{c.step}</span></td>
+                  <td className="text-xs text-slate-500">{hours < 24 ? `${hours}h ago` : `${Math.floor(hours/24)}d ago`}</td>
+                  <td>{c.recovered ? <span className="chip chip-success">recovered</span> : <button onClick={()=>markRecovered(c)} className="btn btn-ghost text-xs !py-1 !px-2">Mark recovered</button>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------- Payments -------------------------------- */
+function PaymentsModule({ section, setSection }) {
+  const meta = PAYMENTS_NAV.find((s) => s.id === section) || PAYMENTS_NAV[0];
+  const Icon = meta.icon;
+  const hints = {
+    transactions: "Every payment attempt across your store.",
+    refunds: "Refunded charges and disputed chargebacks.",
+  };
+  return (
+    <div className="grid gap-6">
+      <SubHero icon={Icon} group={meta.group} label={meta.label} hint={hints[section]}/>
+      {section === "transactions" && <AllTransactionsView/>}
+      {section === "refunds"      && <RefundsChargebacksView/>}
+    </div>
+  );
+}
+
+function AllTransactionsView() {
+  const [status, setStatus] = useState("");
+  const [tx, setTx] = useState([]); const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState({});
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/transactions`, { params: { status: status || undefined, kind: "charge" }});
+    setTx(data.transactions); setTotal(data.total); setCounts(data.counts || {});
+  }, [status]);
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatBox label="Total charges" value={total}/>
+        <StatBox label="Successful" value={counts.successful?.count || 0} tone="success"/>
+        <StatBox label="Pending"    value={counts.pending?.count || 0}/>
+        <StatBox label="Failed"     value={counts.failed?.count || 0}/>
+      </div>
+      <div className="card p-2 flex items-center gap-1 overflow-x-auto">
+        {TRANSACTION_STATUS_TABS.map(t => {
+          const on = status === t.id;
+          const info = t.id ? counts[t.id] : { count: Object.values(counts).reduce((a,b)=>a+(b?.count||0),0), amount: Object.values(counts).reduce((a,b)=>a+(b?.amount||0),0) };
+          return (
+            <button key={t.id||"all"} data-testid={`tx-tab-${t.id||"all"}`} onClick={() => setStatus(t.id)}
+              className={`shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium ${on ? "bg-indigo-50 text-indigo-600 border border-indigo-100" : "text-slate-600 hover:bg-slate-50"}`}>
+              {t.label}
+              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${on ? "bg-indigo-100 text-indigo-600" : "bg-slate-100 text-slate-500"}`}>{info?.count || 0}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto"><table className="tbl">
+          <thead><tr><th>Reference</th><th>Customer</th><th>Method</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody>
+            {tx.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-500">No transactions</td></tr>}
+            {tx.map(t => (
+              <tr key={t.id} data-testid="tx-row">
+                <td className="font-mono text-xs text-slate-500">{t.reference || t.id.slice(0,10)}</td>
+                <td>{t.customer_name}</td>
+                <td><span className="chip chip-neutral capitalize">{t.method}</span></td>
+                <td className="font-mono font-bold text-indigo-600">{moneyCents(t.amount)}</td>
+                <td><span className={`chip capitalize ${t.status==='successful'?'chip-success':t.status==='pending'?'chip-warning':'chip-danger'}`}>{t.status}</span></td>
+                <td className="text-xs text-slate-500 font-mono">{fmtDate(t.created_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+  );
+}
+
+function RefundsChargebacksView() {
+  const [kind, setKind] = useState("");
+  const [tx, setTx] = useState([]);
+  const load = useCallback(async () => {
+    const { data: refunds } = await axios.get(`${API}/transactions`, { params: { kind: "refund" }});
+    const { data: cb } = await axios.get(`${API}/transactions`, { params: { kind: "chargeback" }});
+    let all = [...refunds.transactions, ...cb.transactions].sort((a,b) => (a.created_at < b.created_at ? 1 : -1));
+    if (kind) all = all.filter(t => t.kind === kind);
+    setTx(all);
+  }, [kind]);
+  useEffect(() => { load(); }, [load]);
+  const total = tx.reduce((a,t) => a + (t.amount || 0), 0);
+  const refunds = tx.filter(t => t.kind === "refund").reduce((a,t)=>a+(t.amount||0),0);
+  const chargebacks = tx.filter(t => t.kind === "chargeback").reduce((a,t)=>a+(t.amount||0),0);
+  return (
+    <div className="grid gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatBox label="Refunds" value={moneyCents(refunds)}/>
+        <StatBox label="Chargebacks" value={moneyCents(chargebacks)} tone="success"/>
+        <StatBox label="Combined" value={moneyCents(total)}/>
+        <StatBox label="Records" value={tx.length}/>
+      </div>
+      <div className="card p-2 flex items-center gap-1 overflow-x-auto">
+        {[["","All"],["refund","Refunds"],["chargeback","Chargebacks"]].map(([v,l]) => (
+          <button key={v||"all"} onClick={()=>setKind(v)} className={`shrink-0 px-3 py-2 rounded-lg text-sm font-medium ${kind===v?"bg-indigo-50 text-indigo-600 border border-indigo-100":"text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+        ))}
+      </div>
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto"><table className="tbl">
+          <thead><tr><th>Reference</th><th>Customer</th><th>Kind</th><th>Amount</th><th>Method</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody>
+            {tx.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-slate-500">No refunds or chargebacks</td></tr>}
+            {tx.map(t => (
+              <tr key={t.id}>
+                <td className="font-mono text-xs text-slate-500">{t.reference || t.id.slice(0,10)}</td>
+                <td>{t.customer_name}</td>
+                <td><span className={`chip capitalize ${t.kind==='chargeback'?'chip-danger':'chip-warning'}`}>{t.kind}</span></td>
+                <td className="font-mono font-bold text-indigo-600">{moneyCents(t.amount)}</td>
+                <td><span className="chip chip-neutral capitalize">{t.method}</span></td>
+                <td><span className={`chip capitalize ${t.status==='successful'?'chip-success':t.status==='pending'?'chip-warning':'chip-danger'}`}>{t.status}</span></td>
+                <td className="text-xs text-slate-500 font-mono">{fmtDate(t.created_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+      </div>
+    </div>
   );
 }
 

@@ -260,7 +260,7 @@ function Sidebar({ tab, setTab, mobileOpen, setMobileOpen }) {
     { id: "products",  label: "Products",   icon: Package,        group: "Catalog", hasSub: true },
     { id: "categories", label: "Categories", icon: Tags,          group: "Catalog" },
     { id: "suppliers", label: "Suppliers",  icon: Factory,        group: "Catalog", hasSub: true },
-    { id: "scraper",   label: "eBay AU Scraper", icon: Zap, badge: "AU", group: "Catalog" },
+    { id: "scraper",   label: "Product Sourcing", icon: Zap, badge: "AU", group: "Catalog" },
     { id: "orders",    label: "Orders",     icon: ShoppingCart,   group: "Operations", hasSub: true },
     { id: "payments",  label: "Payments",   icon: CreditCard,     group: "Operations", hasSub: true },
     { id: "customers", label: "Customers",  icon: Users,          group: "Operations", hasSub: true },
@@ -303,7 +303,7 @@ function Sidebar({ tab, setTab, mobileOpen, setMobileOpen }) {
         <div className="card p-4 bg-gradient-to-br from-indigo-50 to-pink-50 border-indigo-100">
           <div className="flex items-center gap-2 text-indigo-700 font-display font-bold text-sm"><Sparkles size={14}/> Import from eBay</div>
           <p className="text-xs text-slate-600 mt-1 leading-relaxed">Paste any ebay.com.au URL to add a new product.</p>
-          <button onClick={() => setTab("scraper")} className="btn btn-primary w-full mt-3 text-xs py-2">Open scraper</button>
+          <button onClick={() => setTab("scraper")} className="btn btn-primary w-full mt-3 text-xs py-2">Open sourcing</button>
         </div>
       </div>
     </>
@@ -376,7 +376,7 @@ function TopHeader({ tab, storeSection, supplierSection, customerSection, produc
   const titles = {
     dashboard: "Dashboard", store: "Store Management", products: "Products", categories: "Categories",
     suppliers: "Suppliers", customers: "Customers",
-    scraper: "eBay AU Scraper", orders: "Orders", payments: "Payments", analytics: "Analytics", settings: "Settings",
+    scraper: "Product Sourcing", orders: "Orders", payments: "Payments", analytics: "Analytics", settings: "Settings",
   };
   const subTitle = tab === "store"
     ? STORE_NAV.find((s) => s.id === storeSection)?.label
@@ -516,7 +516,7 @@ function AllSuppliers({ list, total, q, setQ, sort, setSort, status, setStatus }
               <th>Status</th>
             </tr></thead>
             <tbody>
-              {list.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-500">No eBay sellers yet — import a listing on the eBay Scraper page.</td></tr>}
+              {list.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-500">No eBay sellers yet — import a listing on the Product Sourcing page.</td></tr>}
               {list.map((s) => (
                 <tr key={s.id} className={s.status === "inactive" ? "opacity-60" : ""} data-testid="sup-row">
                   <td>
@@ -1906,7 +1906,7 @@ function Products() {
             <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Price</th><th>Stock</th><th>Sold</th><th></th></tr></thead>
             <tbody>
               {list.length === 0
-                ? <tr><td colSpan={7} className="text-center py-10 text-slate-500">No products yet. Head to the <b>eBay Scraper</b> and import your first one.</td></tr>
+                ? <tr><td colSpan={7} className="text-center py-10 text-slate-500">No products yet. Head to <b>Product Sourcing</b> and import your first one.</td></tr>
                 : list.map((p) => {
                     const c = catByslug(p.category);
                     return (
@@ -2215,7 +2215,7 @@ function ScraperPage({ onView }) {
     <div className="grid gap-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <div className="font-display text-2xl font-bold tracking-tight">eBay AU Scraper</div>
+          <div className="font-display text-2xl font-bold tracking-tight">Product Sourcing</div>
           <div className="text-xs text-slate-500 font-mono">stealth scrape · nightly auto-refresh · sold detection</div>
         </div>
         <button data-testid="refresh-all-btn" onClick={refreshAll} disabled={refreshingAll} className="btn btn-primary">

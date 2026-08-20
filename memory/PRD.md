@@ -18,6 +18,18 @@ Light, modern theme.
   `category_performance` (revenue+profit+margin per category), `best_margin_products`
   (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
 
+### In-app toasts on new notifications (2026-02-20)
+- `NotificationBell` keeps a `seenIdsRef` (initialised silently on first load so we don't
+  toast the backlog on page refresh). On every subsequent poll it diffs and fires a
+  Sonner toast for each fresh, unread notification with the type icon + coloured
+  accent + smart description (price arrow + margin swing for `price_change`,
+  `body` for other types) + an "Open" action that runs the same click-to-navigate as
+  the dropdown row.
+- Polling interval dropped from 30 s to 15 s so alerts feel real-time.
+- Verified end-to-end via Playwright: a fresh notification inserted after mount
+  reliably produces `[data-sonner-toast]:has-text("New order received")` within the
+  next poll cycle.
+
 ### More notification types + Push-to-Phone (2026-02-20)
 **Types added** — the bell now emits and renders 6 types with distinct icons/colours:
 - `price_change`, `new_order`, `out_of_stock`, `low_stock`, `order_status`, `new_customer`.

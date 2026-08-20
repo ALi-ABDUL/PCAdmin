@@ -439,16 +439,56 @@ function NotificationBell({ onNavigate }) {
   const [unread, setUnread] = useState(0);
   const [busy, setBusy] = useState(false);
   const ref = useRef(null);
+  // Track the newest notification we've already surfaced so we don't re-toast on refresh.
+  const seenIdsRef = useRef(null); // Set<id> — null = "first load, don't toast anything"
 
   const load = useCallback(async () => {
     try {
       const { data } = await axios.get(`${API}/notifications`, { params: { limit: 25 } });
-      setRows(data.notifications || []);
+      const list = data.notifications || [];
+      setRows(list);
       setUnread(data.unread_count || 0);
+
+      // First run: prime the seen set silently.
+      if (seenIdsRef.current === null) {
+        seenIdsRef.current = new Set(list.map((n) => n.id));
+        return;
+      }
+      // Toast anything that's new since last poll (unread only).
+      const seen = seenIdsRef.current;
+      const fresh = list.filter((n) => !seen.has(n.id) && !n.read);
+      if (fresh.length) {
+        // Newest first, but toast in reverse so newest appears on top.
+        fresh
+          .slice()
+          .sort((a, b) => (a.at < b.at ? -1 : 1))
+          .forEach((n) => {
+            const meta = NOTIF_META[n.type] || NOTIF_META.price_change;
+            const desc = (() => {
+              if (n.type === "price_change") {
+                const dir = (n.new_price ?? 0) < (n.old_price ?? 0) ? "↓" : "↑";
+                return `${n.product_title || ""} · $${(n.old_price ?? 0).toFixed(2)} ${dir} $${(n.new_price ?? 0).toFixed(2)} · margin ${(n.delta_margin ?? 0) > 0 ? "+" : ""}${(n.delta_margin ?? 0).toFixed(1)}pp`;
+              }
+              return n.body || n.product_title || "";
+            })();
+            toast(n.title || "New notification", {
+              description: desc,
+              icon: <meta.icon size={16} style={{ color: meta.color }}/>,
+              duration: 8000,
+              action: {
+                label: "Open",
+                onClick: () => onClickRow(n),
+              },
+            });
+          });
+      }
+      // Refresh the seen set to the union of previous + current (so read-away rows don't re-toast).
+      seenIdsRef.current = new Set(list.map((n) => n.id));
     } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [load]);
 
   useEffect(() => {
     const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };

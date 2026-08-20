@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 import asyncio
+import resend
 from scraper import (
     ScrapeError,
     NotEbayAUError,
@@ -353,6 +354,20 @@ async def scrape(req: ScrapeRequest) -> dict:
                 })
                 # Mirror to product if linked
                 await db.products.update_many({"source_item_id": data.get("item_id")}, {"$set": {"active": False, "is_sold": True, "updated_at": now_iso}})
+                # Notification: product went out of stock on eBay
+                linked = await db.products.find({"source_item_id": data.get("item_id")}, {"_id": 0, "id": 1, "title": 1, "images": 1}).to_list(20)
+                targets = linked or [{"id": None, "title": data.get("title") or existing.get("title"), "images": data.get("images") or existing.get("images") or []}]
+                for lp in targets:
+                    await _emit_notification(
+                        type="out_of_stock",
+                        title="Sold out on eBay",
+                        body=f"{lp.get('title') or 'Item'} · listing is no longer live",
+                        product_id=lp.get("id"),
+                        item_id=data.get("item_id"),
+                        ebay_url=existing.get("url"),
+                        product_title=lp.get("title"),
+                        image=(lp.get("images") or [None])[0],
+                    )
             history = existing.get("price_history", [])
             last_val = history[-1]["value"] if history else None
             new_val = data.get("price_value")
@@ -721,9 +736,27 @@ async def _seed_transactions_and_returns():
 
 @api_router.patch("/orders/{oid}")
 async def update_order(oid: str, body: dict):
+    prev = await db.orders.find_one({"id": oid}, {"_id": 0})
+    if not prev:
+        raise HTTPException(status_code=404, detail="Not found")
     r = await db.orders.update_one({"id": oid}, {"$set": body})
-    if r.matched_count == 0: raise HTTPException(status_code=404, detail="Not found")
-    return await db.orders.find_one({"id": oid}, {"_id": 0})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    updated = await db.orders.find_one({"id": oid}, {"_id": 0})
+    # Notification: order status updated
+    new_status = body.get("status")
+    if new_status and new_status != prev.get("status"):
+        await _emit_notification(
+            type="order_status",
+            title="Order status updated",
+            body=f"#{oid[:8]} · {prev.get('status')} → {new_status}",
+            order_id=oid,
+            product_id=prev.get("product_id"),
+            product_title=prev.get("product_title"),
+            data={"old_status": prev.get("status"), "new_status": new_status,
+                  "customer_name": prev.get("customer_name"), "total": prev.get("total")},
+        )
+    return updated
 
 
 @api_router.get("/orders/status-counts")
@@ -925,6 +958,14 @@ async def customers_summary():
 async def create_customer(body: CustomerBase):
     c = Customer(**body.model_dump())
     await db.customers.insert_one(c.model_dump())
+    # Notification: new customer registered
+    await _emit_notification(
+        type="new_customer",
+        title="New customer registered",
+        body=f"{c.name} · {c.email or 'no email'}",
+        customer_id=c.id,
+        data={"name": c.name, "email": c.email, "group": c.group},
+    )
     return c
 
 
@@ -1361,12 +1402,20 @@ def _guess_category(
 
 class Notification(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    # type ∈ price_change | new_order | out_of_stock | low_stock | order_status | new_customer
     type: str = "price_change"
+    title: Optional[str] = None
+    body: Optional[str] = None
+    # Deep-link target: any of these tells the frontend where to route on click.
     product_id: Optional[str] = None
+    order_id: Optional[str] = None
+    customer_id: Optional[str] = None
+    item_id: Optional[str] = None
+    ebay_url: Optional[str] = None
+    # Visuals
     product_title: Optional[str] = None
     image: Optional[str] = None
-    ebay_url: Optional[str] = None
-    item_id: Optional[str] = None
+    # Price-change specifics (retained for existing rows)
     old_price: Optional[float] = None
     new_price: Optional[float] = None
     old_sell: Optional[float] = None
@@ -1376,8 +1425,222 @@ class Notification(BaseModel):
     old_margin_pct: Optional[float] = None
     new_margin_pct: Optional[float] = None
     delta_margin: Optional[float] = None
+    # Generic payload for the newer types (kept flexible)
+    data: dict = Field(default_factory=dict)
     at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     read: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Push channels (Email via Resend + Telegram)
+# ---------------------------------------------------------------------------
+PUSH_SETTINGS_DEFAULTS: dict = {
+    "id": "singleton",
+    "email_enabled": True,
+    "telegram_enabled": True,
+    "critical_only": True,           # if True, only pushes critical types (see PUSH_CRITICAL_TYPES)
+    "margin_drop_threshold_pp": 3.0, # for price_change: skip unless margin drops by ≥ this many percentage points
+}
+PUSH_CRITICAL_TYPES = {"new_order", "out_of_stock", "price_change"}
+
+
+async def _get_push_settings() -> dict:
+    doc = await db.push_settings.find_one({"id": "singleton"}, {"_id": 0})
+    if not doc:
+        await db.push_settings.insert_one({**PUSH_SETTINGS_DEFAULTS})
+        return {**PUSH_SETTINGS_DEFAULTS}
+    return {**PUSH_SETTINGS_DEFAULTS, **doc}
+
+
+def _push_channel_status() -> dict:
+    return {
+        "email_configured": bool(os.environ.get("RESEND_API_KEY") and os.environ.get("RESEND_TO_EMAIL")),
+        "telegram_configured": bool(os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")),
+    }
+
+
+def _notif_is_critical(n: dict, settings: dict) -> bool:
+    """Decide if a notification should push based on user settings."""
+    if not settings.get("critical_only"):
+        return True
+    if n.get("type") not in PUSH_CRITICAL_TYPES:
+        return False
+    if n.get("type") == "price_change":
+        threshold = float(settings.get("margin_drop_threshold_pp") or 0)
+        delta = float(n.get("delta_margin") or 0)
+        return delta <= -threshold  # margin drop of at least `threshold` pp
+    return True
+
+
+async def _send_email(subject: str, html: str) -> None:
+    key = os.environ.get("RESEND_API_KEY")
+    to = os.environ.get("RESEND_TO_EMAIL")
+    frm = os.environ.get("RESEND_FROM_EMAIL") or "onboarding@resend.dev"
+    if not key or not to:
+        return
+    resend.api_key = key
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": frm, "to": [to], "subject": subject, "html": html,
+        })
+    except Exception as e:
+        logger.warning(f"[push] Resend send failed: {e}")
+
+
+async def _send_telegram(text: str) -> None:
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                      "disable_web_page_preview": True},
+            )
+    except Exception as e:
+        logger.warning(f"[push] Telegram send failed: {e}")
+
+
+def _format_notification_html(n: dict) -> tuple[str, str, str]:
+    """Return (subject, html_body, plain_text_for_telegram) for a notification."""
+    t = n.get("type")
+    title = n.get("title") or "Notification"
+    body = n.get("body") or ""
+    at = n.get("at") or ""
+
+    # Type-specific rows
+    rows: list[tuple[str, str]] = []
+    if t == "price_change":
+        rows += [
+            ("Product",  n.get("product_title") or "—"),
+            ("Old eBay price", f"${(n.get('old_price') or 0):.2f}"),
+            ("New eBay price", f"${(n.get('new_price') or 0):.2f}"),
+            ("Old margin", f"{(n.get('old_margin_pct') or 0):.1f}%"),
+            ("New margin", f"{(n.get('new_margin_pct') or 0):.1f}%"),
+            ("Change",   f"{(n.get('delta_margin') or 0):+.1f} pp"),
+        ]
+    elif t == "new_order":
+        d = n.get("data") or {}
+        rows += [
+            ("Customer", d.get("customer_name") or "—"),
+            ("Product",  n.get("product_title") or "—"),
+            ("Total",    f"${float(d.get('total') or 0):.2f}"),
+            ("Quantity", str(d.get("quantity") or 1)),
+        ]
+    elif t == "out_of_stock":
+        rows += [("Product", n.get("product_title") or "—"),
+                 ("eBay listing", n.get("ebay_url") or "—")]
+    elif t == "low_stock":
+        d = n.get("data") or {}
+        rows += [("Product", n.get("product_title") or "—"),
+                 ("Stock left", str(d.get("stock")))]
+    elif t == "order_status":
+        d = n.get("data") or {}
+        rows += [("Order", (n.get('order_id') or '')[:8]),
+                 ("Change", f"{d.get('old_status')} → {d.get('new_status')}"),
+                 ("Customer", d.get("customer_name") or "—")]
+    elif t == "new_customer":
+        d = n.get("data") or {}
+        rows += [("Name", d.get("name") or "—"),
+                 ("Email", d.get("email") or "—"),
+                 ("Group", d.get("group") or "—")]
+
+    row_html = "".join(
+        f'<tr><td style="padding:6px 12px;color:#64748B;font-size:12px;">{k}</td>'
+        f'<td style="padding:6px 12px;color:#0F172A;font-size:13px;">{v}</td></tr>'
+        for k, v in rows
+    )
+    html = f"""<!doctype html>
+<html><body style="font-family:Arial,sans-serif;background:#F7F7FB;padding:32px;color:#0F172A;">
+  <table role="presentation" cellspacing="0" cellpadding="0" width="100%" style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #EAEAF0;border-radius:12px;overflow:hidden;">
+    <tr><td style="padding:20px 24px;background:linear-gradient(135deg,#4F46E5,#EC4899);color:#fff;">
+      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:0.85;">{t.upper()}</div>
+      <div style="font-size:20px;font-weight:700;margin-top:4px;">{title}</div>
+    </td></tr>
+    <tr><td style="padding:16px 24px;color:#334155;font-size:14px;">{body}</td></tr>
+    <tr><td style="padding:0 12px 12px 12px;"><table cellspacing="0" cellpadding="0" width="100%" style="border-collapse:collapse;">{row_html}</table></td></tr>
+    <tr><td style="padding:12px 24px 20px 24px;color:#94A3B8;font-size:11px;">Sent {at}</td></tr>
+  </table>
+</body></html>"""
+    plain_lines = [f"<b>{title}</b>", body] + [f"{k}: {v}" for k, v in rows]
+    return f"[{t}] {title}", html, "\n".join(plain_lines)
+
+
+async def _push_notification(n: dict) -> None:
+    """Fire push channels for a notification if it qualifies."""
+    try:
+        settings = await _get_push_settings()
+        if not _notif_is_critical(n, settings):
+            return
+        subject, html, plain = _format_notification_html(n)
+        tasks = []
+        if settings.get("email_enabled", True):
+            tasks.append(_send_email(subject, html))
+        if settings.get("telegram_enabled", True):
+            tasks.append(_send_telegram(plain))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+    except Exception as e:
+        logger.warning(f"[push] pipeline failed: {e}")
+
+
+class PushSettingsUpdate(BaseModel):
+    email_enabled: Optional[bool] = None
+    telegram_enabled: Optional[bool] = None
+    critical_only: Optional[bool] = None
+    margin_drop_threshold_pp: Optional[float] = None
+
+
+@api_router.get("/push/settings")
+async def get_push_settings():
+    s = await _get_push_settings()
+    return {**s, "channels": _push_channel_status()}
+
+
+@api_router.patch("/push/settings")
+async def update_push_settings(body: PushSettingsUpdate):
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields")
+    await db.push_settings.update_one({"id": "singleton"}, {"$set": fields}, upsert=True)
+    return await get_push_settings()
+
+
+@api_router.post("/push/test")
+async def push_test():
+    """Send a test push through configured channels."""
+    n = {
+        "type": "new_order",
+        "title": "Test push",
+        "body": "This is a test push from your Aussie Admin dashboard.",
+        "product_title": "Test Product",
+        "data": {"customer_name": "Test Buyer", "total": 99.99, "quantity": 1},
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    subject, html, plain = _format_notification_html(n)
+    ch = _push_channel_status()
+    results = {"email": None, "telegram": None, **ch}
+    if ch["email_configured"]:
+        await _send_email(subject, html); results["email"] = "sent"
+    if ch["telegram_configured"]:
+        await _send_telegram(plain); results["telegram"] = "sent"
+    return results
+
+
+async def _emit_notification(**kwargs) -> dict:
+    """Insert a notification document and return it (minus _id)."""
+    n = Notification(**kwargs)
+    doc = n.model_dump()
+    await db.notifications.insert_one(doc)
+    doc.pop("_id", None)
+    # Fire push channels in the background — don't block the request
+    try:
+        asyncio.create_task(_push_notification(doc))
+    except Exception as e:
+        logger.warning(f"[push] scheduling failed: {e}")
+    return doc
 
 
 async def _emit_price_change_notifications(item: dict, new_image: Optional[str], new_title: str,
@@ -1723,6 +1986,29 @@ async def create_order(body: OrderCreate):
         {"id": p["id"]},
         {"$inc": {"sold_count": body.quantity, "stock": -body.quantity}},
     )
+    # Notification: new order received
+    await _emit_notification(
+        type="new_order",
+        title="New order received",
+        body=f"{order['customer_name']} · ${total:.2f} · {order['product_title']}",
+        order_id=order["id"],
+        product_id=p["id"],
+        product_title=order["product_title"],
+        image=(p.get("images") or [None])[0],
+        data={"customer_name": order["customer_name"], "total": total, "quantity": body.quantity},
+    )
+    # Low-stock check after decrement
+    updated = await db.products.find_one({"id": p["id"]}, {"_id": 0, "stock": 1, "title": 1, "images": 1})
+    if updated and (updated.get("stock") or 0) <= 3 and (updated.get("stock") or 0) > 0:
+        await _emit_notification(
+            type="low_stock",
+            title="Product low on stock",
+            body=f"{updated.get('title')} · {updated.get('stock')} left",
+            product_id=p["id"],
+            product_title=updated.get("title"),
+            image=(updated.get("images") or [None])[0],
+            data={"stock": updated.get("stock")},
+        )
     order.pop("_id", None)
     return order
 

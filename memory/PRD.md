@@ -18,6 +18,32 @@ Light, modern theme.
   `category_performance` (revenue+profit+margin per category), `best_margin_products`
   (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
 
+### More notification types + Push-to-Phone (2026-02-20)
+**Types added** — the bell now emits and renders 6 types with distinct icons/colours:
+- `price_change`, `new_order`, `out_of_stock`, `low_stock`, `order_status`, `new_customer`.
+
+**Auto-emitted from**:
+- `POST /api/orders` → `new_order` (+ `low_stock` if resulting stock ≤ 3)
+- `PATCH /api/orders/{id}` with a new `status` → `order_status`
+- `POST /api/customers` → `new_customer`
+- Scrape/refresh detecting a listing went sold → `out_of_stock` for every linked product
+
+**Click-to-navigate**: each row deep-links to the relevant Orders / Products /
+Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
+`NotificationBell → TopHeader → AppShell.navigateTo`.
+
+**Push channels (Email · Resend + Telegram)**:
+- Backend `_push_notification(n)` fires channels in parallel via
+  `asyncio.create_task(...)` right after inserting the DB row — never blocks the request.
+- Critical-only filter (default ON): only `new_order`, `out_of_stock`, and
+  `price_change` with margin drop ≥ threshold (default 3pp) push to phone.
+- Endpoints: `GET/PATCH /api/push/settings`, `POST /api/push/test`.
+- Env vars: `RESEND_API_KEY`, `RESEND_TO_EMAIL`, `RESEND_FROM_EMAIL`,
+  `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. Missing keys are silently skipped.
+- Frontend page **Store Management → Push Notifications** shows configured/ready state,
+  channel enable-toggles, critical-only checkbox, threshold input, and a live
+  **Send test push** button.
+
 ### Notification bell + price-change alerts (2026-02-20)
 - New `Notification` collection. `_emit_price_change_notifications()` fires whenever a
   scrape/refresh detects `price_value != last price_history value` on a scraped item.

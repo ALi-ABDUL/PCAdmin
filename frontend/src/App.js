@@ -15,7 +15,7 @@ import {
   Globe, Activity, Cable, Lock, ChevronDown, Bell, BellOff, HelpCircle,
   Factory, UserPlus, Upload, List, Award, ShieldCheck, PackageSearch, ClipboardList, LineChart as LineChartIcon, TrendingDown as TrendingDownIcon, History, BadgeCheck, Star as StarIcon,
   UserCheck, UserX, Users2, Heart, MessageCircle, Ticket, MapPinned, StickyNote, Ban, Layers,
-  Image as ImageLucide, GitBranch, Calculator, Boxes as BoxesIcon, PackagePlus, PackageMinus, PackageX, Warehouse, ClipboardCheck,
+  Image as ImageLucide, GitBranch, Calculator, Boxes as BoxesIcon, PackagePlus, PackageMinus, PackageX, Warehouse, ClipboardCheck, XCircle,
 } from "lucide-react";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -155,6 +155,7 @@ const PRODUCT_NAV = [
 const STORE_NAV = [
   { id: "store-settings",      label: "Store Settings",       icon: Store,        group: "Configuration" },
   { id: "pricing-rules",       label: "Pricing Rules",        icon: Percent,      group: "Configuration" },
+  { id: "notifications-push",  label: "Push Notifications",   icon: Bell,         group: "Configuration" },
   { id: "payment-gateway",     label: "Payment Gateway",      icon: CreditCard,   group: "Configuration" },
   { id: "shipping-methods",    label: "Shipping Methods",     icon: Truck,        group: "Configuration" },
   { id: "tax-rates",           label: "Tax Rates",            icon: Receipt,      group: "Configuration" },
@@ -203,6 +204,14 @@ export default function App() {
     check();
     const iv = setInterval(check, 60_000);
     return () => { cancelled = true; clearInterval(iv); };
+  }, []);
+
+  const navigateTo = useCallback(({ tab: t, section }) => {
+    if (t === "orders") { setTab("orders"); if (section) setOrdersSection(section); }
+    else if (t === "products") { setTab("products"); if (section) setProductSection(section); }
+    else if (t === "customers") { setTab("customers"); if (section) setCustomerSection(section); }
+    else if (t === "scraper") { setTab("scraper"); }
+    else if (t) setTab(t);
   }, []);
 
   const inStore = tab === "store";
@@ -258,7 +267,7 @@ export default function App() {
       </AnimatePresence>
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <TopHeader tab={tab} storeSection={storeSection} supplierSection={supplierSection} customerSection={customerSection} productSection={productSection} ordersSection={ordersSection} paymentsSection={paymentsSection} onMenu={() => setMobileNavOpen(true)}/>
+        <TopHeader tab={tab} storeSection={storeSection} supplierSection={supplierSection} customerSection={customerSection} productSection={productSection} ordersSection={ordersSection} paymentsSection={paymentsSection} onMenu={() => setMobileNavOpen(true)} onNavigate={navigateTo}/>
         {inStore     && <SubMobileNav nav={STORE_NAV}    testPrefix="store-m" active={storeSection}    setActive={setStoreSection}/>}
         {inSuppliers && <SubMobileNav nav={SUPPLIER_NAV} testPrefix="sup-m"   active={supplierSection} setActive={setSupplierSection}/>}
         {inCustomers && <SubMobileNav nav={CUSTOMER_NAV} testPrefix="cus-m"   active={customerSection} setActive={setCustomerSection}/>}
@@ -424,7 +433,7 @@ function SubMobileNav({ nav, testPrefix, active, setActive }) {
   );
 }
 
-function NotificationBell() {
+function NotificationBell({ onNavigate }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState([]);
   const [unread, setUnread] = useState(0);
@@ -460,6 +469,16 @@ function NotificationBell() {
     finally { setBusy(false); }
   };
 
+  const onClickRow = async (n) => {
+    await markOne(n);
+    setOpen(false);
+    // Deep-link: prefer order → product → customer → item detail
+    if (n.order_id) onNavigate?.({ tab: "orders", section: "all", filter: { orderId: n.order_id } });
+    else if (n.product_id) onNavigate?.({ tab: "products", section: "all", filter: { productId: n.product_id } });
+    else if (n.customer_id) onNavigate?.({ tab: "customers", section: "all", filter: { customerId: n.customer_id } });
+    else if (n.item_id) onNavigate?.({ tab: "scraper", filter: { itemId: n.item_id } });
+  };
+
   return (
     <div className="relative" ref={ref}>
       <button
@@ -481,10 +500,10 @@ function NotificationBell() {
       {open && (
         <div
           data-testid="notif-dropdown"
-          className="absolute right-0 top-11 w-[380px] max-w-[92vw] bg-white border hairline shadow-2xl rounded-xl overflow-hidden z-50"
+          className="absolute right-0 top-11 w-[400px] max-w-[92vw] bg-white border hairline shadow-2xl rounded-xl overflow-hidden z-50"
         >
           <div className="p-3 flex items-center justify-between border-b hairline bg-slate-50">
-            <div className="font-display font-bold text-sm flex items-center gap-2"><Bell size={14}/> Price alerts</div>
+            <div className="font-display font-bold text-sm flex items-center gap-2"><Bell size={14}/> Notifications</div>
             <button onClick={markAll} disabled={busy || unread === 0} className="text-[11px] font-mono text-indigo-600 hover:underline disabled:text-slate-300 disabled:no-underline" data-testid="notif-mark-all">
               Mark all read
             </button>
@@ -494,41 +513,12 @@ function NotificationBell() {
             {rows.length === 0 && (
               <div className="p-8 text-center text-sm text-slate-500">
                 <BellOff size={20} className="mx-auto mb-2 text-slate-300"/>
-                No price alerts yet.
+                No notifications yet.
               </div>
             )}
-            {rows.map((n) => {
-              const dropped = n.new_price < n.old_price;
-              const marginBetter = n.delta_margin > 0;
-              return (
-                <button
-                  key={n.id}
-                  onClick={() => markOne(n)}
-                  data-testid="notif-item"
-                  className={`w-full text-left flex gap-3 p-3 border-b hairline last:border-0 transition-colors ${n.read ? "bg-white hover:bg-slate-50" : "bg-indigo-50/50 hover:bg-indigo-50"}`}
-                >
-                  <div className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border hairline shrink-0">
-                    {n.image ? <img src={proxyImg(n.image)} alt="" className="w-full h-full object-cover"/> : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={14}/></div>}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      {!n.read && <span className="w-2 h-2 rounded-full bg-indigo-500 shrink-0"/>}
-                      <div className="text-sm font-medium truncate">{n.product_title || "Untitled"}</div>
-                    </div>
-                    <div className="mt-1 text-xs font-mono flex items-center gap-1.5">
-                      <span className="text-slate-500 line-through">${(n.old_price ?? 0).toFixed(2)}</span>
-                      {dropped ? <TrendingDown size={11} className="text-emerald-600"/> : <TrendingUp size={11} className="text-amber-600"/>}
-                      <span className={dropped ? "text-emerald-600 font-bold" : "text-amber-600 font-bold"}>${(n.new_price ?? 0).toFixed(2)}</span>
-                    </div>
-                    <div className="mt-1 text-[11px] text-slate-500 font-mono">
-                      Margin {(n.old_margin_pct ?? 0).toFixed(1)}% → <span className={marginBetter ? "text-emerald-600 font-bold" : "text-red-600 font-bold"}>{(n.new_margin_pct ?? 0).toFixed(1)}%</span>
-                      <span className={marginBetter ? "text-emerald-600 ml-2" : "text-red-600 ml-2"}>({n.delta_margin > 0 ? "+" : ""}{(n.delta_margin ?? 0).toFixed(1)}pp)</span>
-                    </div>
-                    <div className="mt-1 text-[10px] text-slate-400 font-mono">{fmtDate(n.at)}</div>
-                  </div>
-                </button>
-              );
-            })}
+            {rows.map((n) => (
+              <NotifRow key={n.id} n={n} onClick={() => onClickRow(n)}/>
+            ))}
           </div>
         </div>
       )}
@@ -536,7 +526,71 @@ function NotificationBell() {
   );
 }
 
-function TopHeader({ tab, storeSection, supplierSection, customerSection, productSection, ordersSection, paymentsSection, onMenu }) {
+const NOTIF_META = {
+  price_change:  { icon: TrendingDown, color: "#4F46E5", bg: "#EEF2FF" },
+  new_order:     { icon: ShoppingBag,  color: "#059669", bg: "#ECFDF5" },
+  out_of_stock:  { icon: XCircle,      color: "#DC2626", bg: "#FEE2E2" },
+  low_stock:     { icon: PackageMinus, color: "#D97706", bg: "#FEF3C7" },
+  order_status:  { icon: RefreshCw,    color: "#2563EB", bg: "#DBEAFE" },
+  new_customer:  { icon: UserPlus,     color: "#7C3AED", bg: "#EDE9FE" },
+};
+
+function NotifRow({ n, onClick }) {
+  const meta = NOTIF_META[n.type] || NOTIF_META.price_change;
+  const Icon = meta.icon;
+
+  const body = (() => {
+    if (n.type === "price_change") {
+      const dropped = (n.new_price ?? 0) < (n.old_price ?? 0);
+      const marginBetter = (n.delta_margin ?? 0) > 0;
+      return (
+        <>
+          <div className="text-xs font-mono flex items-center gap-1.5 mt-0.5">
+            <span className="text-slate-500 line-through">${(n.old_price ?? 0).toFixed(2)}</span>
+            {dropped ? <TrendingDown size={11} className="text-emerald-600"/> : <TrendingUp size={11} className="text-amber-600"/>}
+            <span className={dropped ? "text-emerald-600 font-bold" : "text-amber-600 font-bold"}>${(n.new_price ?? 0).toFixed(2)}</span>
+          </div>
+          <div className="text-[11px] text-slate-500 font-mono">
+            Margin {(n.old_margin_pct ?? 0).toFixed(1)}% → <span className={marginBetter ? "text-emerald-600 font-bold" : "text-red-600 font-bold"}>{(n.new_margin_pct ?? 0).toFixed(1)}%</span>
+            <span className={marginBetter ? "text-emerald-600 ml-2" : "text-red-600 ml-2"}>({(n.delta_margin ?? 0) > 0 ? "+" : ""}{(n.delta_margin ?? 0).toFixed(1)}pp)</span>
+          </div>
+        </>
+      );
+    }
+    return <div className="text-xs text-slate-500 mt-0.5">{n.body || ""}</div>;
+  })();
+
+  const thumb = n.image ? (
+    <div className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border hairline shrink-0">
+      <img src={proxyImg(n.image)} alt="" className="w-full h-full object-cover"/>
+    </div>
+  ) : (
+    <div className="w-11 h-11 rounded-lg grid place-items-center shrink-0" style={{ background: meta.bg }}>
+      <Icon size={18} style={{ color: meta.color }}/>
+    </div>
+  );
+
+  return (
+    <button
+      onClick={onClick}
+      data-testid="notif-item"
+      data-notif-type={n.type}
+      className={`w-full text-left flex gap-3 p-3 border-b hairline last:border-0 transition-colors ${n.read ? "bg-white hover:bg-slate-50" : "bg-indigo-50/50 hover:bg-indigo-50"}`}
+    >
+      {thumb}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          {!n.read && <span className="w-2 h-2 rounded-full bg-indigo-500 shrink-0"/>}
+          <div className="text-sm font-medium truncate">{n.title || n.product_title || "Notification"}</div>
+        </div>
+        {body}
+        <div className="mt-1 text-[10px] text-slate-400 font-mono">{fmtDate(n.at)}</div>
+      </div>
+    </button>
+  );
+}
+
+function TopHeader({ tab, storeSection, supplierSection, customerSection, productSection, ordersSection, paymentsSection, onMenu, onNavigate }) {
   const titles = {
     dashboard: "Dashboard", store: "Store Management", products: "Products", categories: "Categories",
     suppliers: "Suppliers", customers: "Customers",
@@ -577,7 +631,7 @@ function TopHeader({ tab, storeSection, supplierSection, customerSection, produc
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--dim)]"/>
             <input placeholder="Search anything…" className="input pl-9 pr-3 py-2 text-sm w-64"/>
           </div>
-          <NotificationBell/>
+          <NotificationBell onNavigate={onNavigate}/>
           <button className="btn btn-ghost !p-2 hidden sm:grid" title="Help"><HelpCircle size={16}/></button>
           <div className="w-9 h-9 rounded-full grid place-items-center text-white font-bold text-xs" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>AK</div>
         </div>
@@ -1938,6 +1992,132 @@ function PricingRulesEditor() {
   );
 }
 
+function PushNotificationSettings() {
+  const [settings, setSettings] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/push/settings`);
+    setSettings(data);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  if (!settings) return <div className="text-slate-500 py-24 text-center">loading…</div>;
+
+  const update = async (patch) => {
+    setBusy(true);
+    setSettings((s) => ({ ...s, ...patch })); // optimistic
+    try { const { data } = await axios.patch(`${API}/push/settings`, patch); setSettings(data); }
+    catch (e) { toast.error("Save failed"); await load(); }
+    finally { setBusy(false); }
+  };
+
+  const sendTest = async () => {
+    setTesting(true);
+    try {
+      const { data } = await axios.post(`${API}/push/test`);
+      const parts = [];
+      if (data.email === "sent") parts.push("email");
+      if (data.telegram === "sent") parts.push("Telegram");
+      if (parts.length === 0) toast.error("No channels configured", { description: "Add your keys to backend/.env then restart backend." });
+      else toast.success(`Test push sent via ${parts.join(" + ")}`);
+    } catch { toast.error("Test failed"); }
+    finally { setTesting(false); }
+  };
+
+  const emailOk = settings.channels.email_configured;
+  const telegramOk = settings.channels.telegram_configured;
+
+  return (
+    <div className="grid gap-4" data-testid="push-settings">
+      <div className="grid md:grid-cols-2 gap-3">
+        <ChannelCard
+          testId="push-email"
+          name="Email · Resend"
+          hint={emailOk ? "Ready to send" : "Add RESEND_API_KEY + RESEND_TO_EMAIL to backend/.env"}
+          configured={emailOk}
+          enabled={settings.email_enabled}
+          onToggle={(v) => update({ email_enabled: v })}
+          setupHref="https://resend.com"
+          envKeys={["RESEND_API_KEY", "RESEND_TO_EMAIL", "RESEND_FROM_EMAIL (optional)"]}
+        />
+        <ChannelCard
+          testId="push-telegram"
+          name="Telegram · Bot API"
+          hint={telegramOk ? "Ready to send" : "Create a bot with @BotFather then get your chat_id from @userinfobot"}
+          configured={telegramOk}
+          enabled={settings.telegram_enabled}
+          onToggle={(v) => update({ telegram_enabled: v })}
+          setupHref="https://core.telegram.org/bots#creating-a-new-bot"
+          envKeys={["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]}
+        />
+      </div>
+
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div>
+            <div className="font-display font-bold text-base">Filters</div>
+            <div className="text-xs text-slate-500">Decide which events actually push to your phone.</div>
+          </div>
+          <button onClick={sendTest} disabled={busy || testing} className="btn btn-primary text-sm" data-testid="push-test-btn">
+            {testing ? <Loader2 className="animate-spin" size={14}/> : <Bell size={14}/>} Send test push
+          </button>
+        </div>
+
+        <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer" data-testid="push-critical-toggle">
+          <input type="checkbox" checked={settings.critical_only} onChange={(e) => update({ critical_only: e.target.checked })} className="accent-indigo-600 mt-1 w-4 h-4"/>
+          <div className="flex-1">
+            <div className="text-sm font-medium">Only push critical events</div>
+            <div className="text-xs text-slate-500">
+              When ON: new orders, out-of-stock alerts, and price drops that hurt margin by ≥ the threshold below.
+              When OFF: <span className="text-slate-700">every notification</span> pushes (chatty).
+            </div>
+          </div>
+        </label>
+
+        <div className="mt-2 flex items-center gap-3 flex-wrap">
+          <label className="text-[11px] font-mono uppercase text-slate-500">Margin-drop threshold (pp)</label>
+          <input
+            data-testid="push-threshold"
+            type="number"
+            min="0" step="0.5"
+            value={settings.margin_drop_threshold_pp}
+            onChange={(e) => update({ margin_drop_threshold_pp: parseFloat(e.target.value) || 0 })}
+            className="input px-3 py-1.5 text-sm font-mono w-24"
+          />
+          <span className="text-xs text-slate-500">Price-change alerts push only when the new margin is at least this many percentage points lower.</span>
+        </div>
+      </div>
+
+      <div className="card p-4 border-dashed border-2 text-xs text-slate-500 leading-relaxed">
+        <div className="font-display font-bold text-slate-700 text-sm mb-1 flex items-center gap-2"><HelpCircle size={14}/> Setup keys</div>
+        Add credentials to <code className="chip chip-neutral">/app/backend/.env</code> then restart the backend. Missing keys are silently skipped — your dashboard notifications keep working either way.
+      </div>
+    </div>
+  );
+}
+
+function ChannelCard({ testId, name, hint, configured, enabled, onToggle, setupHref, envKeys }) {
+  return (
+    <div className={`card p-5 ${configured ? "" : "border-dashed"}`} data-testid={testId}>
+      <div className="flex items-center justify-between mb-2 gap-3">
+        <div className="font-display font-bold text-base">{name}</div>
+        <span className={`chip ${configured ? "chip-success" : "chip-neutral"} font-mono text-[10px]`}>{configured ? <><BadgeCheck size={11}/> Ready</> : <>Not configured</>}</span>
+      </div>
+      <div className="text-xs text-slate-500 mb-3">{hint}</div>
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" checked={enabled} onChange={(e) => onToggle(e.target.checked)} className="accent-indigo-600 w-4 h-4"/>
+        <span className="text-sm">Send this channel</span>
+      </label>
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        {envKeys.map((k) => <span key={k} className="chip chip-neutral font-mono text-[10px]">{k}</span>)}
+      </div>
+      <a href={setupHref} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline">Setup guide <ExternalLink size={11}/></a>
+    </div>
+  );
+}
+
 function StoreManagement({ section, setSection }) {
   const meta = STORE_NAV.find((s) => s.id === section) || STORE_NAV[0];
   const Icon = meta.icon;
@@ -1945,6 +2125,7 @@ function StoreManagement({ section, setSection }) {
   const sections = {
     "store-settings":      { hint: "Store name, brand, contact details, business hours and legal info.", fields: ["Store name","Legal business name","ABN","Contact email","Support phone","Business hours"] },
     "pricing-rules":       { hint: "Tiered profit rules the scraper uses when calculating sell prices for imported items.", fields: [], custom: <PricingRulesEditor/> },
+    "notifications-push":  { hint: "Deliver critical dashboard notifications to your phone via Email (Resend) and Telegram bot.", fields: [], custom: <PushNotificationSettings/> },
     "payment-gateway":     { hint: "Enable/disable payment providers and configure their credentials.", fields: ["Stripe","PayPal","Apple Pay","Google Pay","Afterpay","Zip Pay","Bank transfer","Cash on delivery"] },
     "shipping-methods":    { hint: "Zones, carriers, rates and free-shipping thresholds.", fields: ["Australia Post — Parcel Post","Australia Post — Express","Sendle","Aramex","Local delivery","Click & collect","Free shipping threshold"] },
     "tax-rates":           { hint: "GST and location-based tax rules.", fields: ["Australia — GST 10%","New Zealand — GST 15%","Tax-exempt customer groups","B2B / ABN entries"] },

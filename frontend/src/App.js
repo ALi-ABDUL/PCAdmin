@@ -15,7 +15,7 @@ import {
   Globe, Activity, Cable, Lock, ChevronDown, Bell, BellOff, HelpCircle,
   Factory, UserPlus, Upload, List, Award, ShieldCheck, PackageSearch, ClipboardList, LineChart as LineChartIcon, TrendingDown as TrendingDownIcon, History, BadgeCheck, Star as StarIcon,
   UserCheck, UserX, Users2, Heart, MessageCircle, Ticket, MapPinned, StickyNote, Ban, Layers,
-  Image as ImageLucide, GitBranch, Calculator, Boxes as BoxesIcon, PackagePlus, PackageMinus, PackageX, Warehouse, ClipboardCheck, XCircle, AlertTriangle,
+  Image as ImageLucide, GitBranch, Calculator, Boxes as BoxesIcon, PackagePlus, PackageMinus, PackageX, Warehouse, ClipboardCheck, XCircle, AlertTriangle, Clock as ClockIcon,
 } from "lucide-react";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -155,6 +155,7 @@ const PRODUCT_NAV = [
 const STORE_NAV = [
   { id: "store-settings",      label: "Store Settings",       icon: Store,        group: "Configuration" },
   { id: "pricing-rules",       label: "Pricing Rules",        icon: Percent,      group: "Configuration" },
+  { id: "scraper-schedule",    label: "Scraper Schedule",     icon: RefreshCw,    group: "Configuration" },
   { id: "notifications-push",  label: "Push Notifications",   icon: Bell,         group: "Configuration" },
   { id: "payment-gateway",     label: "Payment Gateway",      icon: CreditCard,   group: "Configuration" },
   { id: "shipping-methods",    label: "Shipping Methods",     icon: Truck,        group: "Configuration" },
@@ -2273,6 +2274,155 @@ function CredField({ label, testId, type = "text", placeholder, value, onChange,
   );
 }
 
+function ScraperScheduleEditor() {
+  const [sched, setSched] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [running, setRunning] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/scraper/schedule`);
+    setSched(data);
+  }, []);
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+
+  if (!sched) return <div className="text-slate-500 py-24 text-center">loading…</div>;
+
+  const patch = async (fields) => {
+    setBusy(true);
+    setSched((s) => ({ ...s, ...fields })); // optimistic
+    try { const { data } = await axios.patch(`${API}/scraper/schedule`, fields); setSched(data); }
+    catch (e) { toast.error("Save failed"); await load(); }
+    finally { setBusy(false); }
+  };
+
+  const runNow = async () => {
+    if (!window.confirm("Trigger a full re-fetch now? This may take several minutes for all items.")) return;
+    setRunning(true);
+    toast.loading("Running full refresh…", { id: "sched-run" });
+    try {
+      const { data } = await axios.post(`${API}/scraper/schedule/run-now`, {}, { timeout: 30 * 60 * 1000 });
+      setSched(data.schedule);
+      const s = data.summary || {};
+      toast.success(`Refresh done · ${s.refreshed || 0}/${s.total || 0} refreshed · ${s.sold_found || 0} sold`, { id: "sched-run" });
+    } catch (e) {
+      toast.error("Refresh failed", { id: "sched-run", description: e?.response?.data?.detail?.slice(0, 200) || e.message });
+    } finally { setRunning(false); }
+  };
+
+  const stopPassed = sched.stop_date ? new Date(sched.stop_date) <= new Date() : false;
+  const disabledByStop = sched.enabled && stopPassed;
+
+  return (
+    <div className="grid gap-4" data-testid="scraper-schedule">
+      {/* Status strip */}
+      <div className="card p-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 flex items-center gap-1"><ClockIcon size={11}/> Status</div>
+            <div className="mt-1 flex items-center gap-2">
+              {sched.enabled && !disabledByStop
+                ? <span className="chip chip-success"><BadgeCheck size={11}/> Active</span>
+                : <span className="chip chip-neutral"><Ban size={11}/> {disabledByStop ? "Stopped (past stop date)" : "Disabled"}</span>}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Last run</div>
+            <div className="mt-1 text-sm font-mono text-slate-800" data-testid="sched-last">
+              {sched.last_run_at ? fmtDate(sched.last_run_at) : "—"}
+              {sched.last_run_stats && (
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {sched.last_run_stats.refreshed}/{sched.last_run_stats.total} refreshed · {sched.last_run_stats.sold_found} sold
+                </div>
+              )}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Next run</div>
+            <div className="mt-1 text-sm font-mono text-indigo-600 font-bold" data-testid="sched-next">
+              {sched.next_run_at ? fmtDate(sched.next_run_at) : "—"}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Configuration */}
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <div className="font-display font-bold text-base">Schedule configuration</div>
+            <div className="text-xs text-slate-500">Times use Australia/Sydney (AEST) for the start-time anchor.</div>
+          </div>
+          <button onClick={runNow} disabled={running} className="btn btn-primary text-sm" data-testid="sched-run-now">
+            {running ? <Loader2 className="animate-spin" size={14}/> : <Zap size={14}/>} Run now
+          </button>
+        </div>
+
+        <label className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 mb-3 cursor-pointer" data-testid="sched-enabled">
+          <div className="flex-1">
+            <div className="text-sm font-medium">Enable auto-refresh</div>
+            <div className="text-xs text-slate-500">When off, the scraper only runs when you click <span className="font-mono">Run now</span> or <span className="font-mono">Refresh all now</span>.</div>
+          </div>
+          <input type="checkbox" checked={sched.enabled} onChange={(e) => patch({ enabled: e.target.checked })} className="accent-indigo-600 w-5 h-5"/>
+        </label>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <Field label="Start time (AEST)">
+            <input
+              data-testid="sched-start"
+              type="time"
+              value={sched.start_time_hhmm}
+              onChange={(e) => patch({ start_time_hhmm: e.target.value })}
+              className="input px-3 py-2 w-full font-mono text-sm"
+            />
+          </Field>
+          <Field label="Frequency">
+            <select
+              data-testid="sched-frequency"
+              value={sched.frequency}
+              onChange={(e) => patch({ frequency: e.target.value })}
+              className="input px-3 py-2 w-full text-sm"
+            >
+              <option value="hourly">Every hour</option>
+              <option value="every_6h">Every 6 hours</option>
+              <option value="every_12h">Every 12 hours</option>
+              <option value="daily">Once daily</option>
+              <option value="weekly">Once weekly</option>
+            </select>
+          </Field>
+          <Field label="Stop date (optional)">
+            <div className="relative">
+              <input
+                data-testid="sched-stop"
+                type="date"
+                value={sched.stop_date || ""}
+                onChange={(e) => patch({ stop_date: e.target.value })}
+                className="input px-3 py-2 w-full font-mono text-sm pr-8"
+              />
+              {sched.stop_date && (
+                <button
+                  type="button"
+                  onClick={() => patch({ stop_date: "" })}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-600 p-1"
+                  title="Clear stop date"
+                >
+                  <X size={12}/>
+                </button>
+              )}
+            </div>
+          </Field>
+        </div>
+
+        {disabledByStop && (
+          <div className="mt-4 p-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800 flex items-center gap-2">
+            <AlertTriangle size={13}/> Stop date has passed — the schedule is paused. Clear the stop date to resume.
+          </div>
+        )}
+        {busy && <div className="mt-2 text-[11px] text-slate-400 font-mono">saving…</div>}
+      </div>
+    </div>
+  );
+}
+
 function StoreManagement({ section, setSection }) {
   const meta = STORE_NAV.find((s) => s.id === section) || STORE_NAV[0];
   const Icon = meta.icon;
@@ -2280,6 +2430,7 @@ function StoreManagement({ section, setSection }) {
   const sections = {
     "store-settings":      { hint: "Store name, brand, contact details, business hours and legal info.", fields: ["Store name","Legal business name","ABN","Contact email","Support phone","Business hours"] },
     "pricing-rules":       { hint: "Tiered profit rules the scraper uses when calculating sell prices for imported items.", fields: [], custom: <PricingRulesEditor/> },
+    "scraper-schedule":    { hint: "Automate the eBay re-fetch: set a start time, frequency, optional stop date, or run one right now.", fields: [], custom: <ScraperScheduleEditor/> },
     "notifications-push":  { hint: "Deliver critical dashboard notifications to your phone via Email (Resend) and Telegram bot.", fields: [], custom: <PushNotificationSettings/> },
     "payment-gateway":     { hint: "Enable/disable payment providers and configure their credentials.", fields: ["Stripe","PayPal","Apple Pay","Google Pay","Afterpay","Zip Pay","Bank transfer","Cash on delivery"] },
     "shipping-methods":    { hint: "Zones, carriers, rates and free-shipping thresholds.", fields: ["Australia Post — Parcel Post","Australia Post — Express","Sendle","Aramex","Local delivery","Click & collect","Free shipping threshold"] },

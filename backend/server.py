@@ -622,19 +622,152 @@ async def refresh_all_items(body: RefreshAllRequest):
     return await _refresh_all_items(body.method, body.scrapingbee_key, body.scraperapi_key)
 
 
-async def _nightly_refresh_loop():
-    """Fire-and-forget background task: re-scrape all items every 24h."""
-    # Wait until app fully starts + first-day delay so we don't hammer on boot
-    await asyncio.sleep(60)
+SCRAPER_SCHEDULE_DEFAULTS: dict = {
+    "id": "singleton",
+    "enabled": True,
+    "start_time_hhmm": "02:00",       # local time (Australia/Sydney)
+    "frequency": "daily",              # hourly | every_6h | every_12h | daily | weekly
+    "stop_date": None,                 # ISO date (YYYY-MM-DD) — schedule pauses on or after this
+    "last_run_at": None,
+    "last_run_stats": None,
+    "next_run_at": None,
+}
+FREQ_INTERVAL_SECONDS = {
+    "hourly":    60 * 60,
+    "every_6h":  6 * 60 * 60,
+    "every_12h": 12 * 60 * 60,
+    "daily":     24 * 60 * 60,
+    "weekly":    7 * 24 * 60 * 60,
+}
+_SYDNEY = timezone(timedelta(hours=10))  # rough AEST; the UI only uses this for display anchoring
+
+
+async def _get_scraper_schedule() -> dict:
+    doc = await db.scraper_schedule.find_one({"id": "singleton"}, {"_id": 0})
+    if not doc:
+        await db.scraper_schedule.insert_one({**SCRAPER_SCHEDULE_DEFAULTS})
+        return {**SCRAPER_SCHEDULE_DEFAULTS}
+    return {**SCRAPER_SCHEDULE_DEFAULTS, **doc}
+
+
+def _compute_next_run(sched: dict) -> Optional[str]:
+    """Given the current schedule, work out the next fire time (UTC ISO)."""
+    if not sched.get("enabled"):
+        return None
+    now = datetime.now(timezone.utc)
+    # Anchor: today at start_time_hhmm (AEST) → UTC
+    hh, mm = (sched.get("start_time_hhmm") or "02:00").split(":")
+    try:
+        anchor = now.astimezone(_SYDNEY).replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+    except Exception:
+        anchor = now.astimezone(_SYDNEY).replace(hour=2, minute=0, second=0, microsecond=0)
+    anchor_utc = anchor.astimezone(timezone.utc)
+    interval = timedelta(seconds=FREQ_INTERVAL_SECONDS.get(sched.get("frequency", "daily"), 86400))
+    # Walk anchor forward by interval until it's in the future
+    while anchor_utc <= now:
+        anchor_utc = anchor_utc + interval
+    # Stop-date check
+    stop = sched.get("stop_date")
+    if stop:
+        try:
+            stop_dt = datetime.fromisoformat(stop).replace(tzinfo=timezone.utc)
+            if anchor_utc >= stop_dt:
+                return None
+        except Exception:
+            pass
+    return anchor_utc.isoformat()
+
+
+async def _refresh_all_and_record(method: str = "auto") -> dict:
+    logger.info("scraper schedule: run starting")
+    summary = await _refresh_all_items(method=method)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.scraper_schedule.update_one(
+        {"id": "singleton"},
+        {"$set": {"last_run_at": now_iso, "last_run_stats": summary}},
+        upsert=True,
+    )
+    # Recompute next run
+    sched = await _get_scraper_schedule()
+    next_run = _compute_next_run(sched)
+    await db.scraper_schedule.update_one({"id": "singleton"}, {"$set": {"next_run_at": next_run}})
+    logger.info(f"scraper schedule: run done · {summary} · next {next_run}")
+    return summary
+
+
+async def _scheduler_loop():
+    """Poll the schedule config every minute and fire refresh-all when due."""
+    await asyncio.sleep(30)  # small boot delay
     while True:
         try:
-            logger.info("nightly refresh: starting")
-            summary = await _refresh_all_items(method="auto")
-            await db.system.update_one({"_id": "nightly"}, {"$set": {"last_run": datetime.now(timezone.utc).isoformat(), **summary}}, upsert=True)
-            logger.info(f"nightly refresh done: {summary}")
+            sched = await _get_scraper_schedule()
+            if sched.get("enabled"):
+                stop = sched.get("stop_date")
+                stop_passed = False
+                if stop:
+                    try:
+                        stop_dt = datetime.fromisoformat(stop).replace(tzinfo=timezone.utc)
+                        stop_passed = datetime.now(timezone.utc) >= stop_dt
+                    except Exception:
+                        pass
+                if not stop_passed:
+                    next_run = sched.get("next_run_at") or _compute_next_run(sched)
+                    if next_run:
+                        try:
+                            due = datetime.fromisoformat(next_run) <= datetime.now(timezone.utc)
+                        except Exception:
+                            due = False
+                        if due:
+                            await _refresh_all_and_record(method="auto")
+                        elif sched.get("next_run_at") != next_run:
+                            await db.scraper_schedule.update_one(
+                                {"id": "singleton"}, {"$set": {"next_run_at": next_run}}, upsert=True,
+                            )
         except Exception as e:
-            logger.exception(f"nightly refresh error: {e}")
-        await asyncio.sleep(24 * 60 * 60)
+            logger.exception(f"scheduler loop error: {e}")
+        await asyncio.sleep(60)
+
+
+class ScraperScheduleUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    start_time_hhmm: Optional[str] = None    # "HH:MM"
+    frequency: Optional[str] = None          # keys of FREQ_INTERVAL_SECONDS
+    stop_date: Optional[str] = None          # "YYYY-MM-DD" or "" to clear
+
+
+@api_router.get("/scraper/schedule")
+async def get_scraper_schedule():
+    sched = await _get_scraper_schedule()
+    # Always refresh next_run_at on read so the UI shows an accurate value
+    next_run = _compute_next_run(sched)
+    if next_run != sched.get("next_run_at"):
+        await db.scraper_schedule.update_one({"id": "singleton"}, {"$set": {"next_run_at": next_run}}, upsert=True)
+        sched["next_run_at"] = next_run
+    return sched
+
+
+@api_router.patch("/scraper/schedule")
+async def update_scraper_schedule(body: ScraperScheduleUpdate):
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if body.frequency is not None and body.frequency not in FREQ_INTERVAL_SECONDS:
+        raise HTTPException(status_code=400, detail=f"frequency must be one of {list(FREQ_INTERVAL_SECONDS)}")
+    if body.start_time_hhmm is not None and not re.match(r"^\d{2}:\d{2}$", body.start_time_hhmm):
+        raise HTTPException(status_code=400, detail="start_time_hhmm must be HH:MM")
+    if body.stop_date == "":
+        fields["stop_date"] = None
+    if fields:
+        await db.scraper_schedule.update_one({"id": "singleton"}, {"$set": fields}, upsert=True)
+    # Recompute next run after any change
+    sched = await _get_scraper_schedule()
+    next_run = _compute_next_run(sched)
+    await db.scraper_schedule.update_one({"id": "singleton"}, {"$set": {"next_run_at": next_run}}, upsert=True)
+    return await get_scraper_schedule()
+
+
+@api_router.post("/scraper/schedule/run-now")
+async def scraper_schedule_run_now():
+    summary = await _refresh_all_and_record(method="auto")
+    return {"ok": True, "summary": summary, "schedule": await get_scraper_schedule()}
 
 
 @app.on_event("startup")
@@ -644,7 +777,7 @@ async def _start_scheduler():
     if await db.customers.count_documents({}) == 0:
         await _rebuild_customers_from_orders()
     await _seed_transactions_and_returns()
-    asyncio.create_task(_nightly_refresh_loop())
+    asyncio.create_task(_scheduler_loop())
 
 
 # ---------------------------------------------------------------------------

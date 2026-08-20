@@ -18,6 +18,26 @@ Light, modern theme.
   `category_performance` (revenue+profit+margin per category), `best_margin_products`
   (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
 
+### Scraper Schedule under Store Management (2026-02-20)
+- **Backend**: singleton `db.scraper_schedule` document with `enabled,
+  start_time_hhmm, frequency, stop_date, last_run_at, last_run_stats, next_run_at`.
+  Frequencies supported: `hourly / every_6h / every_12h / daily / weekly`.
+- `_scheduler_loop()` polls every 60 s, computes `next_run_at` anchored on
+  Australia/Sydney start time + frequency interval, and triggers
+  `_refresh_all_and_record()` when due. `stop_date` (optional) pauses execution
+  when the date is reached. The old `_nightly_refresh_loop` was retired.
+- Endpoints: `GET /api/scraper/schedule`, `PATCH /api/scraper/schedule` (returns
+  refreshed `next_run_at`), `POST /api/scraper/schedule/run-now` (triggers a
+  full refresh immediately and updates last-run stats).
+- **Frontend** page `Store Management → Scraper Schedule` shows:
+  - Status strip: Active / Disabled / Stopped-past-stop-date, last-run relative
+    time with stats, next-run in bold indigo.
+  - Config card: enable toggle, HH:MM time picker, frequency dropdown, optional
+    date picker with clear X, and a **Run now** button that surfaces the summary
+    toast when done.
+- Verified: PATCH frequency=weekly bumped next run 7 days out; PATCH back to
+  daily anchored on 02:00 recomputed to today 16:00 UTC (02:00 AEST).
+
 ### Duplicate URL detection + Bulk push to Products (2026-02-20)
 **Duplicate URL detection** — a light-weight `existingUrls` Map keyed by `item_id`
 and full URL is fetched once on Product Sourcing mount (`limit=500`). As you type

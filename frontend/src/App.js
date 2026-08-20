@@ -15,7 +15,7 @@ import {
   Globe, Activity, Cable, Lock, ChevronDown, Bell, BellOff, HelpCircle,
   Factory, UserPlus, Upload, List, Award, ShieldCheck, PackageSearch, ClipboardList, LineChart as LineChartIcon, TrendingDown as TrendingDownIcon, History, BadgeCheck, Star as StarIcon,
   UserCheck, UserX, Users2, Heart, MessageCircle, Ticket, MapPinned, StickyNote, Ban, Layers,
-  Image as ImageLucide, GitBranch, Calculator, Boxes as BoxesIcon, PackagePlus, PackageMinus, PackageX, Warehouse, ClipboardCheck, XCircle,
+  Image as ImageLucide, GitBranch, Calculator, Boxes as BoxesIcon, PackagePlus, PackageMinus, PackageX, Warehouse, ClipboardCheck, XCircle, AlertTriangle,
 } from "lucide-react";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -2934,6 +2934,9 @@ function ScraperPage({ onView }) {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [categories, setCategories] = useState([]);
   const [rules] = usePricingRules();
+  // Cache of every item id/url/item_id so we can flag duplicates while typing.
+  const [existingUrls, setExistingUrls] = useState(new Map()); // Map<item_id, item>
+  const [dupItem, setDupItem] = useState(null);
 
   // Debounce the search input so typing feels instant but doesn't hammer the API.
   useEffect(() => {
@@ -2944,6 +2947,32 @@ function ScraperPage({ onView }) {
   useEffect(() => {
     axios.get(`${API}/categories`).then((r) => setCategories(r.data.categories || [])).catch(() => {});
   }, []);
+
+  // Fetch a lightweight existence map of every imported URL/item_id so the paste
+  // input can warn about duplicates regardless of the current filter.
+  const loadExistence = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${API}/items`, { params: { limit: 500 } });
+      const map = new Map();
+      for (const it of (data.items || [])) {
+        if (it.item_id) map.set(String(it.item_id), it);
+        if (it.url) map.set(it.url, it);
+      }
+      setExistingUrls(map);
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => { loadExistence(); }, [loadExistence]);
+
+  // Detect duplicates as the user types / pastes.
+  useEffect(() => {
+    const raw = url.trim();
+    if (!raw) { setDupItem(null); return; }
+    // Extract eBay item_id from any of the common URL shapes.
+    const m = raw.match(/\/itm\/(?:[^/]+\/)?(\d{9,})/) || raw.match(/[?&]iid=(\d{9,})/);
+    const itemId = m ? m[1] : null;
+    const dup = (itemId && existingUrls.get(itemId)) || existingUrls.get(raw) || null;
+    setDupItem(dup);
+  }, [url, existingUrls]);
 
   const load = useCallback(async () => {
     const params = {
@@ -2966,12 +2995,13 @@ function ScraperPage({ onView }) {
   const submit = async () => {
     if (!url.trim()) return toast.error("Paste an eBay Australia URL");
     if (!/ebay\.com\.au/i.test(url)) return toast.error("Only ebay.com.au URLs are supported");
+    if (dupItem && !window.confirm(`This URL is already imported as "${(dupItem.title || "").slice(0, 80)}". Import again anyway?`)) return;
     const keys = loadKeys(); setLoading(true);
     setStatus(method === "auto" ? "Trying stealth Chrome fingerprint (curl_cffi) …" : method === "manual" ? "Manual scrape (browser TLS impersonation) …" : `Requesting via ${method} …`);
     try {
       const { data } = await axios.post(`${API}/scrape`, { url: url.trim(), method, save: true, scrapingbee_key: keys.scrapingbee_key || undefined, scraperapi_key: keys.scraperapi_key || undefined }, { timeout: 120000 });
       toast.success(`Imported via ${data.method_used}`, { description: data.item?.title?.slice(0, 90) });
-      setUrl(""); await load();
+      setUrl(""); await load(); await loadExistence();
     } catch (e) { toast.error("Import failed", { description: e?.response?.data?.detail?.slice(0, 220) || e.message }); }
     finally { setLoading(false); setStatus(""); }
   };
@@ -3027,10 +3057,21 @@ function ScraperPage({ onView }) {
     setBulkBusy(true);
     try {
       const { data } = await axios.post(`${API}/items/bulk`, { ids: [...selected], action });
-      const label = action === "delete" ? `Deleted ${data.deleted}` : action === "deactivate" ? `Deactivated ${data.updated}` : `Activated ${data.updated}`;
+      let label;
+      if (action === "delete") label = `Deleted ${data.deleted}`;
+      else if (action === "deactivate") label = `Deactivated ${data.updated}`;
+      else if (action === "activate") label = `Activated ${data.updated}`;
+      else if (action === "add_to_products") {
+        const parts = [];
+        if (data.created) parts.push(`created ${data.created}`);
+        if (data.skipped) parts.push(`skipped ${data.skipped} (already in products)`);
+        if ((data.errors || []).length) parts.push(`${data.errors.length} failed`);
+        label = `Bulk add · ${parts.join(" · ") || "no changes"}`;
+      }
       toast.success(label);
       clearSelection();
       await load();
+      await loadExistence();
     } catch (e) { toast.error("Bulk action failed", { description: e?.response?.data?.detail?.slice(0,200) || e.message }); }
     finally { setBulkBusy(false); }
   };
@@ -3064,6 +3105,28 @@ function ScraperPage({ onView }) {
             {loading ? <Loader2 className="animate-spin" size={16}/> : <Zap size={16}/>} {loading ? "Importing…" : "Import item"}
           </button>
         </div>
+
+        {dupItem && !loading && (
+          <div className="mt-3 flex items-center gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50" data-testid="dup-warning">
+            <div className="w-10 h-10 rounded-md overflow-hidden bg-white border hairline shrink-0">
+              {dupItem.images?.[0]
+                ? <img src={proxyImg(dupItem.images[0])} alt="" className="w-full h-full object-cover"/>
+                : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={14}/></div>}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-amber-800 flex items-center gap-1.5"><AlertTriangle size={13}/> Already imported</div>
+              <div className="text-xs text-amber-700 truncate">{dupItem.title || ""}</div>
+              <div className="text-[11px] text-amber-600 font-mono mt-0.5">
+                {dupItem.price_display || ""} · imported {fmtDate(dupItem.created_at)}
+              </div>
+            </div>
+            <button
+              onClick={() => { onView(dupItem); }}
+              className="btn btn-ghost text-xs shrink-0"
+              data-testid="dup-view-btn"
+            >View existing</button>
+          </div>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <span className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mr-1">Method:</span>
@@ -3142,6 +3205,7 @@ function ScraperPage({ onView }) {
               <button onClick={clearSelection} className="ml-2 text-xs text-slate-500 hover:underline">clear</button>
             </div>
             <div className="flex items-center gap-2">
+              <button onClick={() => bulk("add_to_products")} disabled={bulkBusy} className="btn btn-primary text-xs" data-testid="scraper-bulk-add-products"><Plus size={12}/> Push to Products</button>
               <button onClick={() => bulk("deactivate")} disabled={bulkBusy} className="btn btn-ghost text-xs" data-testid="scraper-bulk-deactivate"><PackageX size={12}/> Mark inactive</button>
               <button onClick={() => bulk("activate")} disabled={bulkBusy} className="btn btn-ghost text-xs" data-testid="scraper-bulk-activate"><BadgeCheck size={12}/> Reactivate</button>
               <button onClick={() => bulk("delete")} disabled={bulkBusy} className="btn btn-danger text-xs" data-testid="scraper-bulk-delete">

@@ -491,6 +491,43 @@ async def items_bulk_action(body: ItemBulkAction):
             {"$set": {"active": active, "updated_at": datetime.now(timezone.utc).isoformat()}},
         )
         return {"updated": r.modified_count, "active": active}
+    if body.action == "add_to_products":
+        created = 0
+        skipped = 0
+        errors: list[str] = []
+        rules = await _load_pricing_rules()
+        for iid in body.ids:
+            it = await db.items.find_one({"id": iid}, {"_id": 0})
+            if not it:
+                errors.append(f"{iid[:8]} not found")
+                continue
+            if it.get("added_to_products"):
+                skipped += 1
+                continue
+            try:
+                cost = it.get("price_value") or 0.0
+                pricing = calc_pricing(cost, rules=rules)
+                prod = Product(
+                    title=it.get("title") or "Untitled",
+                    price=pricing["sell_price"],
+                    cost=cost,
+                    stock=10,
+                    category=it.get("category") or _guess_category(
+                        title=it.get("title") or "",
+                        breadcrumbs=it.get("ebay_category_path") or [],
+                        specifics=it.get("specifics") or {},
+                    ),
+                    description=it.get("description") or "",
+                    images=it.get("images") or [],
+                    source_url=it.get("url"),
+                    source_item_id=it.get("item_id") or it.get("id"),
+                )
+                await db.products.insert_one(prod.model_dump())
+                await db.items.update_one({"id": iid}, {"$set": {"added_to_products": True}})
+                created += 1
+            except Exception as e:
+                errors.append(f"{iid[:8]}: {str(e)[:60]}")
+        return {"created": created, "skipped": skipped, "errors": errors}
     raise HTTPException(status_code=400, detail="Unknown action")
 
 

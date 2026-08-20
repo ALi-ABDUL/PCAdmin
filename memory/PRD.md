@@ -18,6 +18,24 @@ Light, modern theme.
   `category_performance` (revenue+profit+margin per category), `best_margin_products`
   (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
 
+### Duplicate URL detection + Bulk push to Products (2026-02-20)
+**Duplicate URL detection** — a light-weight `existingUrls` Map keyed by `item_id`
+and full URL is fetched once on Product Sourcing mount (`limit=500`). As you type
+into the URL input, a regex pulls the eBay `item_id` from any URL shape (`/itm/…`
+paths, `?iid=`) and matches against the Map. If a match is found a big amber
+banner (`[data-testid=dup-warning]`) appears under the input showing the existing
+title, price, import date and a **View existing** button. Clicking Import on a
+duplicate URL now prompts `window.confirm` before proceeding, so accidental
+re-imports need explicit consent.
+
+**Bulk push to Products** — new backend action `add_to_products` on
+`POST /api/items/bulk`. For each selected item it computes the sell price via
+active pricing rules, creates a `Product`, links `source_item_id`, and marks the
+scraped item `added_to_products=True`. Items already added are counted as
+`skipped` so re-runs are idempotent. Toast reports `created / skipped / errors`.
+Frontend button `[data-testid=scraper-bulk-add-products]` sits first on the bulk
+bar and refreshes the existence map on completion.
+
 ### Product Sourcing filters + bulk actions (2026-02-20)
 **New filters** on `GET /api/items`: `category`, `min_price`, `max_price`, extra
 `status` values `active` / `out_of_stock` / `price_changed` / `inactive`, plus a

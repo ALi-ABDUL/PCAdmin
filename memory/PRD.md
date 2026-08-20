@@ -20,7 +20,8 @@ Light, modern theme.
 
 ### Scraper Schedule under Store Management (2026-02-20)
 - **Backend**: singleton `db.scraper_schedule` document with `enabled,
-  start_time_hhmm, frequency, stop_date, last_run_at, last_run_stats, next_run_at`.
+  start_time_hhmm, frequency, stop_date, last_run_at, last_run_stats, next_run_at,
+  run_history, retry_pending`.
   Frequencies supported: `hourly / every_6h / every_12h / daily / weekly`.
 - `_scheduler_loop()` polls every 60 s, computes `next_run_at` anchored on
   Australia/Sydney start time + frequency interval, and triggers
@@ -28,7 +29,8 @@ Light, modern theme.
   when the date is reached. The old `_nightly_refresh_loop` was retired.
 - Endpoints: `GET /api/scraper/schedule`, `PATCH /api/scraper/schedule` (returns
   refreshed `next_run_at`), `POST /api/scraper/schedule/run-now` (triggers a
-  full refresh immediately and updates last-run stats).
+  full refresh immediately and updates last-run stats),
+  `POST /api/scraper/schedule/clear-history` (wipes the audit log).
 - **Frontend** page `Store Management → Scraper Schedule` shows:
   - Status strip: Active / Disabled / Stopped-past-stop-date, last-run relative
     time with stats, next-run in bold indigo.
@@ -37,6 +39,26 @@ Light, modern theme.
     toast when done.
 - Verified: PATCH frequency=weekly bumped next run 7 days out; PATCH back to
   daily anchored on 02:00 recomputed to today 16:00 UTC (02:00 AEST).
+
+### Run History Log + Retry-on-Failure (2026-02-21)
+- **Run History Log**: every completed run (scheduled, manual, or retry) is
+  prepended to `scraper_schedule.run_history`, capped at 20 entries. Each entry:
+  `{id, started_at, finished_at, duration_seconds, status, attempt, trigger,
+  stats, error}`. Status is `success | failed | dead`.
+- **Retry-on-Failure**: when a *scheduled* run fails (throws OR reports
+  `refreshed==0 && total>0`), `retry_pending` is set to
+  `{retry_at: now+15min, original_run_id, trigger: "scheduled"}`. The scheduler
+  loop fires the retry when due (attempt=2). On retry success → cleared; on
+  retry failure → marked `dead` and cleared. Manual runs never queue retries.
+- **Frontend**:
+  - Amber "Retry queued" banner with spinning refresh icon + retry ETA.
+  - "Run history" card with clear-history button and a table showing when,
+    trigger, status chip, duration, refreshed/total, sold, failed, and error
+    text (truncated with tooltip).
+- Tests: `/app/backend/tests/test_scheduler_history_and_retry.py` — 9 pytest
+  cases (all pass) covering success append, 20-entry cap, newest-first order,
+  scheduled+exception failure queues retry, retry success clears pending,
+  retry failure marks dead, manual failure does not queue retry, clear-history.
 
 ### Duplicate URL detection + Bulk push to Products (2026-02-20)
 **Duplicate URL detection** — a light-weight `existingUrls` Map keyed by `item_id`
@@ -266,4 +288,6 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
 
 ## Test coverage
 - `/app/backend/tests/test_suppliers_and_items.py` — 12 pytest cases (all pass).
+- `/app/backend/tests/test_scheduler_history_and_retry.py` — 9 pytest cases
+  (all pass) covering run history + retry-on-failure orchestration.
 - Latest iteration report: `/app/test_reports/iteration_1.json` (100% backend & frontend).

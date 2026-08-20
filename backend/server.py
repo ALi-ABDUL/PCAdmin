@@ -631,7 +631,15 @@ SCRAPER_SCHEDULE_DEFAULTS: dict = {
     "last_run_at": None,
     "last_run_stats": None,
     "next_run_at": None,
+    # Run history: newest first, capped at 20 entries.
+    # Each entry: {id, started_at, finished_at, duration_seconds, status, attempt, trigger, stats, error}
+    "run_history": [],
+    # Set when a scheduled run fails and a retry is queued for 15 min later.
+    # Shape: {"retry_at": iso, "original_run_id": id, "trigger": "scheduled"|"manual"}
+    "retry_pending": None,
 }
+RETRY_DELAY_SECONDS = 15 * 60  # 15 minutes
+RUN_HISTORY_LIMIT = 20
 FREQ_INTERVAL_SECONDS = {
     "hourly":    60 * 60,
     "every_6h":  6 * 60 * 60,
@@ -678,29 +686,119 @@ def _compute_next_run(sched: dict) -> Optional[str]:
     return anchor_utc.isoformat()
 
 
-async def _refresh_all_and_record(method: str = "auto") -> dict:
-    logger.info("scraper schedule: run starting")
-    summary = await _refresh_all_items(method=method)
-    now_iso = datetime.now(timezone.utc).isoformat()
+def _classify_run(summary: Optional[dict], error: Optional[str]) -> str:
+    """success | failed — 'failed' triggers a retry when the run came from the scheduler."""
+    if error:
+        return "failed"
+    if not summary:
+        return "failed"
+    total = int(summary.get("total") or 0)
+    refreshed = int(summary.get("refreshed") or 0)
+    # If there were items to refresh but none succeeded, treat as failure (likely bot-blocked/network).
+    if total > 0 and refreshed == 0:
+        return "failed"
+    return "success"
+
+
+async def _push_run_history(entry: dict) -> None:
+    """Prepend an entry into scraper_schedule.run_history and cap at RUN_HISTORY_LIMIT."""
+    sched = await _get_scraper_schedule()
+    history = list(sched.get("run_history") or [])
+    history.insert(0, entry)
+    history = history[:RUN_HISTORY_LIMIT]
+    await db.scraper_schedule.update_one(
+        {"id": "singleton"}, {"$set": {"run_history": history}}, upsert=True,
+    )
+
+
+async def _refresh_all_and_record(method: str = "auto", trigger: str = "scheduled", attempt: int = 1, original_run_id: Optional[str] = None) -> dict:
+    """Run a full refresh and record the outcome in run_history. On failure of a scheduled run, queue a 15-min retry."""
+    run_id = original_run_id or uuid.uuid4().hex
+    started = datetime.now(timezone.utc)
+    logger.info(f"scraper schedule: run starting · trigger={trigger} attempt={attempt} id={run_id}")
+    summary: Optional[dict] = None
+    error: Optional[str] = None
+    try:
+        summary = await _refresh_all_items(method=method)
+    except Exception as e:
+        error = f"{type(e).__name__}: {e}"[:400]
+        logger.exception(f"scraper schedule: run crashed · {error}")
+    finished = datetime.now(timezone.utc)
+    duration = (finished - started).total_seconds()
+    status = _classify_run(summary, error)
+    # If this is a retry that also failed, mark it 'dead' so the UI can highlight the give-up.
+    if status == "failed" and attempt >= 2:
+        status = "dead"
+
+    entry = {
+        "id": run_id,
+        "started_at": started.isoformat(),
+        "finished_at": finished.isoformat(),
+        "duration_seconds": round(duration, 2),
+        "status": status,
+        "attempt": attempt,
+        "trigger": trigger,
+        "stats": summary,
+        "error": error,
+    }
+    await _push_run_history(entry)
+
+    # Update last_run_at / last_run_stats on any completed attempt.
     await db.scraper_schedule.update_one(
         {"id": "singleton"},
-        {"$set": {"last_run_at": now_iso, "last_run_stats": summary}},
+        {"$set": {"last_run_at": finished.isoformat(), "last_run_stats": summary}},
         upsert=True,
     )
-    # Recompute next run
-    sched = await _get_scraper_schedule()
-    next_run = _compute_next_run(sched)
-    await db.scraper_schedule.update_one({"id": "singleton"}, {"$set": {"next_run_at": next_run}})
-    logger.info(f"scraper schedule: run done · {summary} · next {next_run}")
-    return summary
+
+    # Retry orchestration: only for scheduled runs, only on first-attempt failure.
+    retry_pending: Optional[dict] = None
+    if trigger == "scheduled" and status == "failed" and attempt == 1:
+        retry_at = (finished + timedelta(seconds=RETRY_DELAY_SECONDS)).isoformat()
+        retry_pending = {"retry_at": retry_at, "original_run_id": run_id, "trigger": "scheduled"}
+        logger.info(f"scraper schedule: queued retry at {retry_at} for run {run_id}")
+    # Clear retry_pending after a retry attempt (success or dead).
+    await db.scraper_schedule.update_one(
+        {"id": "singleton"}, {"$set": {"retry_pending": retry_pending}}, upsert=True,
+    )
+
+    # Recompute next run (skip on retry — the primary schedule anchor is unchanged).
+    if attempt == 1:
+        sched = await _get_scraper_schedule()
+        next_run = _compute_next_run(sched)
+        await db.scraper_schedule.update_one({"id": "singleton"}, {"$set": {"next_run_at": next_run}})
+        logger.info(f"scraper schedule: run done · status={status} · next {next_run}")
+    else:
+        logger.info(f"scraper schedule: retry finished · status={status}")
+    return summary or {"refreshed": 0, "sold_found": 0, "failed": 0, "total": 0, "error": error}
 
 
 async def _scheduler_loop():
-    """Poll the schedule config every minute and fire refresh-all when due."""
+    """Poll the schedule config every minute and fire refresh-all when due (or retry when queued)."""
     await asyncio.sleep(30)  # small boot delay
     while True:
         try:
             sched = await _get_scraper_schedule()
+            now = datetime.now(timezone.utc)
+
+            # 1) Retry orchestration: fire a queued retry regardless of schedule enable flag
+            #    (the original scheduled run was already accepted; user intent was to retry).
+            retry_pending = sched.get("retry_pending")
+            if retry_pending and retry_pending.get("retry_at"):
+                try:
+                    retry_due = datetime.fromisoformat(retry_pending["retry_at"]) <= now
+                except Exception:
+                    retry_due = False
+                if retry_due:
+                    await _refresh_all_and_record(
+                        method="auto",
+                        trigger="retry",
+                        attempt=2,
+                        original_run_id=retry_pending.get("original_run_id"),
+                    )
+                    # Reload after the retry so we don't also fire a scheduled run this tick.
+                    sched = await _get_scraper_schedule()
+
+            # 2) Scheduled runs
             if sched.get("enabled"):
                 stop = sched.get("stop_date")
                 stop_passed = False
@@ -718,7 +816,7 @@ async def _scheduler_loop():
                         except Exception:
                             due = False
                         if due:
-                            await _refresh_all_and_record(method="auto")
+                            await _refresh_all_and_record(method="auto", trigger="scheduled", attempt=1)
                         elif sched.get("next_run_at") != next_run:
                             await db.scraper_schedule.update_one(
                                 {"id": "singleton"}, {"$set": {"next_run_at": next_run}}, upsert=True,
@@ -766,8 +864,18 @@ async def update_scraper_schedule(body: ScraperScheduleUpdate):
 
 @api_router.post("/scraper/schedule/run-now")
 async def scraper_schedule_run_now():
-    summary = await _refresh_all_and_record(method="auto")
+    summary = await _refresh_all_and_record(method="auto", trigger="manual", attempt=1)
     return {"ok": True, "summary": summary, "schedule": await get_scraper_schedule()}
+
+
+@api_router.post("/scraper/schedule/clear-history")
+async def clear_scraper_history():
+    await db.scraper_schedule.update_one(
+        {"id": "singleton"},
+        {"$set": {"run_history": [], "retry_pending": None}},
+        upsert=True,
+    )
+    return await get_scraper_schedule()
 
 
 @app.on_event("startup")

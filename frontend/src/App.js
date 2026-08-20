@@ -2275,6 +2275,7 @@ function CredField({ label, testId, type = "text", placeholder, value, onChange,
 }
 
 function ScraperScheduleEditor() {
+  const RUN_HISTORY_LIMIT_UI = 20;
   const [sched, setSched] = useState(null);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
@@ -2311,6 +2312,31 @@ function ScraperScheduleEditor() {
 
   const stopPassed = sched.stop_date ? new Date(sched.stop_date) <= new Date() : false;
   const disabledByStop = sched.enabled && stopPassed;
+  const history = Array.isArray(sched.run_history) ? sched.run_history : [];
+  const retryPending = sched.retry_pending && sched.retry_pending.retry_at ? sched.retry_pending : null;
+
+  const clearHistory = async () => {
+    if (!window.confirm("Clear the scraper run history log?")) return;
+    try {
+      const { data } = await axios.post(`${API}/scraper/schedule/clear-history`, {});
+      setSched(data);
+      toast.success("Run history cleared");
+    } catch (e) { toast.error("Could not clear history"); }
+  };
+
+  const fmtDuration = (s) => {
+    const n = Number(s) || 0;
+    if (n < 60) return `${n.toFixed(1)}s`;
+    const m = Math.floor(n / 60); const rem = Math.round(n - m * 60);
+    return `${m}m ${rem}s`;
+  };
+  const statusChip = (status) => {
+    if (status === "success") return <span className="chip chip-success"><BadgeCheck size={11}/> Success</span>;
+    if (status === "failed")  return <span className="chip" style={{background:"#fef3c7",color:"#92400e"}}><AlertTriangle size={11}/> Failed · retry queued</span>;
+    if (status === "dead")    return <span className="chip" style={{background:"#fee2e2",color:"#991b1b"}}><XCircle size={11}/> Dead · gave up</span>;
+    return <span className="chip chip-neutral">{status || "—"}</span>;
+  };
+  const triggerLabel = (t) => t === "manual" ? "Manual" : t === "retry" ? "Retry" : "Scheduled";
 
   return (
     <div className="grid gap-4" data-testid="scraper-schedule">
@@ -2418,6 +2444,82 @@ function ScraperScheduleEditor() {
           </div>
         )}
         {busy && <div className="mt-2 text-[11px] text-slate-400 font-mono">saving…</div>}
+      </div>
+
+      {/* Retry pending banner */}
+      {retryPending && (
+        <div className="card p-4 border border-amber-200 bg-amber-50" data-testid="sched-retry-pending">
+          <div className="flex items-center gap-3">
+            <RefreshCw size={16} className="text-amber-700 animate-spin"/>
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-amber-900">Retry queued</div>
+              <div className="text-xs text-amber-800">
+                Last run failed. Auto-retry will fire at{" "}
+                <span className="font-mono">{fmtDate(retryPending.retry_at)}</span>
+                {" "}(15 minutes after the original attempt). If it fails again the run is marked <span className="font-mono">dead</span>.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Run history */}
+      <div className="card p-5" data-testid="sched-history">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <div className="font-display font-bold text-base flex items-center gap-2"><History size={16}/> Run history</div>
+            <div className="text-xs text-slate-500">Last {RUN_HISTORY_LIMIT_UI} refresh runs — scheduled, manual, and retries.</div>
+          </div>
+          {history.length > 0 && (
+            <button onClick={clearHistory} className="btn btn-ghost text-xs" data-testid="sched-history-clear">
+              <Trash2 size={12}/> Clear history
+            </button>
+          )}
+        </div>
+
+        {history.length === 0 ? (
+          <div className="text-slate-500 text-sm py-10 text-center border border-dashed rounded-lg">
+            No runs recorded yet. Click <span className="font-mono">Run now</span> or wait for the next scheduled run.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" data-testid="sched-history-table">
+              <thead>
+                <tr className="text-left text-[10px] font-mono uppercase tracking-widest text-slate-500 border-b">
+                  <th className="py-2 pr-3">When</th>
+                  <th className="py-2 pr-3">Trigger</th>
+                  <th className="py-2 pr-3">Status</th>
+                  <th className="py-2 pr-3">Duration</th>
+                  <th className="py-2 pr-3">Refreshed</th>
+                  <th className="py-2 pr-3">Sold</th>
+                  <th className="py-2 pr-3">Failed</th>
+                  <th className="py-2 pr-3">Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((r) => {
+                  const s = r.stats || {};
+                  return (
+                    <tr key={r.id + "-" + r.attempt} className="border-b last:border-b-0 hover:bg-slate-50" data-testid={`sched-history-row-${r.id}`}>
+                      <td className="py-2 pr-3 font-mono text-xs text-slate-700 whitespace-nowrap">{fmtDate(r.started_at)}</td>
+                      <td className="py-2 pr-3">
+                        <span className="chip chip-neutral">{triggerLabel(r.trigger)}{r.attempt > 1 ? ` · #${r.attempt}` : ""}</span>
+                      </td>
+                      <td className="py-2 pr-3">{statusChip(r.status)}</td>
+                      <td className="py-2 pr-3 font-mono text-xs">{fmtDuration(r.duration_seconds)}</td>
+                      <td className="py-2 pr-3 font-mono text-xs">{s.refreshed ?? 0}<span className="text-slate-400">/{s.total ?? 0}</span></td>
+                      <td className="py-2 pr-3 font-mono text-xs text-emerald-700">{s.sold_found ?? 0}</td>
+                      <td className="py-2 pr-3 font-mono text-xs text-rose-700">{s.failed ?? 0}</td>
+                      <td className="py-2 pr-3 text-xs text-slate-500 max-w-[280px] truncate" title={r.error || ""}>
+                        {r.error ? r.error : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

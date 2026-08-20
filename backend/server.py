@@ -355,8 +355,19 @@ async def scrape(req: ScrapeRequest) -> dict:
                 await db.products.update_many({"source_item_id": data.get("item_id")}, {"$set": {"active": False, "is_sold": True, "updated_at": now_iso}})
             history = existing.get("price_history", [])
             last_val = history[-1]["value"] if history else None
-            if data.get("price_value") is not None and data.get("price_value") != last_val:
+            new_val = data.get("price_value")
+            if new_val is not None and new_val != last_val:
                 history.append(history_point)
+                # Emit a price-change notification for every linked product
+                if last_val is not None:
+                    await _emit_price_change_notifications(
+                        item=existing,
+                        new_image=(data.get("images") or existing.get("images") or [None])[0],
+                        new_title=(data.get("title") or existing.get("title") or ""),
+                        old_price=last_val,
+                        new_price=new_val,
+                        now_iso=now_iso,
+                    )
             elif not history:
                 history.append(history_point)
             update_fields["price_history"] = history
@@ -1343,6 +1354,105 @@ def _guess_category(
     hit = _match_rules(title or "")
     return hit or "other"
 
+
+# ---------------------------------------------------------------------------
+# Notifications (price-change alerts)
+# ---------------------------------------------------------------------------
+
+class Notification(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    type: str = "price_change"
+    product_id: Optional[str] = None
+    product_title: Optional[str] = None
+    image: Optional[str] = None
+    ebay_url: Optional[str] = None
+    item_id: Optional[str] = None
+    old_price: Optional[float] = None
+    new_price: Optional[float] = None
+    old_sell: Optional[float] = None
+    new_sell: Optional[float] = None
+    old_profit: Optional[float] = None
+    new_profit: Optional[float] = None
+    old_margin_pct: Optional[float] = None
+    new_margin_pct: Optional[float] = None
+    delta_margin: Optional[float] = None
+    at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    read: bool = False
+
+
+async def _emit_price_change_notifications(item: dict, new_image: Optional[str], new_title: str,
+                                           old_price: float, new_price: float, now_iso: str) -> None:
+    """Create a notification for each product linked to this scraped item."""
+    ebay_item_id = item.get("item_id") or item.get("id")
+    if not ebay_item_id:
+        return
+    rules = await _load_pricing_rules()
+    old_calc = calc_pricing(old_price, rules=rules)
+    new_calc = calc_pricing(new_price, rules=rules)
+
+    def margin_pct(sell: float, cost: float) -> float:
+        return round(((sell - cost) / sell) * 100, 2) if sell > 0 else 0.0
+
+    old_margin = margin_pct(old_calc["sell_price"], old_price)
+    new_margin = margin_pct(new_calc["sell_price"], new_price)
+
+    products = await db.products.find(
+        {"source_item_id": ebay_item_id}, {"_id": 0, "id": 1, "title": 1, "images": 1}
+    ).to_list(50)
+
+    # No linked products yet — still emit one notification tied to the scraped item so
+    # the user sees eBay-side price movement in their bell drop-down.
+    targets = products or [{"id": None, "title": new_title, "images": item.get("images") or []}]
+
+    for p in targets:
+        n = Notification(
+            product_id=p.get("id"),
+            product_title=p.get("title") or new_title,
+            image=(p.get("images") or [None])[0] or new_image,
+            ebay_url=item.get("url"),
+            item_id=ebay_item_id,
+            old_price=round(float(old_price), 2),
+            new_price=round(float(new_price), 2),
+            old_sell=old_calc["sell_price"],
+            new_sell=new_calc["sell_price"],
+            old_profit=old_calc["profit"],
+            new_profit=new_calc["profit"],
+            old_margin_pct=old_margin,
+            new_margin_pct=new_margin,
+            delta_margin=round(new_margin - old_margin, 2),
+            at=now_iso,
+        )
+        await db.notifications.insert_one(n.model_dump())
+
+
+@api_router.get("/notifications")
+async def list_notifications(unread_only: bool = False, limit: int = Query(50, le=200)):
+    q: dict = {}
+    if unread_only:
+        q["read"] = False
+    cursor = db.notifications.find(q, {"_id": 0}).sort("at", -1).limit(limit)
+    rows = await cursor.to_list(length=limit)
+    unread = await db.notifications.count_documents({"read": False})
+    return {"notifications": rows, "unread_count": unread, "total": await db.notifications.count_documents({})}
+
+
+@api_router.post("/notifications/{nid}/read")
+async def mark_notification_read(nid: str):
+    r = await db.notifications.update_one({"id": nid}, {"$set": {"read": True}})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return {"ok": True}
+
+
+@api_router.post("/notifications/mark-all-read")
+async def mark_all_notifications_read():
+    r = await db.notifications.update_many({"read": False}, {"$set": {"read": True}})
+    return {"marked": r.modified_count}
+
+
+# ---------------------------------------------------------------------------
+# Pricing (rules-aware sell/profit + tier CRUD)
+# ---------------------------------------------------------------------------
 
 def calc_pricing(ebay_price: float, rules: Optional[list[dict]] = None,
                  margin_pct: float = 20.0, min_profit: float = 20.0) -> dict:

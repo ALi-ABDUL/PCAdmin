@@ -18,6 +18,22 @@ Light, modern theme.
   `category_performance` (revenue+profit+margin per category), `best_margin_products`
   (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
 
+### Notification bell + price-change alerts (2026-02-20)
+- New `Notification` collection. `_emit_price_change_notifications()` fires whenever a
+  scrape/refresh detects `price_value != last price_history value` on a scraped item.
+  Each notification captures: product title, image, old/new eBay price, old/new sell
+  price + profit computed via active pricing rules, old/new margin %, and delta_margin
+  (pp change). Fires once per linked product (or once against the raw item if none linked).
+- Endpoints: `GET /api/notifications?unread_only=&limit=`, `POST
+  /api/notifications/{id}/read`, `POST /api/notifications/mark-all-read`.
+- Frontend `<NotificationBell/>` component in the top bar, next to the admin pill.
+  Red circular badge shows unread count (or `99+` beyond 99). Clicking opens a 380px
+  dropdown with product thumb, title, `old → new` price (arrow + colour), margin swing
+  in percentage points. Click a row → mark that one read. "Mark all read" clears the
+  badge. 30-second polling keeps the count fresh; outside-click closes the dropdown.
+- Seeded 4 demo alerts covering both drops and rises so the badge / dropdown is visible
+  from day one.
+
 ### Order delivery address (2026-02-20)
 - New `ShippingAddress { full_name, street, suburb, state, postcode, country }` on every
   order. `POST /api/orders` accepts it and `create_order` persists it.

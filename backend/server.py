@@ -471,6 +471,7 @@ async def _nightly_refresh_loop():
 @app.on_event("startup")
 async def _start_scheduler():
     await _ensure_categories_seeded()
+    await _ensure_pricing_rules_seeded()
     if await db.customers.count_documents({}) == 0:
         await _rebuild_customers_from_orders()
     await _seed_transactions_and_returns()
@@ -1298,19 +1299,145 @@ def _guess_category(
     return hit or "other"
 
 
-def calc_pricing(ebay_price: float, margin_pct: float = 20.0, min_profit: float = 20.0) -> dict:
-    """Sell rule: sell = ebay * (1 + margin_pct/100) + min_profit. Profit = sell - ebay."""
+def calc_pricing(ebay_price: float, rules: Optional[list[dict]] = None,
+                 margin_pct: float = 20.0, min_profit: float = 20.0) -> dict:
+    """Compute sell + profit from an eBay price.
+
+    - If `rules` are provided, walk them in `sort_order` and pick the first active rule
+      whose min_price <= ebay < max_price (max_price=None means +inf). Apply either
+      `flat` ($) or `percent` (%).
+    - If no rule matches (or `rules` is None/empty), fall back to `sell = ebay * (1 +
+      margin_pct/100) + min_profit`.
+    """
     ebay = round(float(ebay_price or 0), 2)
-    sell = round(ebay * (1 + margin_pct / 100.0) + min_profit, 2) if ebay > 0 else 0.0
-    profit = round(sell - ebay, 2)
-    return {"ebay_price": ebay, "sell_price": sell, "profit": profit,
-            "margin_pct": margin_pct, "min_profit": min_profit}
+    if ebay <= 0:
+        return {"ebay_price": 0.0, "sell_price": 0.0, "profit": 0.0, "matched_rule": None}
+
+    matched = None
+    if rules:
+        for r in rules:
+            if not r.get("active", True):
+                continue
+            min_p = float(r.get("min_price") or 0)
+            max_p = r.get("max_price")
+            max_ok = (max_p is None) or (ebay < float(max_p))
+            if ebay >= min_p and max_ok:
+                matched = r
+                break
+
+    if matched:
+        if matched["kind"] == "percent":
+            sell = ebay * (1 + float(matched["value"]) / 100.0)
+        else:  # flat
+            sell = ebay + float(matched["value"])
+    else:
+        sell = ebay * (1 + margin_pct / 100.0) + min_profit
+
+    sell = round(sell, 2)
+    return {
+        "ebay_price": ebay,
+        "sell_price": sell,
+        "profit": round(sell - ebay, 2),
+        "matched_rule": (
+            {k: matched[k] for k in ("id", "label", "min_price", "max_price", "kind", "value")}
+            if matched else None
+        ),
+    }
+
+
+class PricingRuleBase(BaseModel):
+    label: Optional[str] = ""
+    min_price: float = 0.0
+    max_price: Optional[float] = None  # None = infinity
+    kind: str = "flat"  # "flat" | "percent"
+    value: float = 0.0
+    active: bool = True
+    sort_order: int = 0
+
+
+class PricingRule(PricingRuleBase):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class PricingRuleUpdate(BaseModel):
+    label: Optional[str] = None
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    kind: Optional[str] = None
+    value: Optional[float] = None
+    active: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+_DEFAULT_PRICING_RULES = [
+    {"label": "Tiny items",  "min_price": 1,   "max_price": 5,    "kind": "flat",    "value": 2,  "sort_order": 10},
+    {"label": "Cheap",       "min_price": 5,   "max_price": 20,   "kind": "flat",    "value": 5,  "sort_order": 20},
+    {"label": "Mid",         "min_price": 20,  "max_price": 50,   "kind": "flat",    "value": 15, "sort_order": 30},
+    {"label": "Premium",     "min_price": 50,  "max_price": 100,  "kind": "percent", "value": 20, "sort_order": 40},
+    {"label": "High-ticket", "min_price": 100, "max_price": None, "kind": "percent", "value": 15, "sort_order": 50},
+]
+
+
+async def _ensure_pricing_rules_seeded() -> None:
+    if await db.pricing_rules.count_documents({}) > 0:
+        return
+    for r in _DEFAULT_PRICING_RULES:
+        rule = PricingRule(**r)
+        await db.pricing_rules.insert_one(rule.model_dump())
+    logger.info(f"Seeded {len(_DEFAULT_PRICING_RULES)} pricing rules")
+
+
+async def _load_pricing_rules() -> list[dict]:
+    cursor = db.pricing_rules.find({"active": True}, {"_id": 0}).sort("sort_order", 1)
+    return await cursor.to_list(500)
+
+
+@api_router.get("/pricing-rules")
+async def list_pricing_rules():
+    cursor = db.pricing_rules.find({}, {"_id": 0}).sort("sort_order", 1)
+    return {"rules": await cursor.to_list(500)}
+
+
+@api_router.post("/pricing-rules")
+async def create_pricing_rule(body: PricingRuleBase):
+    if body.kind not in {"flat", "percent"}:
+        raise HTTPException(status_code=400, detail="kind must be 'flat' or 'percent'")
+    if body.max_price is not None and body.max_price <= body.min_price:
+        raise HTTPException(status_code=400, detail="max_price must be greater than min_price (or empty for no upper bound)")
+    rule = PricingRule(**body.model_dump())
+    await db.pricing_rules.insert_one(rule.model_dump())
+    return rule.model_dump()
+
+
+@api_router.patch("/pricing-rules/{rid}")
+async def update_pricing_rule(rid: str, body: PricingRuleUpdate):
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if body.kind is not None and body.kind not in {"flat", "percent"}:
+        raise HTTPException(status_code=400, detail="kind must be 'flat' or 'percent'")
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    r = await db.pricing_rules.update_one({"id": rid}, {"$set": fields})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Pricing rule not found")
+    return await db.pricing_rules.find_one({"id": rid}, {"_id": 0})
+
+
+@api_router.delete("/pricing-rules/{rid}")
+async def delete_pricing_rule(rid: str):
+    r = await db.pricing_rules.delete_one({"id": rid})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Pricing rule not found")
+    return {"deleted": True}
 
 
 @api_router.get("/pricing/calc")
-async def pricing_calc(ebay_price: float, margin_pct: float = 20.0, min_profit: float = 20.0):
-    """Manual profit calculator: given an eBay price, return the suggested sell price + profit."""
-    return calc_pricing(ebay_price, margin_pct, min_profit)
+async def pricing_calc(ebay_price: float):
+    """Manual profit calculator: uses active pricing rules; falls back to 20% + $20."""
+    rules = await _load_pricing_rules()
+    return calc_pricing(ebay_price, rules=rules)
 
 
 @api_router.post("/products/from-item/{item_id}")
@@ -1319,7 +1446,8 @@ async def create_product_from_item(item_id: str):
     if not it:
         raise HTTPException(status_code=404, detail="Scraped item not found")
     cost = it.get("price_value") or 0.0
-    pricing = calc_pricing(cost)
+    rules = await _load_pricing_rules()
+    pricing = calc_pricing(cost, rules=rules)
     prod = Product(
         title=it.get("title") or "Untitled",
         price=pricing["sell_price"],

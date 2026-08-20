@@ -18,6 +18,19 @@ Light, modern theme.
   `category_performance` (revenue+profit+margin per category), `best_margin_products`
   (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
 
+### Pricing Rules — Store Management (2026-02-20)
+- New page **Store Management › Pricing Rules** (data-testid `store-pricing-rules`).
+- Backend model `PricingRule { label, min_price, max_price?, kind: flat|percent, value,
+  active, sort_order }`. Endpoints: `GET/POST /api/pricing-rules`, `PATCH/DELETE
+  /api/pricing-rules/{id}`. Seeded on first startup with the 5 default tiers.
+- `calc_pricing(ebay, rules)` walks rules in ascending `sort_order` — first active rule
+  whose `min <= ebay < max` wins. Falls back to the old `20% + $20` rule when no
+  tier matches. Response now includes `matched_rule`.
+- `POST /api/products/from-item/{id}` and `GET /api/pricing/calc` both use active rules.
+- Frontend `usePricingRules()` hook fetches rules once (shared cache + listener pool)
+  so the scraper cards, All Products table and Dashboard Profit Calculator all reflect
+  edits without extra fetches. The calculator shows the matched tier chip live.
+
 ### Profit / pricing calculator (2026-02-19)
 - **Pricing rule**: `sell = eBay × 1.20 + $20` (20% margin + $20 minimum profit floor).
   `profit = sell − eBay`.

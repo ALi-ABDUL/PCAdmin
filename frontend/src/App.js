@@ -35,13 +35,55 @@ const moneyCents = (n) => (n == null ? "—" : new Intl.NumberFormat("en-AU", { 
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" }); } catch { return iso; } };
 const fmtDay = (iso) => { try { return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short" }); } catch { return iso; } };
 
-// Pricing rule: sell = eBay * 1.20 + $20; profit = sell - eBay.
-const PRICING = { marginPct: 20, minProfit: 20 };
-const calcPricing = (ebayPrice) => {
+// Pricing rules — loaded from /api/pricing-rules; fallback = 20% + $20 floor.
+const PRICING_FALLBACK = { marginPct: 20, minProfit: 20 };
+const calcPricingWithRules = (ebayPrice, rules) => {
   const ebay = Number(ebayPrice) || 0;
-  if (ebay <= 0) return { ebay: 0, sell: 0, profit: 0 };
-  const sell = Math.round((ebay * (1 + PRICING.marginPct / 100) + PRICING.minProfit) * 100) / 100;
-  return { ebay, sell, profit: Math.round((sell - ebay) * 100) / 100 };
+  if (ebay <= 0) return { ebay: 0, sell: 0, profit: 0, matched: null };
+  const sorted = (rules || []).filter((r) => r.active).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  let matched = null;
+  for (const r of sorted) {
+    const min = Number(r.min_price) || 0;
+    const max = r.max_price == null ? Infinity : Number(r.max_price);
+    if (ebay >= min && ebay < max) { matched = r; break; }
+  }
+  let sell;
+  if (matched) {
+    sell = matched.kind === "percent" ? ebay * (1 + Number(matched.value) / 100) : ebay + Number(matched.value);
+  } else {
+    sell = ebay * (1 + PRICING_FALLBACK.marginPct / 100) + PRICING_FALLBACK.minProfit;
+  }
+  sell = Math.round(sell * 100) / 100;
+  return { ebay, sell, profit: Math.round((sell - ebay) * 100) / 100, matched };
+};
+// Back-compat name used elsewhere in the file — now defers to rules-aware calc when
+// callers pass a rules[] as the 2nd arg.
+const calcPricing = (ebay, rules) => {
+  const r = calcPricingWithRules(ebay, rules);
+  return { ebay: r.ebay, sell: r.sell, profit: r.profit };
+};
+
+// Tiny global cache so components sharing this file all share one fetch.
+let _pricingRulesCache = null;
+let _pricingRulesPromise = null;
+const _pricingRulesListeners = new Set();
+const _refreshPricingRules = async () => {
+  _pricingRulesPromise = axios.get(`${API}/pricing-rules`).then((r) => {
+    _pricingRulesCache = r.data.rules || [];
+    _pricingRulesListeners.forEach((fn) => fn(_pricingRulesCache));
+    return _pricingRulesCache;
+  });
+  return _pricingRulesPromise;
+};
+const usePricingRules = () => {
+  const [rules, setRules] = useState(_pricingRulesCache || []);
+  useEffect(() => {
+    _pricingRulesListeners.add(setRules);
+    if (_pricingRulesCache == null && !_pricingRulesPromise) _refreshPricingRules();
+    else if (_pricingRulesCache) setRules(_pricingRulesCache);
+    return () => _pricingRulesListeners.delete(setRules);
+  }, []);
+  return [rules, _refreshPricingRules];
 };
 
 const ORDERS_NAV = [
@@ -112,6 +154,7 @@ const PRODUCT_NAV = [
 /* --------------------------- Store Management nav ------------------------- */
 const STORE_NAV = [
   { id: "store-settings",      label: "Store Settings",       icon: Store,        group: "Configuration" },
+  { id: "pricing-rules",       label: "Pricing Rules",        icon: Percent,      group: "Configuration" },
   { id: "payment-gateway",     label: "Payment Gateway",      icon: CreditCard,   group: "Configuration" },
   { id: "shipping-methods",    label: "Shipping Methods",     icon: Truck,        group: "Configuration" },
   { id: "tax-rates",           label: "Tax Rates",            icon: Receipt,      group: "Configuration" },
@@ -1596,12 +1639,178 @@ function RefundsChargebacksView() {
 }
 
 /* ---------------------------- Store Management ---------------------------- */
+function PricingRulesEditor() {
+  const [rules, setRules] = useState([]);
+  const [editing, setEditing] = useState(null); // rule object or {} for new
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/pricing-rules`);
+    setRules(data.rules);
+    _pricingRulesCache = data.rules;
+    _pricingRulesListeners.forEach((fn) => fn(data.rules));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    if (!editing) return;
+    if (editing.max_price !== null && editing.max_price !== "" && Number(editing.max_price) <= Number(editing.min_price || 0)) {
+      return toast.error("Max price must be greater than min (leave blank for no upper bound)");
+    }
+    const body = {
+      label: editing.label || "",
+      min_price: Number(editing.min_price) || 0,
+      max_price: editing.max_price === "" || editing.max_price == null ? null : Number(editing.max_price),
+      kind: editing.kind || "flat",
+      value: Number(editing.value) || 0,
+      active: editing.active !== false,
+      sort_order: Number(editing.sort_order) || 0,
+    };
+    setBusy(true);
+    try {
+      if (editing.id) {
+        await axios.patch(`${API}/pricing-rules/${editing.id}`, body);
+        toast.success("Rule updated");
+      } else {
+        await axios.post(`${API}/pricing-rules`, body);
+        toast.success("Rule created");
+      }
+      setEditing(null);
+      await load();
+    } catch (e) {
+      toast.error("Save failed", { description: e?.response?.data?.detail?.slice(0, 200) || e.message });
+    } finally { setBusy(false); }
+  };
+
+  const del = async (r) => {
+    if (!window.confirm(`Delete rule "${r.label || `$${r.min_price}+`}"?`)) return;
+    await axios.delete(`${API}/pricing-rules/${r.id}`);
+    toast.success("Deleted");
+    await load();
+  };
+
+  const toggleActive = async (r) => {
+    await axios.patch(`${API}/pricing-rules/${r.id}`, { active: !r.active });
+    await load();
+  };
+
+  const rangeLabel = (r) => {
+    const min = `$${Number(r.min_price).toFixed(0)}`;
+    const max = r.max_price == null ? "+" : ` – $${Number(r.max_price).toFixed(0)}`;
+    return `${min}${max}`;
+  };
+  const addLabel = (r) => (r.kind === "percent" ? `+${r.value}%` : `+$${Number(r.value).toFixed(2)}`);
+
+  const emptyRule = { label: "", min_price: "", max_price: "", kind: "flat", value: "", active: true, sort_order: (rules.length + 1) * 10 };
+
+  return (
+    <div className="grid gap-4" data-testid="pricing-rules-editor">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="text-sm text-slate-500">
+          Rules are checked in ascending <span className="font-mono">sort order</span>; the first match wins. If nothing matches, fallback is <span className="font-mono">20% + $20</span>.
+        </div>
+        <button onClick={() => setEditing(emptyRule)} className="btn btn-primary text-sm" data-testid="pr-add-btn"><Plus size={14}/> Add tier</button>
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="tbl">
+            <thead><tr>
+              <th className="w-16">Order</th>
+              <th>Label</th>
+              <th>Range</th>
+              <th>Adds</th>
+              <th className="text-right">Preview</th>
+              <th>Status</th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              {rules.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-slate-500">No pricing rules yet — add your first tier.</td></tr>}
+              {rules.map((r) => {
+                const sample = ((Number(r.min_price) || 0) + (r.max_price ? Number(r.max_price) : Number(r.min_price) + 50)) / 2;
+                const c = calcPricingWithRules(sample, rules);
+                return (
+                  <tr key={r.id} data-testid="pr-row" className={r.active ? "" : "opacity-50"}>
+                    <td className="font-mono text-slate-500">{r.sort_order}</td>
+                    <td className="text-sm font-medium">{r.label || "—"}</td>
+                    <td className="font-mono text-sm">{rangeLabel(r)}</td>
+                    <td><span className={`chip ${r.kind === "percent" ? "chip-primary" : "chip-success"} font-mono`}>{addLabel(r)}</span></td>
+                    <td className="text-right text-[11px] font-mono text-slate-500">
+                      ${sample.toFixed(2)} → <span className="text-indigo-600 font-bold">${c.sell.toFixed(2)}</span> <span className="text-emerald-600">(+${c.profit.toFixed(2)})</span>
+                    </td>
+                    <td>
+                      <label className="flex items-center gap-1.5 text-[11px] font-mono uppercase text-slate-500 cursor-pointer">
+                        <input type="checkbox" checked={r.active} onChange={() => toggleActive(r)} className="accent-indigo-600 w-3.5 h-3.5"/>
+                        {r.active ? "Active" : "Off"}
+                      </label>
+                    </td>
+                    <td>
+                      <div className="flex items-center gap-1 justify-end">
+                        <button onClick={() => setEditing(r)} className="btn btn-ghost text-xs !py-1 !px-2" data-testid="pr-edit-btn">Edit</button>
+                        <button onClick={() => del(r)} className="btn btn-danger text-xs !py-1 !px-2" data-testid="pr-del-btn"><Trash2 size={12}/></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md overflow-y-auto" onClick={() => setEditing(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="card max-w-lg mx-auto my-10 p-6" data-testid="pr-modal">
+            <div className="flex items-center justify-between mb-5">
+              <div className="font-display font-bold text-xl">{editing.id ? "Edit tier" : "New tier"}</div>
+              <button onClick={() => setEditing(null)} className="btn btn-ghost !p-2"><X size={16}/></button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Label (optional)" className="col-span-2">
+                <input className="input px-3 py-2 w-full" value={editing.label || ""} onChange={(e) => setEditing({ ...editing, label: e.target.value })} placeholder="e.g. Mid tier" data-testid="pr-label"/>
+              </Field>
+              <Field label="Min price (AUD)">
+                <input type="number" min="0" step="0.01" className="input px-3 py-2 w-full font-mono" value={editing.min_price} onChange={(e) => setEditing({ ...editing, min_price: e.target.value })} data-testid="pr-min"/>
+              </Field>
+              <Field label="Max price (blank = ∞)">
+                <input type="number" min="0" step="0.01" className="input px-3 py-2 w-full font-mono" value={editing.max_price ?? ""} onChange={(e) => setEditing({ ...editing, max_price: e.target.value })} data-testid="pr-max"/>
+              </Field>
+              <Field label="Adds">
+                <select className="input px-3 py-2 w-full" value={editing.kind || "flat"} onChange={(e) => setEditing({ ...editing, kind: e.target.value })} data-testid="pr-kind">
+                  <option value="flat">Flat $ profit</option>
+                  <option value="percent">% margin</option>
+                </select>
+              </Field>
+              <Field label={editing.kind === "percent" ? "Percentage" : "Dollar amount"}>
+                <input type="number" min="0" step="0.01" className="input px-3 py-2 w-full font-mono" value={editing.value} onChange={(e) => setEditing({ ...editing, value: e.target.value })} data-testid="pr-value"/>
+              </Field>
+              <Field label="Sort order (lower first)">
+                <input type="number" className="input px-3 py-2 w-full font-mono" value={editing.sort_order} onChange={(e) => setEditing({ ...editing, sort_order: e.target.value })} data-testid="pr-order"/>
+              </Field>
+              <Field label="Active">
+                <select className="input px-3 py-2 w-full" value={editing.active !== false ? "1" : "0"} onChange={(e) => setEditing({ ...editing, active: e.target.value === "1" })} data-testid="pr-active">
+                  <option value="1">Yes</option><option value="0">No</option>
+                </select>
+              </Field>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button onClick={() => setEditing(null)} className="btn btn-ghost">Cancel</button>
+              <button onClick={save} disabled={busy} className="btn btn-primary" data-testid="pr-save-btn">{busy ? <Loader2 className="animate-spin" size={14}/> : <Plus size={14}/>} {editing.id ? "Save changes" : "Create tier"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StoreManagement({ section, setSection }) {
   const meta = STORE_NAV.find((s) => s.id === section) || STORE_NAV[0];
   const Icon = meta.icon;
 
   const sections = {
     "store-settings":      { hint: "Store name, brand, contact details, business hours and legal info.", fields: ["Store name","Legal business name","ABN","Contact email","Support phone","Business hours"] },
+    "pricing-rules":       { hint: "Tiered profit rules the scraper uses when calculating sell prices for imported items.", fields: [], custom: <PricingRulesEditor/> },
     "payment-gateway":     { hint: "Enable/disable payment providers and configure their credentials.", fields: ["Stripe","PayPal","Apple Pay","Google Pay","Afterpay","Zip Pay","Bank transfer","Cash on delivery"] },
     "shipping-methods":    { hint: "Zones, carriers, rates and free-shipping thresholds.", fields: ["Australia Post — Parcel Post","Australia Post — Express","Sendle","Aramex","Local delivery","Click & collect","Free shipping threshold"] },
     "tax-rates":           { hint: "GST and location-based tax rules.", fields: ["Australia — GST 10%","New Zealand — GST 15%","Tax-exempt customer groups","B2B / ABN entries"] },
@@ -1627,13 +1836,14 @@ function StoreManagement({ section, setSection }) {
           <div className="font-display text-2xl font-bold tracking-tight">{meta.label}</div>
           <div className="text-sm text-slate-500 mt-1">{sections.hint}</div>
         </div>
-        <button className="btn btn-primary text-sm hidden sm:inline-flex" data-testid="store-save-btn"><Plus size={14}/> Add new</button>
+        {!sections.custom && <button className="btn btn-primary text-sm hidden sm:inline-flex" data-testid="store-save-btn"><Plus size={14}/> Add new</button>}
       </div>
 
-      <div className="grid gap-3">
-        {sections.fields.length === 0 ? (
-          <div className="card p-10 text-center text-slate-500">Configuration for this section coming soon.</div>
-        ) : sections.fields.map((f, i) => (
+      {sections.custom ? sections.custom : (
+        <div className="grid gap-3">
+          {sections.fields.length === 0 ? (
+            <div className="card p-10 text-center text-slate-500">Configuration for this section coming soon.</div>
+          ) : sections.fields.map((f, i) => (
           <div key={f} className="card p-4 md:p-5 flex items-center justify-between gap-4 group hover:shadow-md transition-shadow">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-9 h-9 rounded-lg grid place-items-center shrink-0 bg-indigo-50 text-indigo-500"><Icon size={16}/></div>
@@ -1650,12 +1860,15 @@ function StoreManagement({ section, setSection }) {
             </div>
           </div>
         ))}
-      </div>
+        </div>
+      )}
 
-      <div className="card p-5 border-dashed border-2 text-center text-slate-500 text-sm">
-        <div className="font-display font-bold text-slate-700 mb-1">This is a scaffold — ready for your links & fields</div>
-        Send more sub-links or specific fields for <span className="font-mono text-indigo-600">{meta.label}</span> and I&apos;ll wire them up.
-      </div>
+      {!sections.custom && (
+        <div className="card p-5 border-dashed border-2 text-center text-slate-500 text-sm">
+          <div className="font-display font-bold text-slate-700 mb-1">This is a scaffold — ready for your links & fields</div>
+          Send more sub-links or specific fields for <span className="font-mono text-indigo-600">{meta.label}</span> and I&apos;ll wire them up.
+        </div>
+      )}
     </div>
   );
 }
@@ -1663,10 +1876,14 @@ function StoreManagement({ section, setSection }) {
 /* ------------------------------- Dashboard -------------------------------- */
 function ProfitCalculator() {
   const [ebay, setEbay] = useState("");
+  const [rules] = usePricingRules();
   const num = parseFloat(ebay);
   const valid = !isNaN(num) && num > 0;
-  const c = valid ? calcPricing(num) : { ebay: 0, sell: 0, profit: 0 };
-  const roi = valid ? (c.profit / num) * 100 : 0;
+  const c = valid ? calcPricingWithRules(num, rules) : { ebay: 0, sell: 0, profit: 0, matched: null };
+  const roi = valid && c.ebay ? (c.profit / c.ebay) * 100 : 0;
+  const ruleLabel = c.matched
+    ? `${c.matched.label || "Tier"} · ${c.matched.kind === "percent" ? `+${c.matched.value}%` : `+$${c.matched.value}`}`
+    : "Fallback rule (20% + $20)";
 
   return (
     <div className="card p-5" data-testid="profit-calculator">
@@ -1675,9 +1892,12 @@ function ProfitCalculator() {
           <div className="w-9 h-9 grid place-items-center rounded-lg text-white" style={{ background: "linear-gradient(135deg,#4F46E5,#EC4899)" }}><Calculator size={16}/></div>
           <div>
             <div className="font-display font-bold text-lg">Profit calculator</div>
-            <div className="text-xs text-slate-500 font-mono">Sell = eBay × 1.20 + $20  ·  Profit = Sell − eBay</div>
+            <div className="text-xs text-slate-500 font-mono">Uses your Pricing Rules · edit in Store Management › Pricing Rules</div>
           </div>
         </div>
+        {valid && (
+          <span className="chip chip-primary" data-testid="pcalc-rule">{ruleLabel}</span>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-stretch">
@@ -2234,6 +2454,7 @@ function ScraperPage({ onView }) {
   const [items, setItems] = useState([]); const [q, setQ] = useState("");
   const [sortBy, setSortBy] = useState("created_at_desc");
   const [statusFilter, setStatusFilter] = useState("");
+  const [rules] = usePricingRules();
 
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/items`, { params: { q: q || undefined, sort: sortBy, status: statusFilter || undefined }});
@@ -2375,7 +2596,7 @@ function ScraperPage({ onView }) {
                     {it.condition && <span className="chip chip-neutral">{it.condition.split(" ").slice(0, 2).join(" ")}</span>}
                   </div>
                   {(() => {
-                    const c = calcPricing(it.price_value);
+                    const c = calcPricing(it.price_value, rules);
                     return c.ebay > 0 && (
                       <div className="mt-2 grid grid-cols-3 gap-1 text-[10px] font-mono" data-testid="scraped-card-pricing">
                         <div className="rounded-md bg-slate-50 border hairline p-1.5">

@@ -129,6 +129,7 @@ class ScrapedItem(BaseModel):
     category: Optional[str] = None
     method_used: Optional[str] = None
     watchlisted: bool = False
+    active: bool = True
     price_history: List[dict] = Field(default_factory=list)
     added_to_products: bool = False
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -403,17 +404,42 @@ async def scrape(req: ScrapeRequest) -> dict:
 async def list_items(
     q: Optional[str] = None,
     watchlisted: Optional[bool] = None,
-    status: Optional[str] = None,
+    status: Optional[str] = None,     # all | active | out_of_stock | price_changed | live | sold
+    category: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
     sort: str = "created_at_desc",
-    limit: int = Query(100, le=500),
+    limit: int = Query(200, le=500),
 ):
     query: dict[str, Any] = {}
     if watchlisted is not None:
         query["watchlisted"] = watchlisted
-    if status == "sold":
+    # Status filters
+    if status in ("sold", "out_of_stock"):
         query["is_sold"] = True
-    elif status == "live":
+    elif status in ("live", "active"):
         query["is_sold"] = {"$ne": True}
+        query["active"] = {"$ne": False}
+    elif status == "inactive":
+        query["active"] = False
+    elif status == "price_changed":
+        # At least 2 price_history points AND first differs from last
+        query["$expr"] = {
+            "$and": [
+                {"$gte": [{"$size": {"$ifNull": ["$price_history", []]}}, 2]},
+                {"$ne": [
+                    {"$arrayElemAt": ["$price_history.value", 0]},
+                    {"$arrayElemAt": ["$price_history.value", -1]},
+                ]},
+            ]
+        }
+    if category:
+        query["category"] = category
+    if min_price is not None or max_price is not None:
+        rng: dict = {}
+        if min_price is not None: rng["$gte"] = min_price
+        if max_price is not None: rng["$lte"] = max_price
+        query["price_value"] = rng
     if q:
         query["$or"] = [
             {"title": {"$regex": q, "$options": "i"}},
@@ -422,15 +448,50 @@ async def list_items(
         ]
     sort_map = {
         "created_at_desc": [("created_at", -1)],
-        "created_at_asc": [("created_at", 1)],
-        "price_desc": [("price_value", -1)],
-        "price_asc": [("price_value", 1)],
-        "title_asc": [("title", 1)],
+        "created_at_asc":  [("created_at", 1)],
+        "price_desc":      [("price_value", -1)],
+        "price_asc":       [("price_value", 1)],
+        "title_asc":       [("title", 1)],
     }
-    cursor = db.items.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).limit(limit)
-    items = await cursor.to_list(length=limit)
+    # "margin_desc" is computed server-side using active pricing rules.
+    if sort == "margin_desc":
+        cursor = db.items.find(query, {"_id": 0}).limit(limit)
+        items = await cursor.to_list(length=limit)
+        rules = await _load_pricing_rules()
+        def margin(it: dict) -> float:
+            ebay = float(it.get("price_value") or 0)
+            if ebay <= 0: return -1.0
+            c = calc_pricing(ebay, rules=rules)
+            sell = c["sell_price"]
+            return ((sell - ebay) / sell) if sell > 0 else -1.0
+        items.sort(key=margin, reverse=True)
+    else:
+        cursor = db.items.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).limit(limit)
+        items = await cursor.to_list(length=limit)
     total = await db.items.count_documents(query)
     return {"items": items, "total": total}
+
+
+class ItemBulkAction(BaseModel):
+    ids: List[str]
+    action: str   # "delete" | "deactivate" | "activate"
+
+
+@api_router.post("/items/bulk")
+async def items_bulk_action(body: ItemBulkAction):
+    if not body.ids:
+        raise HTTPException(status_code=400, detail="No item ids")
+    if body.action == "delete":
+        r = await db.items.delete_many({"id": {"$in": body.ids}})
+        return {"deleted": r.deleted_count}
+    if body.action in ("deactivate", "activate"):
+        active = body.action == "activate"
+        r = await db.items.update_many(
+            {"id": {"$in": body.ids}},
+            {"$set": {"active": active, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        return {"updated": r.modified_count, "active": active}
+    raise HTTPException(status_code=400, detail="Unknown action")
 
 
 @api_router.get("/items/refresh-status")

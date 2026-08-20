@@ -18,6 +18,30 @@ Light, modern theme.
   `category_performance` (revenue+profit+margin per category), `best_margin_products`
   (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
 
+### Product Sourcing filters + bulk actions (2026-02-20)
+**New filters** on `GET /api/items`: `category`, `min_price`, `max_price`, extra
+`status` values `active` / `out_of_stock` / `price_changed` / `inactive`, plus a
+`sort=margin_desc` mode that runs the rules-aware `calc_pricing` server-side.
+
+**Bulk endpoint** `POST /api/items/bulk { ids, action }` — supports `delete`,
+`deactivate`, `activate`. New `active: bool = True` field on `ScrapedItem`.
+
+**Frontend** toolbar (data-testid `scraper-toolbar`):
+- Debounced 250 ms search box (title / seller / location)
+- Category dropdown (populated from `/api/categories`)
+- Status dropdown: All / Active / Out of stock / Price changed
+- Min / Max price inputs
+- Sort dropdown: Newest, Price low→high, Price high→low, **Highest margin**,
+  Oldest, Title A→Z
+- "Reset filters" chip appears whenever ≥1 filter is active
+
+**Bulk selection**:
+- Per-card checkbox (`scraped-card-checkbox`) + "Select all" toggle
+- Sticky bulk bar (`scraper-bulk-bar`) with actions: **Delete**, **Mark inactive**,
+  **Reactivate**
+- Cards get an indigo ring while selected; inactive cards render with a dimmed
+  "Inactive" chip. Cards flagged `price_changed` show a warning chip.
+
 ### Push credentials — DB-only, no .env (2026-02-20)
 - `.env` no longer contains any Resend / Telegram keys. Fallback code paths were
   removed from `_send_email`, `_send_telegram`, `_push_channel_status`.

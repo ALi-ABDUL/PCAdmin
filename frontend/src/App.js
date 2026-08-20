@@ -2921,15 +2921,46 @@ function Field({ label, className, children }) {
 function ScraperPage({ onView }) {
   const [url, setUrl] = useState(""); const [method, setMethod] = useState(loadKeys().method);
   const [loading, setLoading] = useState(false); const [status, setStatus] = useState("");
-  const [items, setItems] = useState([]); const [q, setQ] = useState("");
+  const [items, setItems] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
   const [sortBy, setSortBy] = useState("created_at_desc");
   const [statusFilter, setStatusFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [selected, setSelected] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [categories, setCategories] = useState([]);
   const [rules] = usePricingRules();
 
+  // Debounce the search input so typing feels instant but doesn't hammer the API.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  useEffect(() => {
+    axios.get(`${API}/categories`).then((r) => setCategories(r.data.categories || [])).catch(() => {});
+  }, []);
+
   const load = useCallback(async () => {
-    const { data } = await axios.get(`${API}/items`, { params: { q: q || undefined, sort: sortBy, status: statusFilter || undefined }});
+    const params = {
+      q: debouncedQ || undefined,
+      sort: sortBy,
+      status: statusFilter || undefined,
+      category: categoryFilter || undefined,
+      min_price: minPrice !== "" ? Number(minPrice) : undefined,
+      max_price: maxPrice !== "" ? Number(maxPrice) : undefined,
+      limit: 200,
+    };
+    const { data } = await axios.get(`${API}/items`, { params });
     setItems(data.items);
-  }, [q, sortBy, statusFilter]);
+    setTotal(data.total);
+    // Drop selection entries that are no longer visible.
+    setSelected((old) => new Set([...old].filter((id) => data.items.some((it) => it.id === id))));
+  }, [debouncedQ, sortBy, statusFilter, categoryFilter, minPrice, maxPrice]);
   useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
@@ -2948,7 +2979,7 @@ function ScraperPage({ onView }) {
   const paste = async () => { try { const t = await navigator.clipboard.readText(); if (t) setUrl(t.trim()); } catch { toast.error("Clipboard blocked"); } };
 
   const addToProducts = async (it) => {
-    try { const { data } = await axios.post(`${API}/products/from-item/${it.id}`, null, { params: { markup_pct: 25 } });
+    try { const { data } = await axios.post(`${API}/products/from-item/${it.id}`);
       toast.success("Added to products", { description: `${data.title} · ${moneyCents(data.price)} · SKU ${data.sku}` });
       await load();
     } catch (e) { toast.error("Failed", { description: e?.response?.data?.detail || e.message }); }
@@ -2974,6 +3005,34 @@ function ScraperPage({ onView }) {
       await load();
     } catch (e) { toast.error("Refresh failed", { id: "ra", description: e?.response?.data?.detail?.slice(0,200) || e.message }); }
     finally { setRefreshingAll(false); }
+  };
+
+  // ---- Filter helpers ----
+  const activeFilterCount =
+    (debouncedQ ? 1 : 0) + (statusFilter ? 1 : 0) + (categoryFilter ? 1 : 0) +
+    (minPrice !== "" ? 1 : 0) + (maxPrice !== "" ? 1 : 0) + (sortBy !== "created_at_desc" ? 1 : 0);
+  const resetFilters = () => {
+    setQ(""); setStatusFilter(""); setCategoryFilter(""); setMinPrice(""); setMaxPrice(""); setSortBy("created_at_desc");
+  };
+
+  // ---- Bulk selection ----
+  const toggleOne = (id) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const allVisibleSelected = items.length > 0 && items.every((it) => selected.has(it.id));
+  const toggleAll = () => setSelected((s) => allVisibleSelected ? new Set() : new Set(items.map((it) => it.id)));
+  const clearSelection = () => setSelected(new Set());
+
+  const bulk = async (action) => {
+    if (selected.size === 0) return;
+    if (action === "delete" && !window.confirm(`Delete ${selected.size} scraped item(s)?`)) return;
+    setBulkBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/items/bulk`, { ids: [...selected], action });
+      const label = action === "delete" ? `Deleted ${data.deleted}` : action === "deactivate" ? `Deactivated ${data.updated}` : `Activated ${data.updated}`;
+      toast.success(label);
+      clearSelection();
+      await load();
+    } catch (e) { toast.error("Bulk action failed", { description: e?.response?.data?.detail?.slice(0,200) || e.message }); }
+    finally { setBulkBusy(false); }
   };
 
   return (
@@ -3023,80 +3082,145 @@ function ScraperPage({ onView }) {
         <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
           <div>
             <div className="font-display font-bold text-lg">Scraped items</div>
-            <div className="text-xs text-slate-500">{items.length} imported · click to view details, then add to products</div>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input data-testid="scraper-search" value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search title, seller, location" className="input pl-9 pr-3 py-2 text-sm w-64"/></div>
-            <select data-testid="scraper-status-filter" value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value)} className="input px-3 py-2 text-sm">
-              <option value="">All statuses</option>
-              <option value="live">Live</option>
-              <option value="sold">Sold</option>
-            </select>
-            <select data-testid="scraper-sort" value={sortBy} onChange={(e)=>setSortBy(e.target.value)} className="input px-3 py-2 text-sm">
-              <option value="created_at_desc">Newest</option>
-              <option value="created_at_asc">Oldest</option>
-              <option value="price_desc">Price ↓</option>
-              <option value="price_asc">Price ↑</option>
-              <option value="title_asc">Title A→Z</option>
-            </select>
+            <div className="text-xs text-slate-500">
+              {items.length} of {total} shown{activeFilterCount > 0 && <> · {activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"} active</>}
+            </div>
           </div>
         </div>
+
+        {/* Toolbar */}
+        <div className="card p-3 md:p-4 mb-3 grid grid-cols-1 md:grid-cols-6 gap-2 items-center" data-testid="scraper-toolbar">
+          <div className="relative md:col-span-2">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+            <input
+              data-testid="scraper-search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search title, seller, location"
+              className="input pl-9 pr-3 py-2 text-sm w-full"
+            />
+          </div>
+          <select data-testid="scraper-status-filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="input px-3 py-2 text-sm">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="out_of_stock">Out of stock</option>
+            <option value="price_changed">Price changed</option>
+          </select>
+          <select data-testid="scraper-category-filter" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="input px-3 py-2 text-sm">
+            <option value="">All categories</option>
+            {categories.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+          </select>
+          <div className="flex items-center gap-1">
+            <div className="relative flex-1"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-mono">MIN</span>
+              <input data-testid="scraper-min-price" type="number" min="0" step="1" placeholder="0" value={minPrice} onChange={(e) => setMinPrice(e.target.value)} className="input pl-10 pr-2 py-2 text-sm w-full font-mono"/>
+            </div>
+            <div className="relative flex-1"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-mono">MAX</span>
+              <input data-testid="scraper-max-price" type="number" min="0" step="1" placeholder="∞" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} className="input pl-10 pr-2 py-2 text-sm w-full font-mono"/>
+            </div>
+          </div>
+          <select data-testid="scraper-sort" value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input px-3 py-2 text-sm">
+            <option value="created_at_desc">Newest</option>
+            <option value="price_asc">Price low → high</option>
+            <option value="price_desc">Price high → low</option>
+            <option value="margin_desc">Highest margin</option>
+            <option value="created_at_asc">Oldest</option>
+            <option value="title_asc">Title A→Z</option>
+          </select>
+
+          {activeFilterCount > 0 && (
+            <button onClick={resetFilters} className="btn btn-ghost text-xs !py-1.5 md:col-span-6 justify-self-start" data-testid="scraper-reset">
+              <X size={12}/> Reset filters
+            </button>
+          )}
+        </div>
+
+        {/* Bulk selection bar — visible whenever ≥1 item is selected */}
+        {selected.size > 0 && (
+          <div className="card p-3 mb-3 flex items-center justify-between flex-wrap gap-2 border-indigo-200 bg-indigo-50/40" data-testid="scraper-bulk-bar">
+            <div className="text-sm">
+              <span className="font-bold text-indigo-700">{selected.size}</span> item{selected.size === 1 ? "" : "s"} selected
+              <button onClick={clearSelection} className="ml-2 text-xs text-slate-500 hover:underline">clear</button>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => bulk("deactivate")} disabled={bulkBusy} className="btn btn-ghost text-xs" data-testid="scraper-bulk-deactivate"><PackageX size={12}/> Mark inactive</button>
+              <button onClick={() => bulk("activate")} disabled={bulkBusy} className="btn btn-ghost text-xs" data-testid="scraper-bulk-activate"><BadgeCheck size={12}/> Reactivate</button>
+              <button onClick={() => bulk("delete")} disabled={bulkBusy} className="btn btn-danger text-xs" data-testid="scraper-bulk-delete">
+                {bulkBusy ? <Loader2 className="animate-spin" size={12}/> : <Trash2 size={12}/>} Delete
+              </button>
+            </div>
+          </div>
+        )}
 
         {items.length === 0 ? (
           <div className="card p-16 text-center border-dashed">
             <Boxes size={28} className="mx-auto text-slate-300"/>
-            <div className="font-display font-bold mt-2">No items yet</div>
-            <div className="text-sm text-slate-500 mt-1">Paste an eBay Australia URL above to import your first item.</div>
+            <div className="font-display font-bold mt-2">No items match those filters</div>
+            <div className="text-sm text-slate-500 mt-1">Try adjusting or resetting filters, or import a new eBay Australia URL above.</div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {items.map((it) => (
-              <div key={it.id} className={`card overflow-hidden hover:shadow-lg transition-shadow relative ${it.is_sold ? "opacity-60 grayscale" : ""}`} data-testid="scraped-card">
-                {it.is_sold && <div className="absolute top-2 left-2 chip chip-danger z-10">SOLD</div>}
-                <div className="aspect-[4/3] bg-slate-50 relative cursor-pointer" onClick={()=>onView(it)}>
-                  {it.images?.[0]
-                    ? <img src={proxyImg(it.images[0])} alt="" className="w-full h-full object-contain p-2"/>
-                    : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={22}/></div>}
-                  {it.added_to_products && <span className="absolute top-2 left-2 chip chip-success">✓ In products</span>}
+          <>
+            <div className="mb-2 text-xs text-slate-500 flex items-center gap-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} className="accent-indigo-600 w-4 h-4" data-testid="scraper-select-all"/>
+                Select all {items.length}
+              </label>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {items.map((it) => (
+                <div key={it.id} className={`card overflow-hidden hover:shadow-lg transition-shadow relative ${it.is_sold ? "opacity-60 grayscale" : ""} ${it.active === false ? "opacity-70" : ""} ${selected.has(it.id) ? "ring-2 ring-indigo-500" : ""}`} data-testid="scraped-card">
+                  {it.is_sold && <div className="absolute top-2 left-2 chip chip-danger z-10">SOLD</div>}
+                  <label className="absolute top-2 right-2 z-10 grid place-items-center w-6 h-6 rounded-md bg-white/90 border hairline cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggleOne(it.id)} className="accent-indigo-600 w-4 h-4" data-testid="scraped-card-checkbox"/>
+                  </label>
+                  <div className="aspect-[4/3] bg-slate-50 relative cursor-pointer" onClick={() => onView(it)}>
+                    {it.images?.[0]
+                      ? <img src={proxyImg(it.images[0])} alt="" className="w-full h-full object-contain p-2"/>
+                      : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={22}/></div>}
+                    {it.added_to_products && <span className="absolute bottom-2 left-2 chip chip-success">✓ In products</span>}
+                    {it.active === false && <span className="absolute bottom-2 right-2 chip chip-neutral">Inactive</span>}
+                  </div>
+                  <div className="p-4">
+                    <h3 className="text-sm font-semibold line-clamp-2 min-h-[2.6em] cursor-pointer" onClick={() => onView(it)}>{it.title || "Untitled"}</h3>
+                    <div className="mt-2 flex items-baseline justify-between gap-2">
+                      <span className="font-mono text-lg font-bold text-indigo-600">{it.price_display || "—"}</span>
+                      {it.condition && <span className="chip chip-neutral">{it.condition.split(" ").slice(0, 2).join(" ")}</span>}
+                    </div>
+                    {(() => {
+                      const c = calcPricing(it.price_value, rules);
+                      return c.ebay > 0 && (
+                        <div className="mt-2 grid grid-cols-3 gap-1 text-[10px] font-mono" data-testid="scraped-card-pricing">
+                          <div className="rounded-md bg-slate-50 border hairline p-1.5">
+                            <div className="text-slate-400 uppercase tracking-widest text-[9px]">eBay</div>
+                            <div className="text-slate-700 font-bold">${c.ebay.toFixed(2)}</div>
+                          </div>
+                          <div className="rounded-md bg-indigo-50 border border-indigo-100 p-1.5">
+                            <div className="text-indigo-500 uppercase tracking-widest text-[9px]">Sell</div>
+                            <div className="text-indigo-700 font-bold">${c.sell.toFixed(2)}</div>
+                          </div>
+                          <div className="rounded-md bg-emerald-50 border border-emerald-100 p-1.5">
+                            <div className="text-emerald-600 uppercase tracking-widest text-[9px]">Profit</div>
+                            <div className="text-emerald-700 font-bold">${c.profit.toFixed(2)}</div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                      {it.category && <span className="chip chip-primary text-[10px]" data-testid="scraped-card-category" title={(it.ebay_category_path || []).join(" › ")}><Tags size={10}/> {it.category}</span>}
+                      {(it.price_history || []).length >= 2 && it.price_history[0].value !== it.price_history[it.price_history.length - 1].value && (
+                        <span className="chip chip-warning text-[10px]"><TrendingUp size={10}/> price changed</span>
+                      )}
+                    </div>
+                    <div className="mt-2 text-xs text-slate-500 truncate"><MapPin size={11} className="inline"/> {it.location || "—"}</div>
+                    <div className="mt-3 flex items-center gap-1">
+                      <button onClick={() => addToProducts(it)} disabled={it.added_to_products} className="btn btn-primary text-xs !py-1.5 flex-1"><Plus size={12}/> {it.added_to_products ? "Added" : "Add to products"}</button>
+                      <button onClick={() => refresh(it)} className="btn btn-ghost !p-2" title="Refresh"><RefreshCw size={13}/></button>
+                      <button onClick={() => del(it)} className="btn btn-danger !p-2" title="Delete"><Trash2 size={13}/></button>
+                    </div>
+                  </div>
                 </div>
-                <div className="p-4">
-                  <h3 className="text-sm font-semibold line-clamp-2 min-h-[2.6em] cursor-pointer" onClick={()=>onView(it)}>{it.title || "Untitled"}</h3>
-                  <div className="mt-2 flex items-baseline justify-between gap-2">
-                    <span className="font-mono text-lg font-bold text-indigo-600">{it.price_display || "—"}</span>
-                    {it.condition && <span className="chip chip-neutral">{it.condition.split(" ").slice(0, 2).join(" ")}</span>}
-                  </div>
-                  {(() => {
-                    const c = calcPricing(it.price_value, rules);
-                    return c.ebay > 0 && (
-                      <div className="mt-2 grid grid-cols-3 gap-1 text-[10px] font-mono" data-testid="scraped-card-pricing">
-                        <div className="rounded-md bg-slate-50 border hairline p-1.5">
-                          <div className="text-slate-400 uppercase tracking-widest text-[9px]">eBay</div>
-                          <div className="text-slate-700 font-bold">${c.ebay.toFixed(2)}</div>
-                        </div>
-                        <div className="rounded-md bg-indigo-50 border border-indigo-100 p-1.5">
-                          <div className="text-indigo-500 uppercase tracking-widest text-[9px]">Sell</div>
-                          <div className="text-indigo-700 font-bold">${c.sell.toFixed(2)}</div>
-                        </div>
-                        <div className="rounded-md bg-emerald-50 border border-emerald-100 p-1.5">
-                          <div className="text-emerald-600 uppercase tracking-widest text-[9px]">Profit</div>
-                          <div className="text-emerald-700 font-bold">${c.profit.toFixed(2)}</div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                    {it.category && <span className="chip chip-primary text-[10px]" data-testid="scraped-card-category" title={(it.ebay_category_path || []).join(" › ")}><Tags size={10}/> {it.category}</span>}
-                  </div>
-                  <div className="mt-2 text-xs text-slate-500 truncate"><MapPin size={11} className="inline"/> {it.location || "—"}</div>
-                  <div className="mt-3 flex items-center gap-1">
-                    <button onClick={()=>addToProducts(it)} disabled={it.added_to_products} className="btn btn-primary text-xs !py-1.5 flex-1"><Plus size={12}/> {it.added_to_products ? "Added" : "Add to products"}</button>
-                    <button onClick={()=>refresh(it)} className="btn btn-ghost !p-2" title="Refresh"><RefreshCw size={13}/></button>
-                    <button onClick={()=>del(it)} className="btn btn-danger !p-2" title="Delete"><Trash2 size={13}/></button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </>
         )}
       </section>
     </div>

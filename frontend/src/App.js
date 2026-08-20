@@ -4,7 +4,7 @@ import axios from "axios";
 import { Toaster, toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  LayoutDashboard, Package, Zap, ShoppingCart, Users, BarChart3, Settings2, Search, Eye,
+  LayoutDashboard, Package, Zap, ShoppingCart, Users, BarChart3, Settings2, Search, Eye, EyeOff,
   Loader2, Trash2, Star, RefreshCw, MapPin, Truck, User as UserIcon, Box, ExternalLink,
   X, ChevronLeft, ChevronRight, ClipboardPaste, Plus, TrendingUp, TrendingDown, DollarSign,
   ShoppingBag, Percent, Boxes, ArrowUpRight, Filter, Download, ImageIcon, Sparkles,
@@ -2034,6 +2034,7 @@ function PricingRulesEditor() {
 
 function PushNotificationSettings() {
   const [settings, setSettings] = useState(null);
+  const [draft, setDraft] = useState({}); // holds unsaved input values
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
 
@@ -2047,10 +2048,38 @@ function PushNotificationSettings() {
 
   const update = async (patch) => {
     setBusy(true);
-    setSettings((s) => ({ ...s, ...patch })); // optimistic
+    setSettings((s) => ({ ...s, ...patch })); // optimistic non-secret toggles
     try { const { data } = await axios.patch(`${API}/push/settings`, patch); setSettings(data); }
-    catch (e) { toast.error("Save failed"); await load(); }
+    catch { toast.error("Save failed"); await load(); }
     finally { setBusy(false); }
+  };
+
+  const saveCredentials = async () => {
+    const patch = {};
+    if (draft.resend_api_key !== undefined && draft.resend_api_key !== "") patch.resend_api_key = draft.resend_api_key.trim();
+    if (draft.resend_to_email !== undefined) patch.resend_to_email = (draft.resend_to_email || "").trim();
+    if (draft.resend_from_email !== undefined) patch.resend_from_email = (draft.resend_from_email || "").trim();
+    if (draft.telegram_bot_token !== undefined && draft.telegram_bot_token !== "") patch.telegram_bot_token = draft.telegram_bot_token.trim();
+    if (draft.telegram_chat_id !== undefined) patch.telegram_chat_id = (draft.telegram_chat_id || "").trim();
+    if (Object.keys(patch).length === 0) { toast("Nothing to save"); return; }
+    setBusy(true);
+    try {
+      const { data } = await axios.patch(`${API}/push/settings`, patch);
+      setSettings(data);
+      setDraft({}); // clear the input drafts
+      toast.success("Credentials saved");
+    } catch { toast.error("Save failed"); }
+    finally { setBusy(false); }
+  };
+
+  const clearSecret = async (field) => {
+    if (!window.confirm(`Clear stored ${field}? (will fall back to .env if that key is set)`)) return;
+    setBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/push/settings/clear-secret?field=${field}`);
+      setSettings(data);
+      toast.success("Cleared");
+    } finally { setBusy(false); }
   };
 
   const sendTest = async () => {
@@ -2060,7 +2089,7 @@ function PushNotificationSettings() {
       const parts = [];
       if (data.email === "sent") parts.push("email");
       if (data.telegram === "sent") parts.push("Telegram");
-      if (parts.length === 0) toast.error("No channels configured", { description: "Add your keys to backend/.env then restart backend." });
+      if (parts.length === 0) toast.error("No channels configured", { description: "Save your keys above first." });
       else toast.success(`Test push sent via ${parts.join(" + ")}`);
     } catch { toast.error("Test failed"); }
     finally { setTesting(false); }
@@ -2069,29 +2098,85 @@ function PushNotificationSettings() {
   const emailOk = settings.channels.email_configured;
   const telegramOk = settings.channels.telegram_configured;
 
+  const dirty =
+    (draft.resend_api_key ?? "") !== "" ||
+    draft.resend_to_email !== undefined ||
+    draft.resend_from_email !== undefined ||
+    (draft.telegram_bot_token ?? "") !== "" ||
+    draft.telegram_chat_id !== undefined;
+
   return (
     <div className="grid gap-4" data-testid="push-settings">
       <div className="grid md:grid-cols-2 gap-3">
-        <ChannelCard
-          testId="push-email"
-          name="Email · Resend"
-          hint={emailOk ? "Ready to send" : "Add RESEND_API_KEY + RESEND_TO_EMAIL to backend/.env"}
-          configured={emailOk}
-          enabled={settings.email_enabled}
-          onToggle={(v) => update({ email_enabled: v })}
-          setupHref="https://resend.com"
-          envKeys={["RESEND_API_KEY", "RESEND_TO_EMAIL", "RESEND_FROM_EMAIL (optional)"]}
-        />
-        <ChannelCard
-          testId="push-telegram"
-          name="Telegram · Bot API"
-          hint={telegramOk ? "Ready to send" : "Create a bot with @BotFather then get your chat_id from @userinfobot"}
-          configured={telegramOk}
-          enabled={settings.telegram_enabled}
-          onToggle={(v) => update({ telegram_enabled: v })}
-          setupHref="https://core.telegram.org/bots#creating-a-new-bot"
-          envKeys={["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]}
-        />
+        {/* Email channel */}
+        <div className={`card p-5 ${emailOk ? "" : "border-dashed"}`} data-testid="push-email">
+          <ChannelHeader name="Email · Resend" configured={emailOk} enabled={settings.email_enabled} onToggle={(v) => update({ email_enabled: v })}/>
+          <div className="grid gap-3 mt-4">
+            <CredField
+              label="Resend API key"
+              testId="fld-resend-key"
+              type="password"
+              placeholder={settings.resend_api_key_set ? `Saved · ${settings.resend_api_key_masked}` : (settings.resend_api_key_from_env ? "Using .env value" : "re_...")}
+              value={draft.resend_api_key ?? ""}
+              onChange={(v) => setDraft((d) => ({ ...d, resend_api_key: v }))}
+              savedBadge={settings.resend_api_key_set}
+              envBadge={settings.resend_api_key_from_env}
+              onClear={settings.resend_api_key_set ? () => clearSecret("resend_api_key") : null}
+            />
+            <CredField
+              label="Recipient email"
+              testId="fld-resend-to"
+              type="email"
+              placeholder="you@example.com"
+              value={draft.resend_to_email ?? settings.resend_to_email}
+              onChange={(v) => setDraft((d) => ({ ...d, resend_to_email: v }))}
+            />
+            <CredField
+              label="From address (optional)"
+              testId="fld-resend-from"
+              type="email"
+              placeholder="onboarding@resend.dev"
+              value={draft.resend_from_email ?? settings.resend_from_email}
+              onChange={(v) => setDraft((d) => ({ ...d, resend_from_email: v }))}
+            />
+          </div>
+          <a href="https://resend.com" target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline">Get a Resend key <ExternalLink size={11}/></a>
+        </div>
+
+        {/* Telegram channel */}
+        <div className={`card p-5 ${telegramOk ? "" : "border-dashed"}`} data-testid="push-telegram">
+          <ChannelHeader name="Telegram · Bot API" configured={telegramOk} enabled={settings.telegram_enabled} onToggle={(v) => update({ telegram_enabled: v })}/>
+          <div className="grid gap-3 mt-4">
+            <CredField
+              label="Bot token"
+              testId="fld-tg-token"
+              type="password"
+              placeholder={settings.telegram_bot_token_set ? `Saved · ${settings.telegram_bot_token_masked}` : (settings.telegram_bot_token_from_env ? "Using .env value" : "123456:ABC-...")}
+              value={draft.telegram_bot_token ?? ""}
+              onChange={(v) => setDraft((d) => ({ ...d, telegram_bot_token: v }))}
+              savedBadge={settings.telegram_bot_token_set}
+              envBadge={settings.telegram_bot_token_from_env}
+              onClear={settings.telegram_bot_token_set ? () => clearSecret("telegram_bot_token") : null}
+            />
+            <CredField
+              label="Chat ID"
+              testId="fld-tg-chat"
+              type="text"
+              placeholder="e.g. 987654321"
+              value={draft.telegram_chat_id ?? settings.telegram_chat_id}
+              onChange={(v) => setDraft((d) => ({ ...d, telegram_chat_id: v }))}
+            />
+          </div>
+          <a href="https://core.telegram.org/bots#creating-a-new-bot" target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline">Create a bot & get chat ID <ExternalLink size={11}/></a>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-2 flex-wrap">
+        {dirty && <span className="text-xs text-amber-600 font-mono">Unsaved changes</span>}
+        <button onClick={() => { setDraft({}); }} disabled={!dirty || busy} className="btn btn-ghost text-sm" data-testid="creds-cancel-btn">Discard</button>
+        <button onClick={saveCredentials} disabled={busy || !dirty} className="btn btn-primary text-sm" data-testid="creds-save-btn">
+          {busy ? <Loader2 className="animate-spin" size={14}/> : <BadgeCheck size={14}/>} Save credentials
+        </button>
       </div>
 
       <div className="card p-5">
@@ -2131,30 +2216,65 @@ function PushNotificationSettings() {
       </div>
 
       <div className="card p-4 border-dashed border-2 text-xs text-slate-500 leading-relaxed">
-        <div className="font-display font-bold text-slate-700 text-sm mb-1 flex items-center gap-2"><HelpCircle size={14}/> Setup keys</div>
-        Add credentials to <code className="chip chip-neutral">/app/backend/.env</code> then restart the backend. Missing keys are silently skipped — your dashboard notifications keep working either way.
+        <div className="font-display font-bold text-slate-700 text-sm mb-1 flex items-center gap-2"><HelpCircle size={14}/> How storage works</div>
+        Credentials you save here live in the database (secrets are masked when read back). If a field is left blank we fall back to the matching env variable in <code className="chip chip-neutral">/app/backend/.env</code>. Missing everywhere = silent skip, dashboard notifications keep working.
       </div>
     </div>
   );
 }
 
-function ChannelCard({ testId, name, hint, configured, enabled, onToggle, setupHref, envKeys }) {
+function ChannelHeader({ name, configured, enabled, onToggle }) {
   return (
-    <div className={`card p-5 ${configured ? "" : "border-dashed"}`} data-testid={testId}>
-      <div className="flex items-center justify-between mb-2 gap-3">
+    <>
+      <div className="flex items-center justify-between mb-1 gap-3">
         <div className="font-display font-bold text-base">{name}</div>
         <span className={`chip ${configured ? "chip-success" : "chip-neutral"} font-mono text-[10px]`}>{configured ? <><BadgeCheck size={11}/> Ready</> : <>Not configured</>}</span>
       </div>
-      <div className="text-xs text-slate-500 mb-3">{hint}</div>
-      <label className="flex items-center gap-2 cursor-pointer">
+      <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-600">
         <input type="checkbox" checked={enabled} onChange={(e) => onToggle(e.target.checked)} className="accent-indigo-600 w-4 h-4"/>
-        <span className="text-sm">Send this channel</span>
+        Send this channel
       </label>
-      <div className="mt-3 flex items-center gap-2 flex-wrap">
-        {envKeys.map((k) => <span key={k} className="chip chip-neutral font-mono text-[10px]">{k}</span>)}
+    </>
+  );
+}
+
+function CredField({ label, testId, type = "text", placeholder, value, onChange, savedBadge, envBadge, onClear }) {
+  const [reveal, setReveal] = useState(false);
+  const isSecret = type === "password";
+  return (
+    <label className="flex flex-col gap-1">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-mono uppercase tracking-widest text-slate-500">{label}</span>
+        <div className="flex items-center gap-1">
+          {savedBadge && <span className="chip chip-success !py-0 !px-1.5 text-[9px] font-mono"><BadgeCheck size={9}/> saved</span>}
+          {envBadge && !savedBadge && <span className="chip chip-primary !py-0 !px-1.5 text-[9px] font-mono">.env</span>}
+        </div>
       </div>
-      <a href={setupHref} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline">Setup guide <ExternalLink size={11}/></a>
-    </div>
+      <div className="relative">
+        <input
+          data-testid={testId}
+          type={isSecret && !reveal ? "password" : "text"}
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          autoComplete="off"
+          spellCheck={false}
+          className="input pr-16 pl-3 py-2 text-sm font-mono w-full"
+        />
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+          {isSecret && (
+            <button type="button" onClick={() => setReveal((r) => !r)} className="text-slate-400 hover:text-slate-600 p-1" title={reveal ? "Hide" : "Show"}>
+              {reveal ? <EyeOff size={13}/> : <Eye size={13}/>}
+            </button>
+          )}
+          {onClear && (
+            <button type="button" onClick={onClear} className="text-slate-400 hover:text-red-600 p-1" title="Clear stored value">
+              <Trash2 size={13}/>
+            </button>
+          )}
+        </div>
+      </div>
+    </label>
   );
 }
 

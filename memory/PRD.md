@@ -18,6 +18,22 @@ Light, modern theme.
   `category_performance` (revenue+profit+margin per category), `best_margin_products`
   (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
 
+### Editable push credentials from the UI (2026-02-20)
+- Push credentials (`resend_api_key`, `resend_to_email`, `resend_from_email`,
+  `telegram_bot_token`, `telegram_chat_id`) now live in `db.push_settings` and are
+  editable from **Store Management → Push Notifications**.
+- Secrets returned masked in `GET /api/push/settings` (e.g. `re_••••abc`) with
+  `_set` / `_from_env` flags so the UI knows whether a value is saved, coming from
+  `.env`, or absent.
+- `PATCH /api/push/settings` accepts any subset of fields. Empty-string secrets are
+  ignored so users don't wipe a saved key by mistake; use the trash icon or
+  `POST /api/push/settings/clear-secret?field=…` to explicitly clear.
+- Runtime priority is **DB value → env var → no-op** — existing `.env` still works.
+- Frontend: each channel card shows the API key + address inputs with reveal-eye,
+  clear-trash, "saved / .env" badges; a single **Save credentials** button commits
+  the whole draft; **Discard** reverts. Send-test button uses the live configured
+  channels.
+
 ### In-app toasts on new notifications (2026-02-20)
 - `NotificationBell` keeps a `seenIdsRef` (initialised silently on first load so we don't
   toast the backlog on page refresh). On every subsequent poll it diffs and fires a

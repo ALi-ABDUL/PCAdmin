@@ -1440,6 +1440,11 @@ PUSH_SETTINGS_DEFAULTS: dict = {
     "telegram_enabled": True,
     "critical_only": True,           # if True, only pushes critical types (see PUSH_CRITICAL_TYPES)
     "margin_drop_threshold_pp": 3.0, # for price_change: skip unless margin drops by ≥ this many percentage points
+    "resend_api_key": "",
+    "resend_to_email": "",
+    "resend_from_email": "",
+    "telegram_bot_token": "",
+    "telegram_chat_id": "",
 }
 PUSH_CRITICAL_TYPES = {"new_order", "out_of_stock", "price_change"}
 
@@ -1452,10 +1457,27 @@ async def _get_push_settings() -> dict:
     return {**PUSH_SETTINGS_DEFAULTS, **doc}
 
 
-def _push_channel_status() -> dict:
+def _mask(s: Optional[str]) -> str:
+    if not s: return ""
+    if len(s) <= 6: return "•" * len(s)
+    return f"{s[:3]}••••{s[-3:]}"
+
+
+async def _get_credential(field: str, env_var: str) -> str:
+    """Prefer DB-stored value; fall back to env var so existing .env still works."""
+    settings = await _get_push_settings()
+    return settings.get(field) or os.environ.get(env_var) or ""
+
+
+async def _push_channel_status() -> dict:
+    settings = await _get_push_settings()
+    email_key = settings.get("resend_api_key") or os.environ.get("RESEND_API_KEY") or ""
+    email_to  = settings.get("resend_to_email") or os.environ.get("RESEND_TO_EMAIL") or ""
+    tg_tok    = settings.get("telegram_bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN") or ""
+    tg_chat   = settings.get("telegram_chat_id") or os.environ.get("TELEGRAM_CHAT_ID") or ""
     return {
-        "email_configured": bool(os.environ.get("RESEND_API_KEY") and os.environ.get("RESEND_TO_EMAIL")),
-        "telegram_configured": bool(os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")),
+        "email_configured": bool(email_key and email_to),
+        "telegram_configured": bool(tg_tok and tg_chat),
     }
 
 
@@ -1473,9 +1495,10 @@ def _notif_is_critical(n: dict, settings: dict) -> bool:
 
 
 async def _send_email(subject: str, html: str) -> None:
-    key = os.environ.get("RESEND_API_KEY")
-    to = os.environ.get("RESEND_TO_EMAIL")
-    frm = os.environ.get("RESEND_FROM_EMAIL") or "onboarding@resend.dev"
+    settings = await _get_push_settings()
+    key = settings.get("resend_api_key") or os.environ.get("RESEND_API_KEY")
+    to  = settings.get("resend_to_email") or os.environ.get("RESEND_TO_EMAIL")
+    frm = settings.get("resend_from_email") or os.environ.get("RESEND_FROM_EMAIL") or "onboarding@resend.dev"
     if not key or not to:
         return
     resend.api_key = key
@@ -1488,8 +1511,9 @@ async def _send_email(subject: str, html: str) -> None:
 
 
 async def _send_telegram(text: str) -> None:
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    settings = await _get_push_settings()
+    token = settings.get("telegram_bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = settings.get("telegram_chat_id") or os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         return
     try:
@@ -1591,20 +1615,59 @@ class PushSettingsUpdate(BaseModel):
     telegram_enabled: Optional[bool] = None
     critical_only: Optional[bool] = None
     margin_drop_threshold_pp: Optional[float] = None
+    resend_api_key: Optional[str] = None
+    resend_to_email: Optional[str] = None
+    resend_from_email: Optional[str] = None
+    telegram_bot_token: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
 
 
 @api_router.get("/push/settings")
 async def get_push_settings():
     s = await _get_push_settings()
-    return {**s, "channels": _push_channel_status()}
+    channels = await _push_channel_status()
+    # Mask secrets — never return raw keys to the client.
+    return {
+        "id": s["id"],
+        "email_enabled": s["email_enabled"],
+        "telegram_enabled": s["telegram_enabled"],
+        "critical_only": s["critical_only"],
+        "margin_drop_threshold_pp": s["margin_drop_threshold_pp"],
+        # Non-secret fields returned as-is:
+        "resend_to_email": s.get("resend_to_email") or "",
+        "resend_from_email": s.get("resend_from_email") or "",
+        "telegram_chat_id": s.get("telegram_chat_id") or "",
+        # Secrets: mask + presence flags
+        "resend_api_key_masked": _mask(s.get("resend_api_key") or ""),
+        "resend_api_key_set": bool(s.get("resend_api_key")),
+        "telegram_bot_token_masked": _mask(s.get("telegram_bot_token") or ""),
+        "telegram_bot_token_set": bool(s.get("telegram_bot_token")),
+        # Env fallbacks (so user knows a .env value is still active)
+        "resend_api_key_from_env": bool(os.environ.get("RESEND_API_KEY")) and not s.get("resend_api_key"),
+        "telegram_bot_token_from_env": bool(os.environ.get("TELEGRAM_BOT_TOKEN")) and not s.get("telegram_bot_token"),
+        "channels": channels,
+    }
 
 
 @api_router.patch("/push/settings")
 async def update_push_settings(body: PushSettingsUpdate):
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    # Empty string on a secret field means "keep existing value" (avoid accidental wipe).
+    for secret in ("resend_api_key", "telegram_bot_token"):
+        if secret in fields and fields[secret] == "":
+            del fields[secret]
     if not fields:
         raise HTTPException(status_code=400, detail="No fields")
     await db.push_settings.update_one({"id": "singleton"}, {"$set": fields}, upsert=True)
+    return await get_push_settings()
+
+
+@api_router.post("/push/settings/clear-secret")
+async def clear_push_secret(field: str):
+    """Explicitly clear a stored secret (fall back to .env if it's set)."""
+    if field not in {"resend_api_key", "telegram_bot_token"}:
+        raise HTTPException(status_code=400, detail="Unknown field")
+    await db.push_settings.update_one({"id": "singleton"}, {"$set": {field: ""}}, upsert=True)
     return await get_push_settings()
 
 
@@ -1620,7 +1683,7 @@ async def push_test():
         "at": datetime.now(timezone.utc).isoformat(),
     }
     subject, html, plain = _format_notification_html(n)
-    ch = _push_channel_status()
+    ch = await _push_channel_status()
     results = {"email": None, "telegram": None, **ch}
     if ch["email_configured"]:
         await _send_email(subject, html); results["email"] = "sent"

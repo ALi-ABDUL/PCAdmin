@@ -2116,11 +2116,10 @@ function PushNotificationSettings() {
               label="Resend API key"
               testId="fld-resend-key"
               type="password"
-              placeholder={settings.resend_api_key_set ? `Saved · ${settings.resend_api_key_masked}` : (settings.resend_api_key_from_env ? "Using .env value" : "re_...")}
+              placeholder={settings.resend_api_key_set ? `Saved · ${settings.resend_api_key_masked}` : "re_..."}
               value={draft.resend_api_key ?? ""}
               onChange={(v) => setDraft((d) => ({ ...d, resend_api_key: v }))}
               savedBadge={settings.resend_api_key_set}
-              envBadge={settings.resend_api_key_from_env}
               onClear={settings.resend_api_key_set ? () => clearSecret("resend_api_key") : null}
             />
             <CredField
@@ -2151,11 +2150,10 @@ function PushNotificationSettings() {
               label="Bot token"
               testId="fld-tg-token"
               type="password"
-              placeholder={settings.telegram_bot_token_set ? `Saved · ${settings.telegram_bot_token_masked}` : (settings.telegram_bot_token_from_env ? "Using .env value" : "123456:ABC-...")}
+              placeholder={settings.telegram_bot_token_set ? `Saved · ${settings.telegram_bot_token_masked}` : "123456:ABC-..."}
               value={draft.telegram_bot_token ?? ""}
               onChange={(v) => setDraft((d) => ({ ...d, telegram_bot_token: v }))}
               savedBadge={settings.telegram_bot_token_set}
-              envBadge={settings.telegram_bot_token_from_env}
               onClear={settings.telegram_bot_token_set ? () => clearSecret("telegram_bot_token") : null}
             />
             <CredField
@@ -2217,7 +2215,7 @@ function PushNotificationSettings() {
 
       <div className="card p-4 border-dashed border-2 text-xs text-slate-500 leading-relaxed">
         <div className="font-display font-bold text-slate-700 text-sm mb-1 flex items-center gap-2"><HelpCircle size={14}/> How storage works</div>
-        Credentials you save here live in the database (secrets are masked when read back). If a field is left blank we fall back to the matching env variable in <code className="chip chip-neutral">/app/backend/.env</code>. Missing everywhere = silent skip, dashboard notifications keep working.
+        Credentials are stored in the database and read live on every send — no restart or <code className="chip chip-neutral">.env</code> edit needed. Secrets are masked when read back (only the last few characters are visible). Missing keys are silently skipped, so dashboard notifications keep working either way.
       </div>
     </div>
   );
@@ -2238,17 +2236,14 @@ function ChannelHeader({ name, configured, enabled, onToggle }) {
   );
 }
 
-function CredField({ label, testId, type = "text", placeholder, value, onChange, savedBadge, envBadge, onClear }) {
+function CredField({ label, testId, type = "text", placeholder, value, onChange, savedBadge, onClear }) {
   const [reveal, setReveal] = useState(false);
   const isSecret = type === "password";
   return (
     <label className="flex flex-col gap-1">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] font-mono uppercase tracking-widest text-slate-500">{label}</span>
-        <div className="flex items-center gap-1">
-          {savedBadge && <span className="chip chip-success !py-0 !px-1.5 text-[9px] font-mono"><BadgeCheck size={9}/> saved</span>}
-          {envBadge && !savedBadge && <span className="chip chip-primary !py-0 !px-1.5 text-[9px] font-mono">.env</span>}
-        </div>
+        {savedBadge && <span className="chip chip-success !py-0 !px-1.5 text-[9px] font-mono"><BadgeCheck size={9}/> saved</span>}
       </div>
       <div className="relative">
         <input

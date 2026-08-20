@@ -1463,18 +1463,18 @@ def _mask(s: Optional[str]) -> str:
     return f"{s[:3]}••••{s[-3:]}"
 
 
-async def _get_credential(field: str, env_var: str) -> str:
-    """Prefer DB-stored value; fall back to env var so existing .env still works."""
+async def _get_credential(field: str) -> str:
+    """Read a stored credential from the singleton settings doc."""
     settings = await _get_push_settings()
-    return settings.get(field) or os.environ.get(env_var) or ""
+    return settings.get(field) or ""
 
 
 async def _push_channel_status() -> dict:
     settings = await _get_push_settings()
-    email_key = settings.get("resend_api_key") or os.environ.get("RESEND_API_KEY") or ""
-    email_to  = settings.get("resend_to_email") or os.environ.get("RESEND_TO_EMAIL") or ""
-    tg_tok    = settings.get("telegram_bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN") or ""
-    tg_chat   = settings.get("telegram_chat_id") or os.environ.get("TELEGRAM_CHAT_ID") or ""
+    email_key = settings.get("resend_api_key") or ""
+    email_to  = settings.get("resend_to_email") or ""
+    tg_tok    = settings.get("telegram_bot_token") or ""
+    tg_chat   = settings.get("telegram_chat_id") or ""
     return {
         "email_configured": bool(email_key and email_to),
         "telegram_configured": bool(tg_tok and tg_chat),
@@ -1496,9 +1496,9 @@ def _notif_is_critical(n: dict, settings: dict) -> bool:
 
 async def _send_email(subject: str, html: str) -> None:
     settings = await _get_push_settings()
-    key = settings.get("resend_api_key") or os.environ.get("RESEND_API_KEY")
-    to  = settings.get("resend_to_email") or os.environ.get("RESEND_TO_EMAIL")
-    frm = settings.get("resend_from_email") or os.environ.get("RESEND_FROM_EMAIL") or "onboarding@resend.dev"
+    key = settings.get("resend_api_key")
+    to  = settings.get("resend_to_email")
+    frm = settings.get("resend_from_email") or "onboarding@resend.dev"
     if not key or not to:
         return
     resend.api_key = key
@@ -1512,8 +1512,8 @@ async def _send_email(subject: str, html: str) -> None:
 
 async def _send_telegram(text: str) -> None:
     settings = await _get_push_settings()
-    token = settings.get("telegram_bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = settings.get("telegram_chat_id") or os.environ.get("TELEGRAM_CHAT_ID")
+    token = settings.get("telegram_bot_token")
+    chat_id = settings.get("telegram_chat_id")
     if not token or not chat_id:
         return
     try:
@@ -1642,9 +1642,6 @@ async def get_push_settings():
         "resend_api_key_set": bool(s.get("resend_api_key")),
         "telegram_bot_token_masked": _mask(s.get("telegram_bot_token") or ""),
         "telegram_bot_token_set": bool(s.get("telegram_bot_token")),
-        # Env fallbacks (so user knows a .env value is still active)
-        "resend_api_key_from_env": bool(os.environ.get("RESEND_API_KEY")) and not s.get("resend_api_key"),
-        "telegram_bot_token_from_env": bool(os.environ.get("TELEGRAM_BOT_TOKEN")) and not s.get("telegram_bot_token"),
         "channels": channels,
     }
 
@@ -1664,7 +1661,7 @@ async def update_push_settings(body: PushSettingsUpdate):
 
 @api_router.post("/push/settings/clear-secret")
 async def clear_push_secret(field: str):
-    """Explicitly clear a stored secret (fall back to .env if it's set)."""
+    """Explicitly clear a stored secret from the database."""
     if field not in {"resend_api_key", "telegram_bot_token"}:
         raise HTTPException(status_code=400, detail="Unknown field")
     await db.push_settings.update_one({"id": "singleton"}, {"$set": {field: ""}}, upsert=True)

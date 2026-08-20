@@ -18,6 +18,15 @@ Light, modern theme.
   `category_performance` (revenue+profit+margin per category), `best_margin_products`
   (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
 
+### Push credentials — DB-only, no .env (2026-02-20)
+- `.env` no longer contains any Resend / Telegram keys. Fallback code paths were
+  removed from `_send_email`, `_send_telegram`, `_push_channel_status`.
+- Credentials live exclusively in `db.push_settings` (single doc, id="singleton").
+- `_send_email` / `_send_telegram` re-read from the DB on every call, so edits from
+  the UI take effect on the next notification without any restart.
+- UI's `.env` badge removed; help copy now reads "stored in the database and read
+  live on every send — no restart needed".
+
 ### Editable push credentials from the UI (2026-02-20)
 - Push credentials (`resend_api_key`, `resend_to_email`, `resend_from_email`,
   `telegram_bot_token`, `telegram_chat_id`) now live in `db.push_settings` and are

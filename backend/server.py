@@ -171,12 +171,57 @@ class ProductUpdate(BaseModel):
     sku: Optional[str] = None
 
 
+# AU address generator used by the demo seed + backfill for existing orders without addresses.
+class ShippingAddress(BaseModel):
+    full_name: Optional[str] = ""
+    street: Optional[str] = ""
+    suburb: Optional[str] = ""
+    state: Optional[str] = ""
+    postcode: Optional[str] = ""
+    country: str = "Australia"
+
+
+_AU_SUBURBS = [
+    ("Bondi",         "NSW", "2026"), ("Surry Hills",     "NSW", "2010"), ("Parramatta",   "NSW", "2150"),
+    ("Newtown",       "NSW", "2042"), ("Chatswood",       "NSW", "2067"), ("Manly",        "NSW", "2095"),
+    ("Fitzroy",       "VIC", "3065"), ("St Kilda",        "VIC", "3182"), ("Brunswick",    "VIC", "3056"),
+    ("Southbank",     "VIC", "3006"), ("Richmond",        "VIC", "3121"), ("Docklands",    "VIC", "3008"),
+    ("Fortitude Valley","QLD","4006"), ("Kangaroo Point", "QLD", "4169"), ("South Brisbane","QLD","4101"),
+    ("New Farm",      "QLD", "4005"), ("Surfers Paradise","QLD", "4217"), ("Bulimba",     "QLD", "4171"),
+    ("Fremantle",     "WA",  "6160"), ("Subiaco",         "WA",  "6008"), ("Cottesloe",    "WA",  "6011"),
+    ("North Adelaide","SA",  "5006"), ("Glenelg",         "SA",  "5045"), ("Norwood",      "SA",  "5067"),
+    ("Battery Point", "TAS", "7004"), ("Sandy Bay",       "TAS", "7005"),
+    ("Braddon",       "ACT", "2612"), ("Kingston",        "ACT", "2604"),
+    ("Nightcliff",    "NT",  "0810"), ("Fannie Bay",      "NT",  "0820"),
+]
+_STREET_NAMES = ["George", "King", "Queen", "Church", "Elizabeth", "Bourke", "Collins", "Swanston",
+                 "Adelaide", "Ann", "Wickham", "Hay", "Rundle", "Murray", "Northbourne", "Beach", "Ocean",
+                 "Palm", "Coogee", "Bondi", "Chapel", "Brunswick", "Latrobe", "Flinders", "Sturt"]
+_STREET_TYPES = ["St", "Rd", "Ave", "Dr", "Pde", "Lane", "Cres", "Way", "Terrace", "Blvd"]
+
+
+def _rand_au_address(rng: random.Random, full_name: str) -> dict:
+    suburb, state, postcode = rng.choice(_AU_SUBURBS)
+    unit = f"{rng.randint(1, 25)}/" if rng.random() < 0.35 else ""
+    number = rng.randint(1, 480)
+    street = f"{rng.choice(_STREET_NAMES)} {rng.choice(_STREET_TYPES)}"
+    return {
+        "full_name": full_name,
+        "street": f"{unit}{number} {street}",
+        "suburb": suburb,
+        "state": state,
+        "postcode": postcode,
+        "country": "Australia",
+    }
+
+
 class OrderCreate(BaseModel):
     product_id: str
     quantity: int = 1
     customer_name: Optional[str] = "Guest"
     customer_email: Optional[str] = None
     status: str = "paid"
+    shipping_address: Optional[ShippingAddress] = None
 
 
 class Settings(BaseModel):
@@ -1559,6 +1604,7 @@ async def create_order(body: OrderCreate):
         "profit": round(total - cost_total, 2),
         "customer_name": body.customer_name or "Guest",
         "customer_email": body.customer_email,
+        "shipping_address": (body.shipping_address.model_dump() if body.shipping_address else None),
         "status": body.status,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -1841,6 +1887,7 @@ async def demo_seed(reset: bool = False):
                 "profit": round(total - cost_total, 2),
                 "customer_name": name,
                 "customer_email": f"{name.split()[0].lower()}.{name.split()[1].lower()}@example.com",
+                "shipping_address": _rand_au_address(rng, name),
                 "status": status,
                 "created_at": created.replace(tzinfo=timezone.utc).isoformat(),
             }

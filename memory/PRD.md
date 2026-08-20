@@ -18,6 +18,16 @@ Light, modern theme.
   `category_performance` (revenue+profit+margin per category), `best_margin_products`
   (top 20 by margin %). `/api/analytics/overview` still powers the main Dashboard.
 
+### Order delivery address (2026-02-20)
+- New `ShippingAddress { full_name, street, suburb, state, postcode, country }` on every
+  order. `POST /api/orders` accepts it and `create_order` persists it.
+- Demo seed now generates realistic AU addresses across 30 popular suburbs (all 8 states/
+  territories) with unit + street numbers. Existing 1592 orders were backfilled with a
+  seeded RNG so every order in the DB now has an address.
+- `OrderDetailsModal` shows a dedicated **Delivery address** panel with test IDs
+  `order-delivery-address`, `addr-name`, `addr-street`, `addr-suburb`, `addr-state`,
+  `addr-postcode`, `addr-country`.
+
 ### Pricing Rules — Store Management (2026-02-20)
 - New page **Store Management › Pricing Rules** (data-testid `store-pricing-rules`).
 - Backend model `PricingRule { label, min_price, max_price?, kind: flat|percent, value,

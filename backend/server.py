@@ -1,345 +1,63 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Query
+"""FastAPI endpoints for the Admin Dashboard API.
+Deps: app/router/db/logger from deps.py — Pydantic models from models.py — helpers from helpers.py.
+Refactored Feb 2026."""
+from fastapi import HTTPException, Query, Depends, Header
 from fastapi.responses import Response
-from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import re
 import random
-import logging
+import asyncio
 import httpx
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Any
 import uuid
 from datetime import datetime, timezone, timedelta
+from typing import Optional, List, Any
 
-import asyncio
 import resend
 import bcrypt
 import jwt
-from fastapi import Depends, Header
+
+from deps import app, api_router, db, client, logger
 from scraper import (
-    ScrapeError,
-    NotEbayAUError,
-    BlockedError,
-    validate_ebay_au_url,
-    fetch_html,
-    parse_and_enrich,
+    ScrapeError, NotEbayAUError, BlockedError,
+    validate_ebay_au_url, fetch_html, parse_and_enrich,
+)
+from models import (
+    CATEGORIES, SEED_CATEGORIES, ScrapeRequest, ScrapedItem, WatchlistToggle, ProductCreate, 
+    Product, ProductUpdate, ShippingAddress, _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, 
+    OrderCreate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, ItemBulkAction, 
+    RefreshAllRequest, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
+    FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ORDER_STATUSES, ReturnRequest, 
+    AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate, CUSTOMER_GROUPS, 
+    CouponBase, Coupon, ReviewBase, Review, JWT_ALGO, JWT_ACCESS_TTL, PortalRegisterBody, 
+    PortalLoginBody, PortalReviewBody, PortalReviewVoteBody, MessageBase, Message, StockMove, 
+    _CATEGORY_RULES, _EBAY_BREADCRUMB_MAP, Notification, PUSH_SETTINGS_DEFAULTS, 
+    PUSH_CRITICAL_TYPES, PushSettingsUpdate, PricingRuleBase, PricingRule, PricingRuleUpdate, 
+    _DEFAULT_PRICING_RULES, BulkProductIds,
+)
+from helpers import (
+    _rand_au_address, _slug, _product_code_base, _generate_unique_product_code, 
+    _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _refresh_all_items, 
+    _get_scraper_schedule, _compute_next_run, _classify_run, _push_run_history, 
+    _refresh_all_and_record, _scheduler_loop, _ensure_categories_seeded, _now_iso, 
+    _seed_transactions_and_returns, _rebuild_customers_from_orders, _shape_review, _jwt_secret, 
+    _hash_password, _verify_password, _issue_token, get_current_customer, _has_purchased, 
+    _seller_id, _build_sellers, _match_rules, _guess_category, _get_push_settings, _mask, 
+    _get_credential, _push_channel_status, _notif_is_critical, _send_email, _send_telegram, 
+    _format_notification_html, _push_notification, _emit_notification, 
+    _emit_price_change_notifications, calc_pricing, _ensure_pricing_rules_seeded, 
+    _load_pricing_rules,
 )
 
-
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
-
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-app = FastAPI(title="Admin Dashboard API — Product Sourcing")
-api_router = APIRouter(prefix="/api")
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-CATEGORIES = ["electronics", "home", "tools", "apparel", "other"]
-
-# Seed categories for ecommerce store (auto-populated on first startup)
-SEED_CATEGORIES = [
-    # Electronics
-    {"name": "Phones & Tablets",       "group": "Electronics", "icon": "smartphone",   "color": "#4F46E5", "description": "Mobile phones, tablets and accessories."},
-    {"name": "Laptops & Computers",    "group": "Electronics", "icon": "laptop",       "color": "#4338CA", "description": "Laptops, desktops, monitors and peripherals."},
-    {"name": "TVs & Home Theatre",     "group": "Electronics", "icon": "tv",           "color": "#6366F1", "description": "Televisions, projectors and sound bars."},
-    {"name": "Audio & Headphones",     "group": "Electronics", "icon": "headphones",   "color": "#7C3AED", "description": "Headphones, earbuds, speakers and hi-fi."},
-    {"name": "Cameras & Photo",        "group": "Electronics", "icon": "camera",       "color": "#8B5CF6", "description": "Digital cameras, lenses, drones and gear."},
-    {"name": "Gaming",                 "group": "Electronics", "icon": "gamepad-2",    "color": "#A855F7", "description": "Consoles, games, controllers and gaming PCs."},
-    {"name": "Wearables & Smart Home", "group": "Electronics", "icon": "watch",        "color": "#EC4899", "description": "Smart watches, trackers and connected home."},
-    # Home
-    {"name": "Kitchen & Dining",       "group": "Home",        "icon": "utensils",     "color": "#F59E0B", "description": "Cookware, appliances and dining."},
-    {"name": "Furniture",              "group": "Home",        "icon": "armchair",     "color": "#D97706", "description": "Living, bedroom and office furniture."},
-    {"name": "Home Décor & Lighting",  "group": "Home",        "icon": "lamp",         "color": "#EA580C", "description": "Rugs, wall art, mirrors and lighting."},
-    {"name": "Bedroom & Bath",         "group": "Home",        "icon": "bed",          "color": "#F97316", "description": "Linen, bedding, towels and bathware."},
-    {"name": "Vacuums & Cleaning",     "group": "Home",        "icon": "spray-can",    "color": "#FB923C", "description": "Vacuums, mops and cleaning supplies."},
-    {"name": "Garden & Outdoor",       "group": "Home",        "icon": "flower-2",     "color": "#65A30D", "description": "BBQs, garden tools and outdoor living."},
-    # Tools
-    {"name": "Power Tools",            "group": "Tools",       "icon": "drill",        "color": "#0EA5E9", "description": "Cordless drills, saws, grinders and impact drivers."},
-    {"name": "Hand Tools",             "group": "Tools",       "icon": "wrench",       "color": "#0284C7", "description": "Hammers, spanners, screwdrivers and pliers."},
-    {"name": "Automotive",             "group": "Tools",       "icon": "car",          "color": "#0369A1", "description": "Car care, tyres, dash cams and workshop gear."},
-    {"name": "Workshop & Storage",     "group": "Tools",       "icon": "hammer",       "color": "#075985", "description": "Workbenches, tool cabinets and hardware."},
-    {"name": "Safety & Workwear",      "group": "Tools",       "icon": "shield",       "color": "#0891B2", "description": "PPE, hi-vis, boots and safety gear."},
-    # Apparel
-    {"name": "Men's Clothing",         "group": "Apparel",     "icon": "shirt",        "color": "#059669", "description": "Men's shirts, jeans, jackets and more."},
-    {"name": "Women's Clothing",       "group": "Apparel",     "icon": "shirt",        "color": "#10B981", "description": "Women's dresses, tops, activewear and more."},
-    {"name": "Shoes & Sneakers",       "group": "Apparel",     "icon": "footprints",   "color": "#14B8A6", "description": "Sneakers, boots, sandals and formal shoes."},
-    {"name": "Watches & Jewellery",    "group": "Apparel",     "icon": "watch",        "color": "#06B6D4", "description": "Watches, rings, necklaces and accessories."},
-    # Sports
-    {"name": "Fitness & Gym",          "group": "Sports",      "icon": "dumbbell",     "color": "#DC2626", "description": "Dumbbells, benches, treadmills and yoga."},
-    {"name": "Outdoor & Camping",      "group": "Sports",      "icon": "tent",         "color": "#B91C1C", "description": "Tents, sleeping bags, hiking and camping."},
-    {"name": "Cycling",                "group": "Sports",      "icon": "bike",         "color": "#EF4444", "description": "Bikes, helmets, cycling apparel and parts."},
-    # Toys / Collectibles
-    {"name": "Lego & Building",        "group": "Toys",        "icon": "blocks",       "color": "#F43F5E", "description": "LEGO sets, blocks and building toys."},
-    {"name": "Board Games & Puzzles",  "group": "Toys",        "icon": "puzzle",       "color": "#E11D48", "description": "Board games, card games and puzzles."},
-    {"name": "Collectibles & Trading Cards", "group": "Toys",  "icon": "star",         "color": "#BE185D", "description": "Pokémon, sports cards, figures and collectibles."},
-    # Fallback
-    {"name": "Other",                  "group": "General",     "icon": "package",      "color": "#6B7280", "description": "Uncategorised or miscellaneous items."},
-]
 
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
 
-class ScrapeRequest(BaseModel):
-    url: str
-    method: str = "auto"
-    scrapingbee_key: Optional[str] = None
-    scraperapi_key: Optional[str] = None
-    save: bool = True
-
-
-class ScrapedItem(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    url: str
-    item_id: Optional[str] = None
-    title: Optional[str] = None
-    price_display: Optional[str] = None
-    price_value: Optional[float] = None
-    currency: str = "AUD"
-    condition: Optional[str] = None
-    seller: Optional[str] = None
-    location: Optional[str] = None
-    shipping: Optional[str] = None
-    availability: Optional[str] = None
-    description: Optional[str] = None
-    description_iframe_url: Optional[str] = None
-    postage_display: Optional[str] = None
-    postage_fee: Optional[float] = None
-    delivery_estimate: Optional[str] = None
-    delivery_estimate_updated_at: Optional[str] = None
-    collection: Optional[str] = None
-    returns_policy: Optional[str] = None
-    payment_methods: Optional[str] = None
-    is_sold: bool = False
-    sold_detected_at: Optional[str] = None
-    feature_flags: dict = Field(default_factory=lambda: {
-        "show_postage": True, "show_delivery": True, "show_collection": True,
-        "show_returns": True, "show_payments": True, "show_seller": True,
-        "show_description": True, "show_specifics": True, "visible": True,
-    })
-    images: List[str] = Field(default_factory=list)
-    specifics: dict = Field(default_factory=dict)
-    ebay_category_path: List[str] = Field(default_factory=list)
-    variants: List[dict] = Field(default_factory=list)
-    category: Optional[str] = None
-    method_used: Optional[str] = None
-    watchlisted: bool = False
-    active: bool = True
-    price_history: List[dict] = Field(default_factory=list)
-    added_to_products: bool = False
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-class WatchlistToggle(BaseModel):
-    watchlisted: bool
-
-
-class ProductCreate(BaseModel):
-    title: str
-    price: float
-    cost: Optional[float] = 0.0
-    stock: int = 10
-    category: str = "other"
-    description: Optional[str] = ""
-    images: List[str] = Field(default_factory=list)
-    source_url: Optional[str] = None
-    source_item_id: Optional[str] = None
-    active: bool = True
-    sku: Optional[str] = None
-    stock_status: str = "live"          # live | sold | ended | out_of_stock
-    is_sold: bool = False               # kept for backward compat (True iff stock_status != "live")
-    archived: bool = False
-    archived_at: Optional[str] = None
-    product_code: Optional[str] = None  # public reference — e.g. KF21-PC0826 (auto-generated on create)
-    variants: List[dict] = Field(default_factory=list)  # [{type, option, price, currency, stock_status, sku?}]
-
-
-class Product(ProductCreate):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    sold_count: int = 0
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-class ProductUpdate(BaseModel):
-    title: Optional[str] = None
-    price: Optional[float] = None
-    cost: Optional[float] = None
-    stock: Optional[int] = None
-    category: Optional[str] = None
-    description: Optional[str] = None
-    images: Optional[List[str]] = None
-    active: Optional[bool] = None
-    sku: Optional[str] = None
-    stock_status: Optional[str] = None
-    archived: Optional[bool] = None
-
-
-# AU address generator used by the demo seed + backfill for existing orders without addresses.
-class ShippingAddress(BaseModel):
-    full_name: Optional[str] = ""
-    street: Optional[str] = ""
-    suburb: Optional[str] = ""
-    state: Optional[str] = ""
-    postcode: Optional[str] = ""
-    country: str = "Australia"
-
-
-_AU_SUBURBS = [
-    ("Bondi",         "NSW", "2026"), ("Surry Hills",     "NSW", "2010"), ("Parramatta",   "NSW", "2150"),
-    ("Newtown",       "NSW", "2042"), ("Chatswood",       "NSW", "2067"), ("Manly",        "NSW", "2095"),
-    ("Fitzroy",       "VIC", "3065"), ("St Kilda",        "VIC", "3182"), ("Brunswick",    "VIC", "3056"),
-    ("Southbank",     "VIC", "3006"), ("Richmond",        "VIC", "3121"), ("Docklands",    "VIC", "3008"),
-    ("Fortitude Valley","QLD","4006"), ("Kangaroo Point", "QLD", "4169"), ("South Brisbane","QLD","4101"),
-    ("New Farm",      "QLD", "4005"), ("Surfers Paradise","QLD", "4217"), ("Bulimba",     "QLD", "4171"),
-    ("Fremantle",     "WA",  "6160"), ("Subiaco",         "WA",  "6008"), ("Cottesloe",    "WA",  "6011"),
-    ("North Adelaide","SA",  "5006"), ("Glenelg",         "SA",  "5045"), ("Norwood",      "SA",  "5067"),
-    ("Battery Point", "TAS", "7004"), ("Sandy Bay",       "TAS", "7005"),
-    ("Braddon",       "ACT", "2612"), ("Kingston",        "ACT", "2604"),
-    ("Nightcliff",    "NT",  "0810"), ("Fannie Bay",      "NT",  "0820"),
-]
-_STREET_NAMES = ["George", "King", "Queen", "Church", "Elizabeth", "Bourke", "Collins", "Swanston",
-                 "Adelaide", "Ann", "Wickham", "Hay", "Rundle", "Murray", "Northbourne", "Beach", "Ocean",
-                 "Palm", "Coogee", "Bondi", "Chapel", "Brunswick", "Latrobe", "Flinders", "Sturt"]
-_STREET_TYPES = ["St", "Rd", "Ave", "Dr", "Pde", "Lane", "Cres", "Way", "Terrace", "Blvd"]
-
-
-def _rand_au_address(rng: random.Random, full_name: str) -> dict:
-    suburb, state, postcode = rng.choice(_AU_SUBURBS)
-    unit = f"{rng.randint(1, 25)}/" if rng.random() < 0.35 else ""
-    number = rng.randint(1, 480)
-    street = f"{rng.choice(_STREET_NAMES)} {rng.choice(_STREET_TYPES)}"
-    return {
-        "full_name": full_name,
-        "street": f"{unit}{number} {street}",
-        "suburb": suburb,
-        "state": state,
-        "postcode": postcode,
-        "country": "Australia",
-    }
-
-
-class OrderCreate(BaseModel):
-    product_id: str
-    quantity: int = 1
-    customer_name: Optional[str] = "Guest"
-    customer_email: Optional[str] = None
-    status: str = "paid"
-    shipping_address: Optional[ShippingAddress] = None
-
-
-class Settings(BaseModel):
-    store_name: str = "AU Electronics Co."
-    store_email: str = "admin@example.com"
-    currency: str = "AUD"
-    country: str = "Australia"
-    tax_rate: float = 10.0
-    accent_color: str = "indigo"
-
-
-def _slug(s: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-") or "cat"
-
 
 # --- Product code generator -------------------------------------------------
 # Format: [First letter of product name][First letter of day][Day number]-PC[Month][Year]
 # Example: "Keyboard" on Friday 21 Aug 2026 → "KF21-PC0826". Collisions get a "-N" suffix.
-_DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"]  # Mon..Sun (matches user spec: first letter of day)
-
-
-def _product_code_base(title: str, dt: Optional[datetime] = None) -> str:
-    dt = dt or datetime.now(timezone.utc)
-    first = next((ch for ch in (title or "") if ch.isalnum()), "X").upper()[:1]
-    day_letter = _DAY_LETTERS[dt.weekday()]
-    return f"{first}{day_letter}{dt.day:02d}-PC{dt.month:02d}{dt.year % 100:02d}"
-
-
-async def _generate_unique_product_code(title: str, dt: Optional[datetime] = None) -> str:
-    """Return a product_code guaranteed unique in db.products."""
-    base = _product_code_base(title, dt)
-    if not await db.products.find_one({"product_code": base}, {"_id": 1}):
-        return base
-    n = 2
-    while True:
-        candidate = f"{base}-{n}"
-        if not await db.products.find_one({"product_code": candidate}, {"_id": 1}):
-            return candidate
-        n += 1
-
-
-async def _ensure_product_codes_backfilled() -> None:
-    """One-shot backfill: assign product_code to any product missing one.
-    Uses the product's created_at (falls back to now) so codes reflect the real scrape day."""
-    cursor = db.products.find({"$or": [{"product_code": {"$exists": False}}, {"product_code": None}, {"product_code": ""}]}, {"_id": 0, "id": 1, "title": 1, "created_at": 1})
-    count = 0
-    async for p in cursor:
-        try:
-            dt = datetime.fromisoformat(p.get("created_at") or "") if p.get("created_at") else None
-        except Exception:
-            dt = None
-        code = await _generate_unique_product_code(p.get("title") or "Product", dt)
-        await db.products.update_one({"id": p["id"]}, {"$set": {"product_code": code}})
-        count += 1
-    if count:
-        logger.info(f"backfilled product_code on {count} products")
-
-
-async def _ensure_order_references_backfilled() -> None:
-    """Backfill reference on existing orders using their linked product's product_code."""
-    cursor = db.orders.find({"$or": [{"reference": {"$exists": False}}, {"reference": None}, {"reference": ""}]}, {"_id": 0, "id": 1, "product_id": 1})
-    count = 0
-    async for o in cursor:
-        pid = o.get("product_id")
-        if not pid:
-            continue
-        p = await db.products.find_one({"id": pid}, {"_id": 0, "product_code": 1})
-        if p and p.get("product_code"):
-            await db.orders.update_one({"id": o["id"]}, {"$set": {"reference": p["product_code"]}})
-            count += 1
-    if count:
-        logger.info(f"backfilled reference on {count} orders")
-
-
-class Category(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    slug: str
-    group: str = "General"
-    icon: str = "package"
-    color: str = "#6B7280"
-    description: str = ""
-    active: bool = True
-    sort_order: int = 0
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-class CategoryCreate(BaseModel):
-    name: str
-    group: str = "General"
-    icon: str = "package"
-    color: str = "#6B7280"
-    description: str = ""
-    active: bool = True
-
-
-class CategoryUpdate(BaseModel):
-    name: Optional[str] = None
-    group: Optional[str] = None
-    icon: Optional[str] = None
-    color: Optional[str] = None
-    description: Optional[str] = None
-    active: Optional[bool] = None
-    sort_order: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -579,11 +297,6 @@ async def list_items(
     return {"items": items, "total": total}
 
 
-class ItemBulkAction(BaseModel):
-    ids: List[str]
-    action: str   # "delete" | "deactivate" | "activate"
-
-
 @api_router.post("/items/bulk")
 async def items_bulk_action(body: ItemBulkAction):
     if not body.ids:
@@ -702,244 +415,9 @@ async def update_item_features(item_id: str, features: dict):
     return await db.items.find_one({"id": item_id}, {"_id": 0})
 
 
-class RefreshAllRequest(BaseModel):
-    method: str = "auto"
-    scrapingbee_key: Optional[str] = None
-    scraperapi_key: Optional[str] = None
-
-
-async def _refresh_all_items(method: str = "auto", scrapingbee_key: Optional[str] = None, scraperapi_key: Optional[str] = None) -> dict:
-    """Re-scrape every stored item; detects sold status + updates delivery estimate."""
-    items = await db.items.find({}, {"_id": 0, "id": 1, "url": 1, "item_id": 1}).to_list(1000)
-    ok = 0; sold = 0; failed = 0
-    for it in items:
-        try:
-            r = ScrapeRequest(url=it["url"], method=method, scrapingbee_key=scrapingbee_key, scraperapi_key=scraperapi_key, save=True)
-            res = await scrape(r)
-            if res.get("item", {}).get("is_sold"):
-                sold += 1
-            ok += 1
-        except Exception as e:
-            failed += 1
-            logger.info(f"refresh-all: {it.get('item_id')} failed: {e}")
-        await asyncio.sleep(1.2)  # be gentle to eBay
-    return {"refreshed": ok, "sold_found": sold, "failed": failed, "total": len(items)}
-
-
 @api_router.post("/items/refresh-all")
 async def refresh_all_items(body: RefreshAllRequest):
     return await _refresh_all_items(body.method, body.scrapingbee_key, body.scraperapi_key)
-
-
-SCRAPER_SCHEDULE_DEFAULTS: dict = {
-    "id": "singleton",
-    "enabled": True,
-    "start_time_hhmm": "02:00",       # local time (Australia/Sydney)
-    "frequency": "daily",              # hourly | every_6h | every_12h | daily | weekly
-    "stop_date": None,                 # ISO date (YYYY-MM-DD) — schedule pauses on or after this
-    "last_run_at": None,
-    "last_run_stats": None,
-    "next_run_at": None,
-    # Run history: newest first, capped at 20 entries.
-    # Each entry: {id, started_at, finished_at, duration_seconds, status, attempt, trigger, stats, error}
-    "run_history": [],
-    # Set when a scheduled run fails and a retry is queued for 15 min later.
-    # Shape: {"retry_at": iso, "original_run_id": id, "trigger": "scheduled"|"manual"}
-    "retry_pending": None,
-}
-RETRY_DELAY_SECONDS = 15 * 60  # 15 minutes
-RUN_HISTORY_LIMIT = 20
-FREQ_INTERVAL_SECONDS = {
-    "hourly":    60 * 60,
-    "every_6h":  6 * 60 * 60,
-    "every_12h": 12 * 60 * 60,
-    "daily":     24 * 60 * 60,
-    "weekly":    7 * 24 * 60 * 60,
-}
-_SYDNEY = timezone(timedelta(hours=10))  # rough AEST; the UI only uses this for display anchoring
-
-
-async def _get_scraper_schedule() -> dict:
-    doc = await db.scraper_schedule.find_one({"id": "singleton"}, {"_id": 0})
-    if not doc:
-        await db.scraper_schedule.insert_one({**SCRAPER_SCHEDULE_DEFAULTS})
-        return {**SCRAPER_SCHEDULE_DEFAULTS}
-    return {**SCRAPER_SCHEDULE_DEFAULTS, **doc}
-
-
-def _compute_next_run(sched: dict) -> Optional[str]:
-    """Given the current schedule, work out the next fire time (UTC ISO)."""
-    if not sched.get("enabled"):
-        return None
-    now = datetime.now(timezone.utc)
-    # Anchor: today at start_time_hhmm (AEST) → UTC
-    hh, mm = (sched.get("start_time_hhmm") or "02:00").split(":")
-    try:
-        anchor = now.astimezone(_SYDNEY).replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
-    except Exception:
-        anchor = now.astimezone(_SYDNEY).replace(hour=2, minute=0, second=0, microsecond=0)
-    anchor_utc = anchor.astimezone(timezone.utc)
-    interval = timedelta(seconds=FREQ_INTERVAL_SECONDS.get(sched.get("frequency", "daily"), 86400))
-    # Walk anchor forward by interval until it's in the future
-    while anchor_utc <= now:
-        anchor_utc = anchor_utc + interval
-    # Stop-date check
-    stop = sched.get("stop_date")
-    if stop:
-        try:
-            stop_dt = datetime.fromisoformat(stop).replace(tzinfo=timezone.utc)
-            if anchor_utc >= stop_dt:
-                return None
-        except Exception:
-            pass
-    return anchor_utc.isoformat()
-
-
-def _classify_run(summary: Optional[dict], error: Optional[str]) -> str:
-    """success | failed — 'failed' triggers a retry when the run came from the scheduler."""
-    if error:
-        return "failed"
-    if not summary:
-        return "failed"
-    total = int(summary.get("total") or 0)
-    refreshed = int(summary.get("refreshed") or 0)
-    # If there were items to refresh but none succeeded, treat as failure (likely bot-blocked/network).
-    if total > 0 and refreshed == 0:
-        return "failed"
-    return "success"
-
-
-async def _push_run_history(entry: dict) -> None:
-    """Prepend an entry into scraper_schedule.run_history and cap at RUN_HISTORY_LIMIT."""
-    sched = await _get_scraper_schedule()
-    history = list(sched.get("run_history") or [])
-    history.insert(0, entry)
-    history = history[:RUN_HISTORY_LIMIT]
-    await db.scraper_schedule.update_one(
-        {"id": "singleton"}, {"$set": {"run_history": history}}, upsert=True,
-    )
-
-
-async def _refresh_all_and_record(method: str = "auto", trigger: str = "scheduled", attempt: int = 1, original_run_id: Optional[str] = None) -> dict:
-    """Run a full refresh and record the outcome in run_history. On failure of a scheduled run, queue a 15-min retry."""
-    run_id = original_run_id or uuid.uuid4().hex
-    started = datetime.now(timezone.utc)
-    logger.info(f"scraper schedule: run starting · trigger={trigger} attempt={attempt} id={run_id}")
-    summary: Optional[dict] = None
-    error: Optional[str] = None
-    try:
-        summary = await _refresh_all_items(method=method)
-    except Exception as e:
-        error = f"{type(e).__name__}: {e}"[:400]
-        logger.exception(f"scraper schedule: run crashed · {error}")
-    finished = datetime.now(timezone.utc)
-    duration = (finished - started).total_seconds()
-    status = _classify_run(summary, error)
-    # If this is a retry that also failed, mark it 'dead' so the UI can highlight the give-up.
-    if status == "failed" and attempt >= 2:
-        status = "dead"
-
-    entry = {
-        "id": run_id,
-        "started_at": started.isoformat(),
-        "finished_at": finished.isoformat(),
-        "duration_seconds": round(duration, 2),
-        "status": status,
-        "attempt": attempt,
-        "trigger": trigger,
-        "stats": summary,
-        "error": error,
-    }
-    await _push_run_history(entry)
-
-    # Update last_run_at / last_run_stats on any completed attempt.
-    await db.scraper_schedule.update_one(
-        {"id": "singleton"},
-        {"$set": {"last_run_at": finished.isoformat(), "last_run_stats": summary}},
-        upsert=True,
-    )
-
-    # Retry orchestration: only for scheduled runs, only on first-attempt failure.
-    retry_pending: Optional[dict] = None
-    if trigger == "scheduled" and status == "failed" and attempt == 1:
-        retry_at = (finished + timedelta(seconds=RETRY_DELAY_SECONDS)).isoformat()
-        retry_pending = {"retry_at": retry_at, "original_run_id": run_id, "trigger": "scheduled"}
-        logger.info(f"scraper schedule: queued retry at {retry_at} for run {run_id}")
-    # Clear retry_pending after a retry attempt (success or dead).
-    await db.scraper_schedule.update_one(
-        {"id": "singleton"}, {"$set": {"retry_pending": retry_pending}}, upsert=True,
-    )
-
-    # Recompute next run (skip on retry — the primary schedule anchor is unchanged).
-    if attempt == 1:
-        sched = await _get_scraper_schedule()
-        next_run = _compute_next_run(sched)
-        await db.scraper_schedule.update_one({"id": "singleton"}, {"$set": {"next_run_at": next_run}})
-        logger.info(f"scraper schedule: run done · status={status} · next {next_run}")
-    else:
-        logger.info(f"scraper schedule: retry finished · status={status}")
-    return summary or {"refreshed": 0, "sold_found": 0, "failed": 0, "total": 0, "error": error}
-
-
-async def _scheduler_loop():
-    """Poll the schedule config every minute and fire refresh-all when due (or retry when queued)."""
-    await asyncio.sleep(30)  # small boot delay
-    while True:
-        try:
-            sched = await _get_scraper_schedule()
-            now = datetime.now(timezone.utc)
-
-            # 1) Retry orchestration: fire a queued retry regardless of schedule enable flag
-            #    (the original scheduled run was already accepted; user intent was to retry).
-            retry_pending = sched.get("retry_pending")
-            if retry_pending and retry_pending.get("retry_at"):
-                try:
-                    retry_due = datetime.fromisoformat(retry_pending["retry_at"]) <= now
-                except Exception:
-                    retry_due = False
-                if retry_due:
-                    await _refresh_all_and_record(
-                        method="auto",
-                        trigger="retry",
-                        attempt=2,
-                        original_run_id=retry_pending.get("original_run_id"),
-                    )
-                    # Reload after the retry so we don't also fire a scheduled run this tick.
-                    sched = await _get_scraper_schedule()
-
-            # 2) Scheduled runs
-            if sched.get("enabled"):
-                stop = sched.get("stop_date")
-                stop_passed = False
-                if stop:
-                    try:
-                        stop_dt = datetime.fromisoformat(stop).replace(tzinfo=timezone.utc)
-                        stop_passed = datetime.now(timezone.utc) >= stop_dt
-                    except Exception:
-                        pass
-                if not stop_passed:
-                    next_run = sched.get("next_run_at") or _compute_next_run(sched)
-                    if next_run:
-                        try:
-                            due = datetime.fromisoformat(next_run) <= datetime.now(timezone.utc)
-                        except Exception:
-                            due = False
-                        if due:
-                            await _refresh_all_and_record(method="auto", trigger="scheduled", attempt=1)
-                        elif sched.get("next_run_at") != next_run:
-                            await db.scraper_schedule.update_one(
-                                {"id": "singleton"}, {"$set": {"next_run_at": next_run}}, upsert=True,
-                            )
-        except Exception as e:
-            logger.exception(f"scheduler loop error: {e}")
-        await asyncio.sleep(60)
-
-
-class ScraperScheduleUpdate(BaseModel):
-    enabled: Optional[bool] = None
-    start_time_hhmm: Optional[str] = None    # "HH:MM"
-    frequency: Optional[str] = None          # keys of FREQ_INTERVAL_SECONDS
-    stop_date: Optional[str] = None          # "YYYY-MM-DD" or "" to clear
 
 
 @api_router.get("/scraper/schedule")
@@ -1009,18 +487,6 @@ async def _start_scheduler():
 # Categories
 # ---------------------------------------------------------------------------
 
-async def _ensure_categories_seeded() -> None:
-    count = await db.categories.count_documents({})
-    if count > 0:
-        return
-    for i, s in enumerate(SEED_CATEGORIES):
-        cat = Category(
-            name=s["name"], slug=_slug(s["name"]), group=s["group"],
-            icon=s["icon"], color=s["color"], description=s["description"], sort_order=i,
-        )
-        await db.categories.insert_one(cat.model_dump())
-    logger.info(f"Seeded {len(SEED_CATEGORIES)} categories")
-
 
 @api_router.get("/categories")
 async def list_categories(active: Optional[bool] = None, group: Optional[str] = None):
@@ -1084,110 +550,6 @@ async def reseed_categories(force: bool = False):
 # ---------------------------------------------------------------------------
 # Returns, Abandoned Carts, Transactions
 # ---------------------------------------------------------------------------
-
-ORDER_STATUSES = ["new", "pending", "processing", "ready_to_ship", "shipped", "delivered", "cancelled"]
-
-
-class ReturnRequest(BaseModel):
-    order_id: Optional[str] = None
-    product_id: Optional[str] = None
-    product_title: str = ""
-    customer_name: str = "Customer"
-    reason: str = "Not as described"
-    amount: float = 0.0
-    status: str = "pending"  # pending | approved | rejected | refunded
-
-
-class AbandonedCart(BaseModel):
-    customer_name: str = "Guest"
-    customer_email: Optional[str] = ""
-    items: int = 1
-    subtotal: float = 0.0
-    step: str = "cart"  # cart | shipping | payment
-    recovered: bool = False
-
-
-class Transaction(BaseModel):
-    order_id: Optional[str] = None
-    customer_name: str = "Customer"
-    amount: float = 0.0
-    method: str = "card"  # card | paypal | applepay | afterpay | bank
-    status: str = "successful"  # successful | pending | failed
-    kind: str = "charge"  # charge | refund | chargeback
-    reference: Optional[str] = None
-
-
-def _now_iso() -> str: return datetime.now(timezone.utc).isoformat()
-
-
-async def _seed_transactions_and_returns():
-    if await db.transactions.count_documents({}) > 0:
-        return
-    orders = await db.orders.find({}, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
-    rng = random.Random(7)
-    tx_docs = []
-    for o in orders:
-        status = rng.choices(["successful", "pending", "failed"], weights=[85, 8, 7])[0]
-        tx_docs.append({
-            "id": str(uuid.uuid4()),
-            "order_id": o["id"],
-            "customer_name": o.get("customer_name") or "Customer",
-            "amount": o.get("total") or 0,
-            "method": rng.choice(["card", "paypal", "applepay", "afterpay", "bank"]),
-            "status": status,
-            "kind": "charge",
-            "reference": f"txn_{uuid.uuid4().hex[:10]}",
-            "created_at": o.get("created_at") or _now_iso(),
-        })
-    # Refunds & chargebacks
-    for o in rng.sample(orders, min(12, len(orders))):
-        tx_docs.append({
-            "id": str(uuid.uuid4()),
-            "order_id": o["id"],
-            "customer_name": o.get("customer_name") or "Customer",
-            "amount": round((o.get("total") or 0) * rng.uniform(0.25, 1.0), 2),
-            "method": rng.choice(["card", "paypal"]),
-            "status": "successful",
-            "kind": rng.choices(["refund", "chargeback"], weights=[4, 1])[0],
-            "reference": f"txn_{uuid.uuid4().hex[:10]}",
-            "created_at": _now_iso(),
-        })
-    if tx_docs:
-        await db.transactions.insert_many(tx_docs)
-
-    # Returns
-    ret_docs = []
-    for o in rng.sample(orders, min(10, len(orders))):
-        ret_docs.append({
-            "id": str(uuid.uuid4()),
-            "order_id": o["id"],
-            "product_id": o.get("product_id"),
-            "product_title": o.get("product_title") or "",
-            "customer_name": o.get("customer_name") or "Customer",
-            "reason": rng.choice(["Not as described", "Faulty on arrival", "Changed mind", "Wrong size", "Damaged in transit"]),
-            "amount": o.get("total") or 0,
-            "status": rng.choice(["pending", "pending", "approved", "refunded", "rejected"]),
-            "created_at": _now_iso(),
-        })
-    if ret_docs:
-        await db.returns.insert_many(ret_docs)
-
-    # Abandoned carts
-    cart_docs = []
-    names = ["Amelia Wilson", "Jack Harris", "Olivia Nguyen", "Liam Brown", "Ava Smith", "Noah Taylor", "Emma Anderson", "Charlie Wilson", "Isla Walker", "Ethan Nguyen"]
-    for i in range(24):
-        cart_docs.append({
-            "id": str(uuid.uuid4()),
-            "customer_name": rng.choice(names),
-            "customer_email": f"cart{i}@example.com",
-            "items": rng.randint(1, 5),
-            "subtotal": round(rng.uniform(29, 899), 2),
-            "step": rng.choice(["cart", "shipping", "payment"]),
-            "recovered": rng.random() < 0.15,
-            "created_at": (datetime.now(timezone.utc) - timedelta(hours=rng.randint(1, 240))).isoformat(),
-        })
-    if cart_docs:
-        await db.abandoned_carts.insert_many(cart_docs)
 
 
 @api_router.get("/orders/status-counts")
@@ -1295,82 +657,6 @@ async def create_transaction(body: Transaction):
 # Customers (persistent) - complement to derived-from-orders
 # ---------------------------------------------------------------------------
 
-class CustomerBase(BaseModel):
-    name: str
-    email: Optional[str] = ""
-    phone: Optional[str] = ""
-    country: str = "Australia"
-    state: Optional[str] = ""
-    city: Optional[str] = ""
-    address: Optional[str] = ""
-    postcode: Optional[str] = ""
-    status: str = "pending"           # pending | active | blocked
-    type: str = "registered"          # registered | guest
-    group: str = "Retail"             # Retail | VIP | Wholesale | Trade
-    tags: List[str] = Field(default_factory=list)
-    notes: Optional[str] = ""
-
-
-class Customer(CustomerBase):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    code: str = Field(default_factory=lambda: f"CUS-{uuid.uuid4().hex[:6].upper()}")
-    orders_count: int = 0
-    total_spend: float = 0.0
-    wishlist: List[str] = Field(default_factory=list)  # product_ids
-    addresses: List[dict] = Field(default_factory=list)
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-class CustomerUpdate(BaseModel):
-    name: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    status: Optional[str] = None
-    type: Optional[str] = None
-    group: Optional[str] = None
-    tags: Optional[List[str]] = None
-    notes: Optional[str] = None
-    address: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    postcode: Optional[str] = None
-
-
-CUSTOMER_GROUPS = ["Retail", "VIP", "Wholesale", "Trade"]
-
-
-async def _rebuild_customers_from_orders():
-    """Materialise customer records from orders and merge stats."""
-    orders = await db.orders.find({}, {"_id": 0}).to_list(5000)
-    if not orders: return 0
-    by_email: dict[str, dict] = {}
-    for o in orders:
-        key = (o.get("customer_email") or o.get("customer_name") or "").lower().strip()
-        if not key: continue
-        e = by_email.setdefault(key, {
-            "name": o.get("customer_name") or "Guest",
-            "email": o.get("customer_email") or "",
-            "orders_count": 0, "total_spend": 0.0,
-        })
-        e["orders_count"] += 1
-        e["total_spend"] += float(o.get("total") or 0)
-    n = 0
-    for key, agg in by_email.items():
-        existing = await db.customers.find_one({"email": agg["email"]}, {"_id": 0}) if agg["email"] else None
-        if not existing:
-            group = "VIP" if agg["total_spend"] > 500 else "Retail"
-            c = Customer(
-                name=agg["name"], email=agg["email"], group=group,
-                status="active", type="registered",
-                orders_count=agg["orders_count"], total_spend=round(agg["total_spend"], 2),
-            )
-            await db.customers.insert_one(c.model_dump())
-            n += 1
-        else:
-            await db.customers.update_one({"id": existing["id"]}, {"$set": {"orders_count": agg["orders_count"], "total_spend": round(agg["total_spend"], 2), "updated_at": datetime.now(timezone.utc).isoformat()}})
-    return n
-
 
 @api_router.get("/customers")
 async def list_customers(
@@ -1468,23 +754,6 @@ async def rebuild_from_orders():
 # Coupons + Reviews + Customer messages (light collections)
 # ---------------------------------------------------------------------------
 
-class CouponBase(BaseModel):
-    code: str
-    type: str = "percent"        # percent | fixed
-    value: float = 10.0
-    min_spend: float = 0.0
-    max_uses: int = 100
-    used: int = 0
-    active: bool = True
-    starts_at: Optional[str] = None
-    ends_at: Optional[str] = None
-    description: Optional[str] = ""
-
-
-class Coupon(CouponBase):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
 
 @api_router.get("/coupons")
 async def list_coupons():
@@ -1504,36 +773,6 @@ async def delete_coupon(cid: str):
     r = await db.coupons.delete_one({"id": cid})
     if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Not found")
     return {"deleted": True}
-
-
-class ReviewBase(BaseModel):
-    product_id: str
-    customer_name: str = "Anonymous"
-    customer_email: Optional[str] = ""
-    rating: int = 5
-    title: Optional[str] = ""
-    body: Optional[str] = ""
-    status: str = "approved"     # pending | approved | rejected — portal reviews are auto-approved (verified)
-    order_id: Optional[str] = ""
-    verified_purchase: bool = False
-
-
-class Review(ReviewBase):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    helpful_votes: List[str] = Field(default_factory=list)      # customer emails that voted helpful
-    not_helpful_votes: List[str] = Field(default_factory=list)  # customer emails that voted not-helpful
-
-
-def _shape_review(r: dict) -> dict:
-    """Attach counts, strip private lists before returning to public consumers."""
-    hv = r.get("helpful_votes") or []
-    nv = r.get("not_helpful_votes") or []
-    return {
-        **{k: v for k, v in r.items() if k not in ("helpful_votes", "not_helpful_votes")},
-        "helpful_count": len(hv),
-        "not_helpful_count": len(nv),
-    }
 
 
 @api_router.get("/reviews")
@@ -1588,90 +827,6 @@ async def delete_review(rid: str):
 
 
 # --- Customer Portal (JWT auth + verified-purchase reviews) ---------------
-
-JWT_ALGO = "HS256"
-JWT_ACCESS_TTL = timedelta(days=7)  # portal sessions last a week
-
-
-def _jwt_secret() -> str:
-    s = os.environ.get("JWT_SECRET")
-    if not s:
-        raise RuntimeError("JWT_SECRET missing from backend/.env")
-    return s
-
-
-def _hash_password(pw: str) -> str:
-    return bcrypt.hashpw(pw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-
-
-def _verify_password(pw: str, hashed: str) -> bool:
-    try:
-        return bcrypt.checkpw(pw.encode("utf-8"), hashed.encode("utf-8"))
-    except Exception:
-        return False
-
-
-def _issue_token(customer_email: str) -> str:
-    payload = {
-        "sub": customer_email,
-        "type": "access",
-        "iat": datetime.now(timezone.utc),
-        "exp": datetime.now(timezone.utc) + JWT_ACCESS_TTL,
-    }
-    return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALGO)
-
-
-async def get_current_customer(authorization: Optional[str] = Header(None)) -> dict:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    token = authorization[7:]
-    try:
-        payload = jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALGO])
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Session expired — please log in again")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid session token")
-    email = (payload.get("sub") or "").lower()
-    if not email:
-        raise HTTPException(status_code=401, detail="Invalid session token")
-    acct = await db.customer_accounts.find_one({"email": email}, {"_id": 0, "password_hash": 0})
-    if not acct:
-        raise HTTPException(status_code=401, detail="Account not found")
-    return acct
-
-
-class PortalRegisterBody(BaseModel):
-    email: str
-    password: str
-    name: Optional[str] = ""
-
-
-class PortalLoginBody(BaseModel):
-    email: str
-    password: str
-
-
-class PortalReviewBody(BaseModel):
-    product_id: str
-    rating: int
-    title: Optional[str] = ""
-    body: Optional[str] = ""
-
-
-class PortalReviewVoteBody(BaseModel):
-    vote: str  # "helpful" | "not_helpful" | "clear"
-
-
-async def _has_purchased(email: str, product_id: str) -> Optional[dict]:
-    """Return the first matching order (paid or later) for this customer+product, else None."""
-    valid = ["paid", "processing", "shipped", "delivered", "completed"]
-    o = await db.orders.find_one(
-        {"customer_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
-         "product_id": product_id,
-         "status": {"$in": valid}},
-        {"_id": 0},
-    )
-    return o
 
 
 @api_router.post("/portal/register")
@@ -1799,20 +954,6 @@ async def review_vote(rid: str, body: PortalReviewVoteBody, current: dict = Depe
     return result
 
 
-
-class MessageBase(BaseModel):
-    customer_name: str
-    customer_email: Optional[str] = ""
-    subject: str = ""
-    body: str = ""
-    status: str = "new"  # new | read | archived
-
-
-class Message(MessageBase):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
 @api_router.get("/messages")
 async def list_messages(status: Optional[str] = None):
     q = {"status": status} if status else {}
@@ -1830,12 +971,6 @@ async def create_message(body: MessageBase):
 # ---------------------------------------------------------------------------
 # Stock movements & product inventory helpers
 # ---------------------------------------------------------------------------
-
-class StockMove(BaseModel):
-    product_id: str
-    delta: int
-    kind: str = "adjustment"  # opening | count | adjustment | receive | sale | return
-    reason: Optional[str] = ""
 
 
 @api_router.get("/stock/moves")
@@ -1878,62 +1013,6 @@ async def inventory_summary():
 # A "supplier" here is an eBay AU seller whose listing has been imported.
 # The list is computed on-the-fly from the `items` collection (each scraped
 # item's `seller` field), enriched with product & order counts and revenue.
-
-def _seller_id(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-") or "unknown"
-
-
-async def _build_sellers() -> List[dict]:
-    """Aggregate items -> sellers, then enrich with product and order stats."""
-    items = await db.items.find({"seller": {"$nin": [None, ""]}}, {"_id": 0}).to_list(5000)
-    if not items:
-        return []
-
-    buckets: dict = {}
-    for it in items:
-        name = (it.get("seller") or "").strip()
-        if not name:
-            continue
-        b = buckets.setdefault(name, {"item_ids": [], "locations": set(), "last": "", "any_live": False})
-        b["item_ids"].append(it["id"])
-        if it.get("location"):
-            b["locations"].add(it["location"])
-        upd = it.get("updated_at") or it.get("created_at") or ""
-        if upd > b["last"]:
-            b["last"] = upd
-        if not it.get("is_sold"):
-            b["any_live"] = True
-
-    sellers: List[dict] = []
-    for name, b in buckets.items():
-        products = await db.products.find(
-            {"source_item_id": {"$in": b["item_ids"]}}, {"_id": 0, "id": 1}
-        ).to_list(1000)
-        product_ids = [p["id"] for p in products]
-
-        orders_count = 0
-        revenue = 0.0
-        if product_ids:
-            agg = await db.orders.aggregate([
-                {"$match": {"product_id": {"$in": product_ids}}},
-                {"$group": {"_id": None, "n": {"$sum": 1}, "rev": {"$sum": "$total"}}},
-            ]).to_list(1)
-            if agg:
-                orders_count = int(agg[0].get("n") or 0)
-                revenue = float(agg[0].get("rev") or 0.0)
-
-        sellers.append({
-            "id": _seller_id(name),
-            "name": name,
-            "location": ", ".join(sorted(b["locations"])) or "—",
-            "total_products": len(b["item_ids"]),
-            "total_orders": orders_count,
-            "revenue_generated": round(revenue, 2),
-            "last_active": b["last"],
-            "status": "active" if b["any_live"] else "inactive",
-            "item_ids": b["item_ids"],
-        })
-    return sellers
 
 
 @api_router.get("/suppliers")
@@ -1994,346 +1073,15 @@ async def get_supplier(sid: str):
     raise HTTPException(status_code=404, detail="Seller not found")
 
 
-# ---------------------------------------------------------------------------
-# Products
-# ---------------------------------------------------------------------------
-
-_CATEGORY_RULES: list[tuple[list[str], str]] = [
-    (["iphone", "samsung galaxy", "pixel", "smartphone", "mobile phone", "ipad", "tablet"], "phones-tablets"),
-    (["laptop", "macbook", "notebook", "monitor", "keyboard", "mouse", "ssd", "gpu", "desktop", "pc "], "laptops-computers"),
-    (["tv", "television", "projector", "soundbar", "home theatre", "home theater"], "tvs-home-theatre"),
-    (["headphone", "earbud", "airpods", "speaker", "hi-fi", "hifi", " amp "], "audio-headphones"),
-    (["camera", "lens", "gopro", "drone"], "cameras-photo"),
-    (["playstation", "ps5", "xbox", "nintendo", "switch", "controller", "gaming"], "gaming"),
-    (["smart watch", "smartwatch", "fitbit", "garmin", "smart home", "echo", "alexa"], "wearables-smart-home"),
-    (["kitchen", "cookware", "coffee", "espresso", "kettle", "toaster", "microwave", "blender"], "kitchen-dining"),
-    (["sofa", "couch", "chair", "desk", "table", "wardrobe"], "furniture"),
-    (["rug", "wall art", "mirror", "lamp", "candle", "vase"], "home-decor-lighting"),
-    (["mattress", "linen", "towel", "quilt", "duvet", "pillow"], "bedroom-bath"),
-    (["vacuum", "robot vac", "mop", "cleaner"], "vacuums-cleaning"),
-    (["bbq", "garden", "outdoor", "lawn", "mower", "shed"], "garden-outdoor"),
-    (["drill", "impact driver", "grinder", "sander", "circular saw", "power tool"], "power-tools"),
-    (["hammer", "spanner", "wrench", "screwdriver", "plier", "tape measure"], "hand-tools"),
-    (["dash cam", "car ", "auto ", "tyre", "engine oil", "towbar"], "automotive"),
-    (["workbench", "tool cabinet", "tool box", "workshop"], "workshop-storage"),
-    (["hi-vis", "safety boot", "ppe", "helmet", "gloves"], "safety-workwear"),
-    (["men's ", "mens shirt", "mens jeans", "mens jacket", "mens hoodie"], "mens-clothing"),
-    (["women's ", "womens dress", "womens top", "womens jeans"], "womens-clothing"),
-    (["shoe", "sneaker", "boot", "sandal"], "shoes-sneakers"),
-    (["watch", "ring ", "necklace", "bracelet", "earring"], "watches-jewellery"),
-    (["dumbbell", "bench press", "treadmill", "yoga", "gym", "exercise bike"], "fitness-gym"),
-    (["tent", "sleeping bag", "hiking", "camping"], "outdoor-camping"),
-    (["bike", "bicycle", "cycling", "mtb"], "cycling"),
-    (["lego", "building block", "brick"], "lego-building"),
-    (["board game", "card game", "puzzle"], "board-games-puzzles"),
-    (["pokemon", "trading card", "figurine", "funko", "collectible"], "collectibles-trading-cards"),
-]
-
-# Map eBay's own top-level breadcrumb crumbs to the closest store slug.
-_EBAY_BREADCRUMB_MAP: dict[str, str] = {
-    "cell phones & accessories": "phones-tablets",
-    "mobile phones & communication": "phones-tablets",
-    "computers/tablets & networking": "laptops-computers",
-    "computers, tablets & network hardware": "laptops-computers",
-    "tv, video & home audio": "tvs-home-theatre",
-    "sound & vision": "tvs-home-theatre",
-    "cameras & photo": "cameras-photo",
-    "video games & consoles": "gaming",
-    "smart home": "wearables-smart-home",
-    "jewellery & watches": "watches-jewellery",
-    "jewelry & watches": "watches-jewellery",
-    "home & garden": "home-decor-lighting",
-    "kitchen, dining & bar": "kitchen-dining",
-    "small kitchen appliances": "kitchen-dining",
-    "furniture": "furniture",
-    "bedding": "bedroom-bath",
-    "vehicle parts & accessories": "automotive",
-    "auto parts & accessories": "automotive",
-    "business & industrial": "workshop-storage",
-    "power tools": "power-tools",
-    "hand tools": "hand-tools",
-    "clothing, shoes & accessories": "shoes-sneakers",
-    "men's clothing": "mens-clothing",
-    "women's clothing": "womens-clothing",
-    "sporting goods": "fitness-gym",
-    "cycling": "cycling",
-    "outdoor sports": "outdoor-camping",
-    "toys & hobbies": "lego-building",
-    "toys, hobbies": "lego-building",
-    "collectables": "collectibles-trading-cards",
-    "collectibles": "collectibles-trading-cards",
-    "trading card games": "collectibles-trading-cards",
-}
-
-
-def _match_rules(text: str) -> Optional[str]:
-    t = (text or "").lower()
-    if not t:
-        return None
-    for keywords, slug in _CATEGORY_RULES:
-        if any(k in t for k in keywords):
-            return slug
-    return None
-
-
-def _guess_category(
-    title: Optional[str] = None,
-    breadcrumbs: Optional[list[str]] = None,
-    specifics: Optional[dict] = None,
-) -> str:
-    """Guess a store category slug from (in priority): breadcrumbs, specifics, title."""
-    # 1. eBay breadcrumb — walk from leaf → root, prefer more specific matches
-    for crumb in reversed(breadcrumbs or []):
-        c = crumb.lower().strip()
-        if c in _EBAY_BREADCRUMB_MAP:
-            return _EBAY_BREADCRUMB_MAP[c]
-        # Try partial match against the map keys
-        for key, slug in _EBAY_BREADCRUMB_MAP.items():
-            if key in c or c in key:
-                return slug
-        # Fall back to keyword rules on the crumb text
-        hit = _match_rules(c)
-        if hit:
-            return hit
-
-    # 2. Item specifics — Brand / Type / Category / Model / Sub-Type
-    if specifics:
-        for key in ("Category", "Sub-Type", "Type", "Product Type", "Model", "Brand"):
-            v = specifics.get(key)
-            if v:
-                hit = _match_rules(str(v))
-                if hit:
-                    return hit
-
-    # 3. Title
-    hit = _match_rules(title or "")
-    return hit or "other"
-
 
 # ---------------------------------------------------------------------------
 # Notifications (price-change alerts)
 # ---------------------------------------------------------------------------
 
-class Notification(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    # type ∈ price_change | new_order | out_of_stock | low_stock | order_status | new_customer
-    type: str = "price_change"
-    title: Optional[str] = None
-    body: Optional[str] = None
-    # Deep-link target: any of these tells the frontend where to route on click.
-    product_id: Optional[str] = None
-    order_id: Optional[str] = None
-    customer_id: Optional[str] = None
-    item_id: Optional[str] = None
-    ebay_url: Optional[str] = None
-    # Visuals
-    product_title: Optional[str] = None
-    image: Optional[str] = None
-    # Price-change specifics (retained for existing rows)
-    old_price: Optional[float] = None
-    new_price: Optional[float] = None
-    old_sell: Optional[float] = None
-    new_sell: Optional[float] = None
-    old_profit: Optional[float] = None
-    new_profit: Optional[float] = None
-    old_margin_pct: Optional[float] = None
-    new_margin_pct: Optional[float] = None
-    delta_margin: Optional[float] = None
-    # Generic payload for the newer types (kept flexible)
-    data: dict = Field(default_factory=dict)
-    at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    read: bool = False
-
 
 # ---------------------------------------------------------------------------
 # Push channels (Email via Resend + Telegram)
 # ---------------------------------------------------------------------------
-PUSH_SETTINGS_DEFAULTS: dict = {
-    "id": "singleton",
-    "email_enabled": True,
-    "telegram_enabled": True,
-    "critical_only": True,           # if True, only pushes critical types (see PUSH_CRITICAL_TYPES)
-    "margin_drop_threshold_pp": 3.0, # for price_change: skip unless margin drops by ≥ this many percentage points
-    "resend_api_key": "",
-    "resend_to_email": "",
-    "resend_from_email": "",
-    "telegram_bot_token": "",
-    "telegram_chat_id": "",
-}
-PUSH_CRITICAL_TYPES = {"new_order", "out_of_stock", "price_change"}
-
-
-async def _get_push_settings() -> dict:
-    doc = await db.push_settings.find_one({"id": "singleton"}, {"_id": 0})
-    if not doc:
-        await db.push_settings.insert_one({**PUSH_SETTINGS_DEFAULTS})
-        return {**PUSH_SETTINGS_DEFAULTS}
-    return {**PUSH_SETTINGS_DEFAULTS, **doc}
-
-
-def _mask(s: Optional[str]) -> str:
-    if not s: return ""
-    if len(s) <= 6: return "•" * len(s)
-    return f"{s[:3]}••••{s[-3:]}"
-
-
-async def _get_credential(field: str) -> str:
-    """Read a stored credential from the singleton settings doc."""
-    settings = await _get_push_settings()
-    return settings.get(field) or ""
-
-
-async def _push_channel_status() -> dict:
-    settings = await _get_push_settings()
-    email_key = settings.get("resend_api_key") or ""
-    email_to  = settings.get("resend_to_email") or ""
-    tg_tok    = settings.get("telegram_bot_token") or ""
-    tg_chat   = settings.get("telegram_chat_id") or ""
-    return {
-        "email_configured": bool(email_key and email_to),
-        "telegram_configured": bool(tg_tok and tg_chat),
-    }
-
-
-def _notif_is_critical(n: dict, settings: dict) -> bool:
-    """Decide if a notification should push based on user settings."""
-    if not settings.get("critical_only"):
-        return True
-    if n.get("type") not in PUSH_CRITICAL_TYPES:
-        return False
-    if n.get("type") == "price_change":
-        threshold = float(settings.get("margin_drop_threshold_pp") or 0)
-        delta = float(n.get("delta_margin") or 0)
-        return delta <= -threshold  # margin drop of at least `threshold` pp
-    return True
-
-
-async def _send_email(subject: str, html: str) -> None:
-    settings = await _get_push_settings()
-    key = settings.get("resend_api_key")
-    to  = settings.get("resend_to_email")
-    frm = settings.get("resend_from_email") or "onboarding@resend.dev"
-    if not key or not to:
-        return
-    resend.api_key = key
-    try:
-        await asyncio.to_thread(resend.Emails.send, {
-            "from": frm, "to": [to], "subject": subject, "html": html,
-        })
-    except Exception as e:
-        logger.warning(f"[push] Resend send failed: {e}")
-
-
-async def _send_telegram(text: str) -> None:
-    settings = await _get_push_settings()
-    token = settings.get("telegram_bot_token")
-    chat_id = settings.get("telegram_chat_id")
-    if not token or not chat_id:
-        return
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            await client.post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-                      "disable_web_page_preview": True},
-            )
-    except Exception as e:
-        logger.warning(f"[push] Telegram send failed: {e}")
-
-
-def _format_notification_html(n: dict) -> tuple[str, str, str]:
-    """Return (subject, html_body, plain_text_for_telegram) for a notification."""
-    t = n.get("type")
-    title = n.get("title") or "Notification"
-    body = n.get("body") or ""
-    at = n.get("at") or ""
-
-    # Type-specific rows
-    rows: list[tuple[str, str]] = []
-    if t == "price_change":
-        rows += [
-            ("Product",  n.get("product_title") or "—"),
-            ("Old eBay price", f"${(n.get('old_price') or 0):.2f}"),
-            ("New eBay price", f"${(n.get('new_price') or 0):.2f}"),
-            ("Old margin", f"{(n.get('old_margin_pct') or 0):.1f}%"),
-            ("New margin", f"{(n.get('new_margin_pct') or 0):.1f}%"),
-            ("Change",   f"{(n.get('delta_margin') or 0):+.1f} pp"),
-        ]
-    elif t == "new_order":
-        d = n.get("data") or {}
-        rows += [
-            ("Customer", d.get("customer_name") or "—"),
-            ("Product",  n.get("product_title") or "—"),
-            ("Total",    f"${float(d.get('total') or 0):.2f}"),
-            ("Quantity", str(d.get("quantity") or 1)),
-        ]
-    elif t == "out_of_stock":
-        rows += [("Product", n.get("product_title") or "—"),
-                 ("eBay listing", n.get("ebay_url") or "—")]
-    elif t == "low_stock":
-        d = n.get("data") or {}
-        rows += [("Product", n.get("product_title") or "—"),
-                 ("Stock left", str(d.get("stock")))]
-    elif t == "order_status":
-        d = n.get("data") or {}
-        rows += [("Order", (n.get('order_id') or '')[:8]),
-                 ("Change", f"{d.get('old_status')} → {d.get('new_status')}"),
-                 ("Customer", d.get("customer_name") or "—")]
-    elif t == "new_customer":
-        d = n.get("data") or {}
-        rows += [("Name", d.get("name") or "—"),
-                 ("Email", d.get("email") or "—"),
-                 ("Group", d.get("group") or "—")]
-
-    row_html = "".join(
-        f'<tr><td style="padding:6px 12px;color:#64748B;font-size:12px;">{k}</td>'
-        f'<td style="padding:6px 12px;color:#0F172A;font-size:13px;">{v}</td></tr>'
-        for k, v in rows
-    )
-    html = f"""<!doctype html>
-<html><body style="font-family:Arial,sans-serif;background:#F7F7FB;padding:32px;color:#0F172A;">
-  <table role="presentation" cellspacing="0" cellpadding="0" width="100%" style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #EAEAF0;border-radius:12px;overflow:hidden;">
-    <tr><td style="padding:20px 24px;background:linear-gradient(135deg,#4F46E5,#EC4899);color:#fff;">
-      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:0.85;">{t.upper()}</div>
-      <div style="font-size:20px;font-weight:700;margin-top:4px;">{title}</div>
-    </td></tr>
-    <tr><td style="padding:16px 24px;color:#334155;font-size:14px;">{body}</td></tr>
-    <tr><td style="padding:0 12px 12px 12px;"><table cellspacing="0" cellpadding="0" width="100%" style="border-collapse:collapse;">{row_html}</table></td></tr>
-    <tr><td style="padding:12px 24px 20px 24px;color:#94A3B8;font-size:11px;">Sent {at}</td></tr>
-  </table>
-</body></html>"""
-    plain_lines = [f"<b>{title}</b>", body] + [f"{k}: {v}" for k, v in rows]
-    return f"[{t}] {title}", html, "\n".join(plain_lines)
-
-
-async def _push_notification(n: dict) -> None:
-    """Fire push channels for a notification if it qualifies."""
-    try:
-        settings = await _get_push_settings()
-        if not _notif_is_critical(n, settings):
-            return
-        subject, html, plain = _format_notification_html(n)
-        tasks = []
-        if settings.get("email_enabled", True):
-            tasks.append(_send_email(subject, html))
-        if settings.get("telegram_enabled", True):
-            tasks.append(_send_telegram(plain))
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-    except Exception as e:
-        logger.warning(f"[push] pipeline failed: {e}")
-
-
-class PushSettingsUpdate(BaseModel):
-    email_enabled: Optional[bool] = None
-    telegram_enabled: Optional[bool] = None
-    critical_only: Optional[bool] = None
-    margin_drop_threshold_pp: Optional[float] = None
-    resend_api_key: Optional[str] = None
-    resend_to_email: Optional[str] = None
-    resend_from_email: Optional[str] = None
-    telegram_bot_token: Optional[str] = None
-    telegram_chat_id: Optional[str] = None
 
 
 @api_router.get("/push/settings")
@@ -2403,65 +1151,6 @@ async def push_test():
     return results
 
 
-async def _emit_notification(**kwargs) -> dict:
-    """Insert a notification document and return it (minus _id)."""
-    n = Notification(**kwargs)
-    doc = n.model_dump()
-    await db.notifications.insert_one(doc)
-    doc.pop("_id", None)
-    # Fire push channels in the background — don't block the request
-    try:
-        asyncio.create_task(_push_notification(doc))
-    except Exception as e:
-        logger.warning(f"[push] scheduling failed: {e}")
-    return doc
-
-
-async def _emit_price_change_notifications(item: dict, new_image: Optional[str], new_title: str,
-                                           old_price: float, new_price: float, now_iso: str) -> None:
-    """Create a notification for each product linked to this scraped item."""
-    ebay_item_id = item.get("item_id") or item.get("id")
-    if not ebay_item_id:
-        return
-    rules = await _load_pricing_rules()
-    old_calc = calc_pricing(old_price, rules=rules)
-    new_calc = calc_pricing(new_price, rules=rules)
-
-    def margin_pct(sell: float, cost: float) -> float:
-        return round(((sell - cost) / sell) * 100, 2) if sell > 0 else 0.0
-
-    old_margin = margin_pct(old_calc["sell_price"], old_price)
-    new_margin = margin_pct(new_calc["sell_price"], new_price)
-
-    products = await db.products.find(
-        {"source_item_id": ebay_item_id}, {"_id": 0, "id": 1, "title": 1, "images": 1}
-    ).to_list(50)
-
-    # No linked products yet — still emit one notification tied to the scraped item so
-    # the user sees eBay-side price movement in their bell drop-down.
-    targets = products or [{"id": None, "title": new_title, "images": item.get("images") or []}]
-
-    for p in targets:
-        n = Notification(
-            product_id=p.get("id"),
-            product_title=p.get("title") or new_title,
-            image=(p.get("images") or [None])[0] or new_image,
-            ebay_url=item.get("url"),
-            item_id=ebay_item_id,
-            old_price=round(float(old_price), 2),
-            new_price=round(float(new_price), 2),
-            old_sell=old_calc["sell_price"],
-            new_sell=new_calc["sell_price"],
-            old_profit=old_calc["profit"],
-            new_profit=new_calc["profit"],
-            old_margin_pct=old_margin,
-            new_margin_pct=new_margin,
-            delta_margin=round(new_margin - old_margin, 2),
-            at=now_iso,
-        )
-        await db.notifications.insert_one(n.model_dump())
-
-
 @api_router.get("/notifications")
 async def list_notifications(unread_only: bool = False, limit: int = Query(50, le=200)):
     q: dict = {}
@@ -2490,100 +1179,6 @@ async def mark_all_notifications_read():
 # ---------------------------------------------------------------------------
 # Pricing (rules-aware sell/profit + tier CRUD)
 # ---------------------------------------------------------------------------
-
-def calc_pricing(ebay_price: float, rules: Optional[list[dict]] = None,
-                 margin_pct: float = 20.0, min_profit: float = 20.0) -> dict:
-    """Compute sell + profit from an eBay price.
-
-    - If `rules` are provided, walk them in `sort_order` and pick the first active rule
-      whose min_price <= ebay < max_price (max_price=None means +inf). Apply either
-      `flat` ($) or `percent` (%).
-    - If no rule matches (or `rules` is None/empty), fall back to `sell = ebay * (1 +
-      margin_pct/100) + min_profit`.
-    """
-    ebay = round(float(ebay_price or 0), 2)
-    if ebay <= 0:
-        return {"ebay_price": 0.0, "sell_price": 0.0, "profit": 0.0, "matched_rule": None}
-
-    matched = None
-    if rules:
-        for r in rules:
-            if not r.get("active", True):
-                continue
-            min_p = float(r.get("min_price") or 0)
-            max_p = r.get("max_price")
-            max_ok = (max_p is None) or (ebay < float(max_p))
-            if ebay >= min_p and max_ok:
-                matched = r
-                break
-
-    if matched:
-        if matched["kind"] == "percent":
-            sell = ebay * (1 + float(matched["value"]) / 100.0)
-        else:  # flat
-            sell = ebay + float(matched["value"])
-    else:
-        sell = ebay * (1 + margin_pct / 100.0) + min_profit
-
-    sell = round(sell, 2)
-    return {
-        "ebay_price": ebay,
-        "sell_price": sell,
-        "profit": round(sell - ebay, 2),
-        "matched_rule": (
-            {k: matched[k] for k in ("id", "label", "min_price", "max_price", "kind", "value")}
-            if matched else None
-        ),
-    }
-
-
-class PricingRuleBase(BaseModel):
-    label: Optional[str] = ""
-    min_price: float = 0.0
-    max_price: Optional[float] = None  # None = infinity
-    kind: str = "flat"  # "flat" | "percent"
-    value: float = 0.0
-    active: bool = True
-    sort_order: int = 0
-
-
-class PricingRule(PricingRuleBase):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-class PricingRuleUpdate(BaseModel):
-    label: Optional[str] = None
-    min_price: Optional[float] = None
-    max_price: Optional[float] = None
-    kind: Optional[str] = None
-    value: Optional[float] = None
-    active: Optional[bool] = None
-    sort_order: Optional[int] = None
-
-
-_DEFAULT_PRICING_RULES = [
-    {"label": "Tiny items",  "min_price": 1,   "max_price": 5,    "kind": "flat",    "value": 2,  "sort_order": 10},
-    {"label": "Cheap",       "min_price": 5,   "max_price": 20,   "kind": "flat",    "value": 5,  "sort_order": 20},
-    {"label": "Mid",         "min_price": 20,  "max_price": 50,   "kind": "flat",    "value": 15, "sort_order": 30},
-    {"label": "Premium",     "min_price": 50,  "max_price": 100,  "kind": "percent", "value": 20, "sort_order": 40},
-    {"label": "High-ticket", "min_price": 100, "max_price": None, "kind": "percent", "value": 15, "sort_order": 50},
-]
-
-
-async def _ensure_pricing_rules_seeded() -> None:
-    if await db.pricing_rules.count_documents({}) > 0:
-        return
-    for r in _DEFAULT_PRICING_RULES:
-        rule = PricingRule(**r)
-        await db.pricing_rules.insert_one(rule.model_dump())
-    logger.info(f"Seeded {len(_DEFAULT_PRICING_RULES)} pricing rules")
-
-
-async def _load_pricing_rules() -> list[dict]:
-    cursor = db.pricing_rules.find({"active": True}, {"_id": 0}).sort("sort_order", 1)
-    return await cursor.to_list(500)
 
 
 @api_router.get("/pricing-rules")
@@ -2772,8 +1367,42 @@ async def restore_product(pid: str):
     return await db.products.find_one({"id": pid}, {"_id": 0})
 
 
-class BulkProductIds(BaseModel):
-    product_ids: List[str]
+@api_router.post("/products/{pid}/refresh")
+async def refresh_product_from_ebay(pid: str):
+    """Re-scrape the linked eBay listing and mirror title / price / images / variants /
+    stock_status onto this product. Requires source_url on the product."""
+    p = await db.products.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+    url = p.get("source_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="This product isn't linked to an eBay URL — nothing to refresh.")
+    try:
+        validate_ebay_au_url(url)
+        html = await fetch_html(url)
+        data = await parse_and_enrich(html, url)
+    except NotEbayAUError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except BlockedError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except ScrapeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    new_status = data.get("stock_status") or ("sold" if data.get("is_sold") else "live")
+    now = datetime.now(timezone.utc).isoformat()
+    update = {
+        "title": data.get("title") or p.get("title"),
+        "images": data.get("images") or p.get("images") or [],
+        "variants": data.get("variants") or [],
+        "cost": data.get("price_value") if data.get("price_value") is not None else p.get("cost"),
+        "stock_status": new_status,
+        "is_sold": new_status != "live",
+        "active": p.get("active") if new_status == "live" else False,
+        "description": data.get("description") or p.get("description"),
+        "updated_at": now,
+    }
+    await db.products.update_one({"id": pid}, {"$set": update})
+    return await db.products.find_one({"id": pid}, {"_id": 0})
 
 
 @api_router.post("/products/bulk-archive")

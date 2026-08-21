@@ -1,0 +1,37 @@
+{
+  "summary": "Tested new full-page Product Detail and Order Detail refactor (replacing modals). Backend: 10/10 pytest tests pass (refresh endpoint 4 + detail-pages regression 6). Frontend: full product-detail-page and order-detail-page render with every required data-testid, images strip renders 20 images, variants table renders 6 rows, save button disabled/enabled dirty state works, refresh button correctly enabled (has source_url), change-category popover opens, back button collapses detail, deep-link from global search opens ProductDetailPage, deep-link from notifications opens ProductDetailPage. Order status tracker exposes all 7 buttons and PATCH to /api/orders/{id} works. Customer + delivery address cards render with fallback text.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "App (multiple pages)", "issues": ["React hydration warning: '<span> cannot be a child of <option>' — a <span> is rendered inside a native <select><option>. Non-blocking but should be cleaned up to avoid hydration errors."]},
+      {"screen": "Dashboard charts", "issues": ["Recharts logs 'width(-1) height(-1)' warnings on initial mount — container likely has 0 dimensions during first paint. Cosmetic but noisy in console."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_product_refresh_endpoint.py",
+    "/app/backend/tests/test_detail_pages_backend.py",
+    "/app/test_reports/pytest/refresh_results.xml",
+    "/app/test_reports/pytest/detail_pages_backend.xml"
+  ],
+  "action_items": [
+    "Optional: remove <span> wrapper inside <option> elements in Select components (hydration warning).",
+    "Optional: set explicit min height on recharts container to silence width/height warnings."
+  ],
+  "critical_code_review_comments": [
+    "ProductDetailPage/OrderDetailPage are inside App.js (~4000+ lines total). Consider extracting into /app/frontend/src/pages/ for maintainability — App.js is well over the 700-line guideline.",
+    "Old ProductEditModal + OrderDetailsModal remain in-file but unused; safe to delete to prevent confusion.",
+    "product-code-input uses readonly HTML attr correctly (verified). Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_detail_pages_backend.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "N/A — admin endpoints unauthenticated per problem statement.",
+  "seed_data_creation": "Only ephemeral TEST_ prefixed products created and torn down inside pytest fixtures.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "AF21-PC0826 product (id 9b4d4c82-b75b-461a-bd22-99fcf69930c5) is the seeded smoke-test product (20 images, 6 variants, has source_url so Refresh button enabled). TF21-PC0826-2 is the seeded order (no shipping_address so 'No delivery address on file.' fallback renders). Both detail pages render inside their sidebar module (Products/Orders); leaving the module via top-level nav collapses the detail. Sub-nav within same module preserves the detail view.",
+  "rca of the issue": "No blocking issues found."
+}

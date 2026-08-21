@@ -13,6 +13,7 @@ import pytest
 
 sys.path.insert(0, "/app/backend")
 import server  # noqa: E402
+import helpers  # noqa: E402
 
 
 def _run(coro):
@@ -48,7 +49,7 @@ class TestSchedulerHistoryAndRetry:
     def test_manual_success_appends_history(self, monkeypatch):
         async def _fake(**kw):
             return {"refreshed": 5, "sold_found": 1, "failed": 0, "total": 5}
-        monkeypatch.setattr(server, "_refresh_all_items", _fake)
+        monkeypatch.setattr(helpers, "_refresh_all_items", _fake)
 
         summary = _run(server._refresh_all_and_record(trigger="manual", attempt=1))
         assert summary["refreshed"] == 5
@@ -68,7 +69,7 @@ class TestSchedulerHistoryAndRetry:
     def test_history_capped_at_20(self, monkeypatch):
         async def _fake(**kw):
             return {"refreshed": 1, "sold_found": 0, "failed": 0, "total": 1}
-        monkeypatch.setattr(server, "_refresh_all_items", _fake)
+        monkeypatch.setattr(helpers, "_refresh_all_items", _fake)
         for _ in range(25):
             _run(server._refresh_all_and_record(trigger="manual", attempt=1))
         sched = _run(server._get_scraper_schedule())
@@ -77,7 +78,7 @@ class TestSchedulerHistoryAndRetry:
     def test_newest_first(self, monkeypatch):
         async def _fake(**kw):
             return {"refreshed": 1, "sold_found": 0, "failed": 0, "total": 1}
-        monkeypatch.setattr(server, "_refresh_all_items", _fake)
+        monkeypatch.setattr(helpers, "_refresh_all_items", _fake)
         _run(server._refresh_all_and_record(trigger="manual", attempt=1))
         _run(server._refresh_all_and_record(trigger="manual", attempt=1))
         sched = _run(server._get_scraper_schedule())
@@ -88,7 +89,7 @@ class TestSchedulerHistoryAndRetry:
     def test_scheduled_failure_queues_retry(self, monkeypatch):
         async def _fail(**kw):
             return {"refreshed": 0, "sold_found": 0, "failed": 3, "total": 3}
-        monkeypatch.setattr(server, "_refresh_all_items", _fail)
+        monkeypatch.setattr(helpers, "_refresh_all_items", _fail)
 
         _run(server._refresh_all_and_record(trigger="scheduled", attempt=1))
         sched = _run(server._get_scraper_schedule())
@@ -106,7 +107,7 @@ class TestSchedulerHistoryAndRetry:
     def test_exception_also_queues_retry(self, monkeypatch):
         async def _boom(**kw):
             raise RuntimeError("boom-network")
-        monkeypatch.setattr(server, "_refresh_all_items", _boom)
+        monkeypatch.setattr(helpers, "_refresh_all_items", _boom)
 
         _run(server._refresh_all_and_record(trigger="scheduled", attempt=1))
         sched = _run(server._get_scraper_schedule())
@@ -118,7 +119,7 @@ class TestSchedulerHistoryAndRetry:
     def test_retry_success_clears_pending(self, monkeypatch):
         async def _fail(**kw):
             return {"refreshed": 0, "sold_found": 0, "failed": 2, "total": 2}
-        monkeypatch.setattr(server, "_refresh_all_items", _fail)
+        monkeypatch.setattr(helpers, "_refresh_all_items", _fail)
         _run(server._refresh_all_and_record(trigger="scheduled", attempt=1))
         sched = _run(server._get_scraper_schedule())
         rp = sched["retry_pending"]
@@ -126,7 +127,7 @@ class TestSchedulerHistoryAndRetry:
 
         async def _ok(**kw):
             return {"refreshed": 2, "sold_found": 0, "failed": 0, "total": 2}
-        monkeypatch.setattr(server, "_refresh_all_items", _ok)
+        monkeypatch.setattr(helpers, "_refresh_all_items", _ok)
         _run(server._refresh_all_and_record(trigger="retry", attempt=2, original_run_id=rp["original_run_id"]))
 
         sched = _run(server._get_scraper_schedule())
@@ -139,7 +140,7 @@ class TestSchedulerHistoryAndRetry:
     def test_retry_failure_marks_dead(self, monkeypatch):
         async def _fail(**kw):
             return {"refreshed": 0, "sold_found": 0, "failed": 4, "total": 4}
-        monkeypatch.setattr(server, "_refresh_all_items", _fail)
+        monkeypatch.setattr(helpers, "_refresh_all_items", _fail)
         _run(server._refresh_all_and_record(trigger="scheduled", attempt=1))
         sched = _run(server._get_scraper_schedule())
         rp = sched["retry_pending"]
@@ -153,7 +154,7 @@ class TestSchedulerHistoryAndRetry:
     def test_manual_failure_does_not_queue_retry(self, monkeypatch):
         async def _fail(**kw):
             return {"refreshed": 0, "sold_found": 0, "failed": 1, "total": 1}
-        monkeypatch.setattr(server, "_refresh_all_items", _fail)
+        monkeypatch.setattr(helpers, "_refresh_all_items", _fail)
         _run(server._refresh_all_and_record(trigger="manual", attempt=1))
         sched = _run(server._get_scraper_schedule())
         assert sched["retry_pending"] is None
@@ -162,7 +163,7 @@ class TestSchedulerHistoryAndRetry:
     def test_clear_history_wipes_entries(self, monkeypatch):
         async def _fake(**kw):
             return {"refreshed": 1, "sold_found": 0, "failed": 0, "total": 1}
-        monkeypatch.setattr(server, "_refresh_all_items", _fake)
+        monkeypatch.setattr(helpers, "_refresh_all_items", _fake)
         _run(server._refresh_all_and_record(trigger="manual", attempt=1))
 
         _run(server.clear_scraper_history())

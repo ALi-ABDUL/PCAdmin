@@ -1,0 +1,33 @@
+{
+  "summary": "Post-refactor verification (backend split: server.py + helpers.py + models.py + deps.py; frontend split: App.js + lib/* + components/* + pages/*). Backend: all 84 existing pytest tests PASS (62.9s). Added 14 new refactor smoke tests covering every endpoint called out in review (scraper/schedule, products list+archived+search, global search, portal register/login/me/orders, orders CRUD + status cycle pending->processing->shipped->delivered, notifications, push settings, push test, analytics overview + report) — 14/14 PASS. Frontend: dashboard + all 10 sidebar nav destinations render with zero console errors; global search dropdown returns 1 product + 3 orders for 'AF21' (data-testids search-product-* / search-order-*); notification bell shows 25 notifications and deep-link click opens ProductDetail/OrderDetail; Customer Portal login as aliko@yopmail.com/secret123 succeeds and renders exactly 3 order cards (Pending / Paid / Delivered) with correct review-gating (Write-a-review CTA on paid+delivered, 'Review available once processed' on pending). Refactor did NOT introduce regressions.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Global (carryover from iteration_6)", "issues": ["React hydration warning: '<span> cannot be a child of <option>' still present in Select components — non-blocking.", "Recharts 'width(-1) height(-1)' warnings on first paint of dashboard — cosmetic."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_refactor_smoke.py",
+    "/app/test_reports/pytest/iteration_7_results.xml",
+    "/app/test_reports/pytest/iteration_7_smoke.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py at 1862 lines is still above the 700-line guideline — consider a further router-level split (products.py / orders.py / portal.py / analytics.py) but non-blocking; endpoint boundaries are already clean.",
+    "OrderCreate model accepts only single product_id + quantity (no line-items array) — fine given current UI, but if the storefront ever needs multi-line orders this will need to evolve.",
+    "Product/Order/Notification list endpoints return a paginated envelope {items[], total}. Previous test assumed bare lists — envelope shape is fine and consistent, just document it.",
+    "Two on_event(startup/shutdown) usages in server.py trigger DeprecationWarnings — migrate to lifespan handlers when convenient."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_refactor_smoke.py (new — 14 endpoint smoke tests)"
+  ],
+  "success_rate": {"backend": "100% (98/98)", "frontend": "100%"},
+  "test_credentials": "Customer Portal: aliko@yopmail.com / secret123 (already registered — 3 seeded orders).",
+  "seed_data_creation": "Ephemeral TEST_cycle_* orders created and immediately deleted inside status-cycle test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend list endpoints return {products|orders|notifications: [...], total: N} envelopes — not bare arrays. OrderCreate schema requires top-level product_id + quantity (not items[]). aliko@yopmail.com has 3 orders with statuses pending/paid/delivered — the write-review CTA only renders on paid+delivered per business rule. Portal testids: portal-email, portal-password, portal-submit, portal-tab-login/register, portal-order-<oid>, portal-write-review-<oid>, portal-signout, portal-dashboard. Global search testids: global-search-input, global-search-dropdown, search-product-<pid>, search-order-<oid>.",
+  "rca of the issue": "No issues found — refactor is clean."
+}

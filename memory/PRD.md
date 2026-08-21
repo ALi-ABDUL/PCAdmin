@@ -414,11 +414,44 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
 - Public storefront reading /api/products (would consume `GET /api/products/{id}/reviews` already implemented)
 - Admin authentication
 - Product ↔ supplier linking (kept minimal after suppliers refactor)
-- Refactor `App.js` (~4300 lines) into per-module files: `Suppliers.jsx`,
-  `ScraperPage.jsx`, `ProductsPage.jsx`, `PriceHistoryChart.jsx`,
-  `CustomerPortal.jsx`, `nav.js`.
 - Replace N+1 pattern in `_build_sellers()` with a single `$lookup` aggregation
   when seller count grows beyond ~500.
+
+## Modular refactor (2026-02-21) ✅
+Split both monolithic files into cohesive modules while preserving 100% behavior.
+
+**Backend** (server.py 3272 → 1862 lines, +3 new modules):
+- `deps.py` (22 lines) — `app`, `api_router`, `db`, `client`, `logger` + env load
+- `models.py` (580 lines) — All 58 Pydantic classes + data constants (CATEGORIES,
+  SEED_CATEGORIES, PUSH_SETTINGS_DEFAULTS, SCRAPER_SCHEDULE_DEFAULTS, JWT config,
+  category rules, AU address suburbs, etc.)
+- `helpers.py` (851 lines) — All 42 helper functions: pricing, JWT/auth,
+  scheduler, notifications (email/telegram), category classifier, seller
+  aggregator, seeders, backfills
+- `server.py` — endpoints only + startup + shutdown + CORS + image proxy
+
+**Frontend** (App.js 5197 → 167 lines, +30 new modules):
+- `lib/api.js` — API base, KEYS, proxyImg, loadKeys
+- `lib/format.js` — money, fmtDate, humaniseStatus
+- `lib/pricing.js` — usePricingRules hook + calcPricing cache
+- `lib/nav.js` — all sidebar NAV constants + ORDER_STATUSES + ORDER_STATUS_STYLE
+- `lib/portal-auth.js` — usePortalAuth hook + PORTAL_TOKEN_KEY
+- `components/icons.jsx` — ICON_MAP + CatIcon
+- `components/layout.jsx` — Sidebar + SubSideNav + SubMobileNav
+- `components/header.jsx` — TopHeader + GlobalSearch + NotificationBell
+- `components/atoms.jsx` — StatusChip, statusBadge, StatBox, InfoBox, KpiCard,
+  SubHero, ScaffoldList, Field
+- `components/modals/{ItemModal,ProductEditModal,CategoryEditModal,OrderDetailsModal}.jsx`
+- `pages/{Dashboard,Suppliers,Customers,CustomerPortal,Products,ProductsList,ArchivedProducts,ProductDetail,Orders,OrderDetail,Payments,Store,Categories,Scraper,Analytics,Settings}.jsx`
+
+**Testing**: iteration_7.json — all 84 pytest tests PASS + 14 new refactor
+smoke tests PASS + full frontend regression (Dashboard, Products, Orders,
+Analytics, Categories, Scraper, Customer Portal login as aliko, Global Search,
+Notification Bell deep-links) — zero regressions detected.
+
+**Test-suite update**: `tests/test_scheduler_history_and_retry.py`
+`monkeypatch.setattr(server, "_refresh_all_items", …)` was changed to
+`monkeypatch.setattr(helpers, …)` to reflect the new module boundary.
 
 ## Test coverage
 - `/app/backend/tests/test_suppliers_and_items.py` — 12 pytest cases (all pass).
@@ -438,4 +471,5 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
 - `/app/backend/tests/test_variants_and_search.py` — 10 pytest cases (all pass)
   covering variant scraper, review aggregates, bulk archive/delete, global
   search, and restock code-path presence.
-- Latest iteration report: `/app/test_reports/iteration_5.json` (100% backend & frontend).
+- Latest iteration report: `/app/test_reports/iteration_7.json` (100% backend & frontend
+  post-refactor).

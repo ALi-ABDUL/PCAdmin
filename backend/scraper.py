@@ -747,29 +747,96 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
         if m: location = m.group(1).strip()
 
     # --- Sold / ended / out-of-stock detection ------------------------------
+    # Only mark non-live when eBay explicitly signals it via structured data
+    # or its own status banner. We NEVER string-match against the raw HTML
+    # (which contains scripts, JSON blobs, recommendations, footer help copy,
+    # and other noise that would poison a live listing into a sold state).
     is_sold = False
     stock_status = "live"   # live | sold | ended | out_of_stock
-    lower_html = html.lower()
-    # 1) Seller ended the listing (no sale)
-    if ("this listing has ended" in lower_html
-        or "this listing was ended by the seller" in lower_html
-        or "the listing you're looking for has ended" in lower_html):
+
+    # 1) VISIBLE text banner — we compute the visible text after excluding
+    #    <script>/<style>/<noscript> content, so JSON blobs and inline JS
+    #    strings cannot false-positive our banner check. eBay renders "This
+    #    listing has ended" / "This item has been sold" as a user-visible
+    #    message when a listing is dead — the exact phrase seen on ebay.com.au.
+    visible_parts: list[str] = []
+    for txt in soup.find_all(string=True):
+        parent_name = getattr(txt.parent, "name", None) if txt.parent else None
+        if parent_name in ("script", "style", "noscript"):
+            continue
+        s = str(txt).strip()
+        if s:
+            visible_parts.append(s)
+    visible_text = " ".join(visible_parts).lower()
+    ended_signals = (
+        "this listing has ended",
+        "this listing was ended by the seller",
+        "the listing you're looking for has ended",
+        "the listing you are looking for has ended",
+    )
+    sold_signals = (
+        "this item has been sold",
+    )
+    if any(s in visible_text for s in ended_signals):
         is_sold = True
         stock_status = "ended"
-    # 2) Sold out / sold
-    elif ('itemavailability">soldout' in lower_html.replace(" ", "")
-        or 'itemavailability" content="https://schema.org/soldout' in lower_html
-        or re.search(r"this\s+item\s+has\s+sold", lower_html)
-        or "this item has been sold" in lower_html):
+    elif any(s in visible_text for s in sold_signals):
         is_sold = True
         stock_status = "sold"
-    # 3) Out of stock / no more units available (listing still live)
-    elif ('itemavailability">outofstock' in lower_html.replace(" ", "")
-        or 'itemavailability" content="https://schema.org/outofstock' in lower_html
-        or "out of stock" in lower_html
-        or "no longer available" in lower_html):
-        is_sold = True
-        stock_status = "out_of_stock"
+
+    # 2) Structured itemAvailability — microdata (`<meta itemprop="itemAvailability" content="…">`)
+    #    or plain-text `<span itemprop="itemAvailability">SoldOut</span>`. This
+    #    is the eBay-blessed structured signal for the listing's own availability.
+    if stock_status == "live":
+        avail_nodes = soup.select('[itemprop="itemAvailability" i]')  # case-insensitive attr match
+        for node in avail_nodes:
+            val = (node.get("content") or _text(node) or "").lower().replace(" ", "")
+            if not val:
+                continue
+            if "soldout" in val:
+                is_sold = True; stock_status = "sold"; break
+            if "outofstock" in val:
+                is_sold = True; stock_status = "out_of_stock"; break
+            if "discontinued" in val:
+                is_sold = True; stock_status = "ended"; break
+
+    # 3) Main product's JSON-LD offer.availability (schema.org). We look at the
+    #    top-level Product node only (not variant `hasVariant` offers) so a
+    #    single out-of-stock variant on a live listing does not flip the whole
+    #    product to sold.
+    if stock_status == "live":
+        for ld_json in re.findall(r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>', html, flags=re.DOTALL | re.IGNORECASE):
+            try:
+                payload = json.loads(ld_json.strip())
+            except Exception:
+                continue
+            candidates = payload if isinstance(payload, list) else [payload]
+            main_avail = None
+            for node in candidates:
+                if not isinstance(node, dict):
+                    continue
+                types = node.get("@type")
+                types = [types] if isinstance(types, str) else (types or [])
+                if not any((t or "").lower() == "product" for t in types):
+                    continue
+                offers = node.get("offers") or {}
+                if isinstance(offers, list):
+                    offers = offers[0] if offers else {}
+                if isinstance(offers, dict):
+                    a = (offers.get("availability") or "").lower()
+                    if a:
+                        main_avail = a
+                        break
+            if not main_avail:
+                continue
+            if "soldout" in main_avail:
+                is_sold = True; stock_status = "sold"; break
+            if "outofstock" in main_avail:
+                is_sold = True; stock_status = "out_of_stock"; break
+            if "discontinued" in main_avail:
+                is_sold = True; stock_status = "ended"; break
+            # instock / limitedavailability / preorder / backorder -> live (no change)
+            break
 
 
     # Description will be fetched separately from the iframe.

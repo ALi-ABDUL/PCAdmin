@@ -117,3 +117,80 @@ class TestScraperStockStatusClassification:
         data = self._parse(html)
         assert data["stock_status"] == "live"
         assert data["is_sold"] is False
+
+    # ---- False-positive regression tests (fresh live listings must remain live) ----
+
+    def test_scripts_saying_out_of_stock_do_not_flip_live_listing(self):
+        """A live listing whose <script> JSON blob contains the string
+        'out of stock' (e.g. recommendations metadata) must stay LIVE."""
+        html = """
+        <html><body>
+          <h1 class='x-item-title__mainTitle'>Fresh Live Product</h1>
+          <script>window.__DATA__ = { "recommendation": "these are out of stock: item-1" };</script>
+          <script type="application/ld+json">
+          {"@type":"Product","name":"Fresh Live Product",
+           "offers":{"@type":"Offer","price":"49.95","availability":"https://schema.org/InStock"}}
+          </script>
+        </body></html>
+        """
+        data = self._parse(html)
+        assert data["stock_status"] == "live", f"expected live, got {data['stock_status']}"
+        assert data["is_sold"] is False
+
+    def test_related_offer_out_of_stock_does_not_flip_main_product(self):
+        """When ONLY a related-item Offer says OutOfStock but the main Product
+        Offer says InStock, we must stay LIVE."""
+        html = """
+        <html><body>
+          <h1 class='x-item-title__mainTitle'>Fresh Live Product</h1>
+          <script type="application/ld+json">
+          [
+            {"@type":"BreadcrumbList","itemListElement":[]},
+            {"@type":"Product","name":"Fresh Live Product",
+             "offers":{"@type":"Offer","price":"49.95","availability":"https://schema.org/InStock"}},
+            {"@type":"ItemList","itemListElement":[
+              {"@type":"Offer","availability":"https://schema.org/OutOfStock"}
+            ]}
+          ]
+          </script>
+        </body></html>
+        """
+        data = self._parse(html)
+        assert data["stock_status"] == "live", f"expected live, got {data['stock_status']}"
+        assert data["is_sold"] is False
+
+    def test_footer_help_text_saying_no_longer_available_does_not_flip(self):
+        """The generic footer/help copy phrase 'no longer available' must NOT
+        mark a live listing as sold."""
+        html = """
+        <html><body>
+          <h1 class='x-item-title__mainTitle'>Fresh Live Product</h1>
+          <footer>If this listing is no longer available, please check back later.</footer>
+          <script type="application/ld+json">
+          {"@type":"Product","offers":{"@type":"Offer","availability":"https://schema.org/InStock"}}
+          </script>
+        </body></html>
+        """
+        data = self._parse(html)
+        assert data["stock_status"] == "live"
+        assert data["is_sold"] is False
+
+    def test_variant_out_of_stock_does_not_flip_main_product(self):
+        """When JSON-LD ProductGroup has a hasVariant with OutOfStock but the
+        main Product offer is InStock, the product must stay LIVE."""
+        html = """
+        <html><body>
+          <h1 class='x-item-title__mainTitle'>Fresh Live Product</h1>
+          <script type="application/ld+json">
+          {"@type":"Product","name":"Fresh Live Product",
+           "offers":{"@type":"Offer","availability":"https://schema.org/InStock"},
+           "hasVariant":[
+             {"@type":"Product","color":"Red","offers":{"availability":"https://schema.org/OutOfStock"}},
+             {"@type":"Product","color":"Blue","offers":{"availability":"https://schema.org/InStock"}}
+           ]}
+          </script>
+        </body></html>
+        """
+        data = self._parse(html)
+        assert data["stock_status"] == "live"
+        assert data["is_sold"] is False

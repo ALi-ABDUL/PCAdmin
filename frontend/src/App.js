@@ -13,7 +13,7 @@ import {
   Bike, Blocks, Puzzle, Tags, Palette,
   Store, CreditCard, Receipt, Undo2, Mail, MessageSquare, Menu, Layout, FileText, Building2,
   Globe, Activity, Cable, Lock, ChevronDown, Bell, BellOff, HelpCircle,
-  Factory, UserPlus, Upload, List, Award, ShieldCheck, PackageSearch, ClipboardList, LineChart as LineChartIcon, TrendingDown as TrendingDownIcon, History, BadgeCheck, Star as StarIcon,
+  Factory, UserPlus, Upload, List, Award, ShieldCheck, PackageSearch, ClipboardList, LineChart as LineChartIcon, TrendingDown as TrendingDownIcon, History, BadgeCheck, Star as StarIcon, CheckCircle2,
   UserCheck, UserX, Users2, Heart, MessageCircle, Ticket, MapPinned, StickyNote, Ban, Layers,
   Image as ImageLucide, GitBranch, Calculator, Boxes as BoxesIcon, PackagePlus, PackageMinus, PackageX, Warehouse, ClipboardCheck, XCircle, AlertTriangle, Clock as ClockIcon,
 } from "lucide-react";
@@ -438,6 +438,101 @@ function SubMobileNav({ nav, testPrefix, active, setActive }) {
   );
 }
 
+/* -------------------------- Global (top-bar) search -------------------------- */
+function GlobalSearch({ onNavigate }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState(null);   // {products, orders}
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!q.trim()) { setResults(null); return; }
+    const t = setTimeout(async () => {
+      setBusy(true);
+      try {
+        const { data } = await axios.get(`${API}/search`, { params: { q: q.trim(), limit: 8 }});
+        setResults(data);
+      } catch { setResults({ products: [], orders: [] }); }
+      finally { setBusy(false); }
+    }, 200);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  useEffect(() => {
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    if (open) document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const openProduct = (p) => { setOpen(false); setQ(""); onNavigate?.({ tab: "products", section: "all", filter: { productId: p.id } }); };
+  const openOrder   = (o) => { setOpen(false); setQ(""); onNavigate?.({ tab: "orders",   section: "all", filter: { orderId: o.id } }); };
+
+  const hasHits = results && (results.products.length + results.orders.length) > 0;
+
+  return (
+    <div ref={ref} className="hidden lg:block relative">
+      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--dim)]"/>
+      <input
+        value={q}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => q && setOpen(true)}
+        placeholder="Search products, orders, or codes…"
+        className="input pl-9 pr-3 py-2 text-sm w-72"
+        data-testid="global-search-input"
+      />
+      {open && q && (
+        <div className="absolute right-0 top-11 w-[420px] max-w-[92vw] bg-white border hairline shadow-2xl rounded-xl overflow-hidden z-50" data-testid="global-search-dropdown">
+          {busy && <div className="p-3 text-xs text-slate-500 font-mono">searching…</div>}
+          {!busy && !hasHits && <div className="p-6 text-center text-sm text-slate-500">No matches for <span className="font-mono">{q}</span></div>}
+          {!busy && hasHits && (
+            <div className="max-h-[440px] overflow-y-auto">
+              {results.products.length > 0 && (
+                <div>
+                  <div className="px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-slate-500 bg-slate-50 border-b hairline">Products · {results.products.length}</div>
+                  {results.products.map(p => (
+                    <button key={p.id} onClick={() => openProduct(p)} className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center gap-3 border-b hairline last:border-b-0" data-testid={`search-product-${p.id}`}>
+                      <div className="w-9 h-9 rounded-lg overflow-hidden bg-slate-100 shrink-0">
+                        {p.images?.[0] ? <img src={proxyImg(p.images[0])} alt="" className="w-full h-full object-cover"/> : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={13}/></div>}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium truncate">{p.title}</div>
+                        <div className="text-[11px] text-slate-500 flex items-center gap-2 font-mono">
+                          {p.product_code && <span className="text-indigo-600 font-bold">{p.product_code}</span>}
+                          <span className="text-slate-400">·</span>
+                          <span>{moneyCents(p.price)}</span>
+                          {p.archived && <span className="chip chip-neutral !text-[9px] !py-0">archived</span>}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {results.orders.length > 0 && (
+                <div>
+                  <div className="px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-slate-500 bg-slate-50 border-b hairline">Orders · {results.orders.length}</div>
+                  {results.orders.map(o => (
+                    <button key={o.id} onClick={() => openOrder(o)} className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b hairline last:border-b-0" data-testid={`search-order-${o.id}`}>
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="font-mono text-indigo-600 font-bold text-xs">{o.reference || o.id.slice(0,8)}</span>
+                        <span className="text-slate-400">·</span>
+                        <span className="truncate flex-1">{o.product_title}</span>
+                        <span className="font-mono text-slate-600 shrink-0">{moneyCents(o.total)}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">{o.customer_name} · {o.status}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function NotificationBell({ onNavigate }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState([]);
@@ -575,6 +670,7 @@ const NOTIF_META = {
   price_change:  { icon: TrendingDown, color: "#4F46E5", bg: "#EEF2FF" },
   new_order:     { icon: ShoppingBag,  color: "#059669", bg: "#ECFDF5" },
   out_of_stock:  { icon: XCircle,      color: "#DC2626", bg: "#FEE2E2" },
+  restock:       { icon: BadgeCheck,   color: "#059669", bg: "#ECFDF5" },
   low_stock:     { icon: PackageMinus, color: "#D97706", bg: "#FEF3C7" },
   order_status:  { icon: RefreshCw,    color: "#2563EB", bg: "#DBEAFE" },
   new_customer:  { icon: UserPlus,     color: "#7C3AED", bg: "#EDE9FE" },
@@ -672,10 +768,7 @@ function TopHeader({ tab, storeSection, supplierSection, customerSection, produc
           <span className="hidden sm:inline chip chip-neutral shrink-0">AU · AUD</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <div className="hidden lg:flex relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--dim)]"/>
-            <input placeholder="Search anything…" className="input pl-9 pr-3 py-2 text-sm w-64"/>
-          </div>
+          <GlobalSearch onNavigate={onNavigate}/>
           <NotificationBell onNavigate={onNavigate}/>
           <button className="btn btn-ghost !p-2 hidden sm:grid" title="Help"><HelpCircle size={16}/></button>
           <div className="w-9 h-9 rounded-full grid place-items-center text-white font-bold text-xs" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>AK</div>
@@ -3268,23 +3361,28 @@ function Products({ deepLink, clearDeepLink }) {
   const [q, setQ] = useState(""); const [cat, setCat] = useState(""); const [sort, setSort] = useState("created_at_desc");
   const [editing, setEditing] = useState(null);
   const [cats, setCats] = useState([]);
+  const [selected, setSelected] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/products`, { params: { q: q || undefined, category: cat || undefined, sort } });
     setList(data.products); setTotal(data.total);
+    // Drop selection ids that are no longer in list
+    setSelected(prev => {
+      const ids = new Set(data.products.map(p => p.id));
+      const next = new Set();
+      prev.forEach(id => { if (ids.has(id)) next.add(id); });
+      return next;
+    });
   }, [q, cat, sort]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { axios.get(`${API}/categories`, { params: { active: true }}).then(r => setCats(r.data.categories)); }, []);
 
-  // Deep-link from a notification: open the specific product modal
   useEffect(() => {
     if (!deepLink?.productId) return;
     const found = list.find(p => p.id === deepLink.productId);
-    if (found) {
-      setEditing(found);
-      clearDeepLink && clearDeepLink();
-    } else if (list.length) {
-      // Product might exist but be filtered out; fetch it directly
+    if (found) { setEditing(found); clearDeepLink && clearDeepLink(); }
+    else if (list.length) {
       axios.get(`${API}/products/${deepLink.productId}`).then(r => {
         setEditing(r.data); clearDeepLink && clearDeepLink();
       }).catch(() => { toast.error("Product not found"); clearDeepLink && clearDeepLink(); });
@@ -3295,12 +3393,27 @@ function Products({ deepLink, clearDeepLink }) {
   const archive = async (p) => { await axios.post(`${API}/products/${p.id}/archive`); toast.success(`Archived — find it under Archived`); load(); };
   const catByslug = (slug) => cats.find(c => c.slug === slug);
 
+  const toggleOne = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => setSelected(s => s.size === list.length ? new Set() : new Set(list.map(p => p.id)));
+  const selectDeadOnly = () => setSelected(new Set(list.filter(p => p.is_sold || !p.active || (p.stock_status && p.stock_status !== "live")).map(p => p.id)));
+  const bulkArchive = async () => {
+    if (selected.size === 0) return;
+    if (!window.confirm(`Archive ${selected.size} product${selected.size===1?"":"s"}? They'll be hidden from All Products but restorable from the Archived tab.`)) return;
+    setBulkBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/products/bulk-archive`, { product_ids: Array.from(selected) });
+      toast.success(`Archived ${data.archived} product${data.archived===1?"":"s"}`);
+      setSelected(new Set()); load();
+    } catch { toast.error("Bulk archive failed"); }
+    finally { setBulkBusy(false); }
+  };
+
   return (
     <div className="grid gap-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="text-sm text-slate-500 font-mono">{total} product{total===1?"":"s"}</div>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={q} onChange={(e)=>setQ(e.target.value)} data-testid="product-search" placeholder="Search title / SKU" className="input pl-9 pr-3 py-2 text-sm w-56"/></div>
+          <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={q} onChange={(e)=>setQ(e.target.value)} data-testid="product-search" placeholder="Search title / SKU / code" className="input pl-9 pr-3 py-2 text-sm w-56"/></div>
           <select value={cat} onChange={(e)=>setCat(e.target.value)} className="input px-3 py-2 text-sm" data-testid="product-cat">
             <option value="">All categories</option>
             {cats.map(c=><option key={c.slug} value={c.slug}>{c.name}</option>)}
@@ -3315,13 +3428,32 @@ function Products({ deepLink, clearDeepLink }) {
         </div>
       </div>
 
+      {selected.size > 0 && (
+        <div className="card p-3 border-indigo-200 bg-indigo-50 flex items-center gap-3 flex-wrap" data-testid="bulk-actions-bar">
+          <span className="text-sm font-medium text-indigo-900"><CheckCircle2 size={14} className="inline mr-1"/> {selected.size} selected</span>
+          <span className="text-slate-400">·</span>
+          <button onClick={selectDeadOnly} className="btn btn-ghost text-xs !py-1" data-testid="select-dead-btn">Select all inactive</button>
+          <button onClick={() => setSelected(new Set())} className="btn btn-ghost text-xs !py-1">Clear</button>
+          <div className="ml-auto">
+            <button onClick={bulkArchive} disabled={bulkBusy} className="btn btn-primary text-xs" data-testid="bulk-archive-btn">
+              {bulkBusy ? <Loader2 className="animate-spin" size={12}/> : <Warehouse size={12}/>} Archive {selected.size} product{selected.size===1?"":"s"}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tbl">
-            <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th className="text-right">eBay</th><th className="text-right">Sell</th><th className="text-right">Profit</th><th className="text-right">Stock</th><th className="text-right">Sold</th><th></th></tr></thead>
+            <thead><tr>
+              <th className="w-8"><input type="checkbox" className="accent-indigo-600" checked={list.length > 0 && selected.size === list.length} onChange={toggleAll} data-testid="bulk-select-all"/></th>
+              <th>Product</th><th>SKU</th><th>Category</th><th>Rating</th>
+              <th className="text-right">eBay</th><th className="text-right">Sell</th><th className="text-right">Profit</th>
+              <th className="text-right">Stock</th><th className="text-right">Sold</th><th></th>
+            </tr></thead>
             <tbody>
               {list.length === 0
-                ? <tr><td colSpan={9} className="text-center py-10 text-slate-500">No products yet. Head to <b>Product Sourcing</b> and import your first one.</td></tr>
+                ? <tr><td colSpan={11} className="text-center py-10 text-slate-500">No products yet. Head to <b>Product Sourcing</b> and import your first one.</td></tr>
                 : list.map((p) => {
                     const c = catByslug(p.category);
                     const ebay = Number(p.cost) || 0;
@@ -3329,8 +3461,10 @@ function Products({ deepLink, clearDeepLink }) {
                     const profit = ebay > 0 ? Math.round((sell - ebay) * 100) / 100 : 0;
                     const badge = statusBadge(p);
                     const dead = p.is_sold || !p.active || (p.stock_status && p.stock_status !== "live");
+                    const isSel = selected.has(p.id);
                     return (
-                  <tr key={p.id} data-testid="product-row" className={dead ? "opacity-60 bg-slate-50/70" : ""}>
+                  <tr key={p.id} data-testid="product-row" className={`${dead ? "opacity-60 bg-slate-50/70" : ""} ${isSel ? "bg-indigo-50/60" : ""}`}>
+                    <td><input type="checkbox" className="accent-indigo-600" checked={isSel} onChange={() => toggleOne(p.id)} data-testid={`bulk-check-${p.id}`}/></td>
                     <td>
                       <div className="flex items-center gap-3 min-w-0">
                         <div className={`w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border hairline shrink-0 ${dead ? "grayscale" : ""}`}>
@@ -3356,6 +3490,15 @@ function Products({ deepLink, clearDeepLink }) {
                           <CatIcon name={c.icon} size={11}/> {c.name}
                         </span>
                       ) : <span className="chip chip-neutral capitalize">{p.category || "—"}</span>}
+                    </td>
+                    <td>
+                      {(p.review_count ?? 0) > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-xs" data-testid={`product-rating-${p.id}`}>
+                          <StarIcon size={11} className="text-amber-500" fill="currentColor"/>
+                          <span className="font-mono font-bold">{(p.average_rating ?? 0).toFixed(1)}</span>
+                          <span className="text-slate-400 font-mono">({p.review_count})</span>
+                        </span>
+                      ) : <span className="text-[11px] text-slate-400 font-mono">no reviews</span>}
                     </td>
                     <td className="text-right font-mono text-slate-500">{ebay > 0 ? moneyCents(ebay) : "—"}</td>
                     <td className="text-right font-mono font-bold text-indigo-600">{moneyCents(sell)}</td>
@@ -3447,17 +3590,38 @@ function ArchivedProducts() {
 
 function ProductEditModal({ product, categories = [], onClose, onSaved }) {
   const [f, setF] = useState({ ...product });
+  const [full, setFull] = useState(product);
+  const [reviews, setReviews] = useState([]);
+
+  useEffect(() => {
+    axios.get(`${API}/products/${product.id}`).then(r => setFull(r.data)).catch(() => {});
+    axios.get(`${API}/products/${product.id}/reviews`).then(r => setReviews(r.data.reviews || [])).catch(() => setReviews([]));
+  }, [product.id]);
+
   const save = async () => {
     try { await axios.patch(`${API}/products/${product.id}`, { title: f.title, price: Number(f.price), cost: Number(f.cost), stock: Number(f.stock), category: f.category, active: !!f.active, description: f.description, sku: f.sku }); toast.success("Saved"); onSaved(); }
     catch { toast.error("Save failed"); }
   };
+  const variants = full.variants || [];
+  const variantsByType = variants.reduce((acc, v) => { (acc[v.type] = acc[v.type] || []).push(v); return acc; }, {});
+  const avg = full.average_rating || 0;
   return (
     <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md overflow-y-auto" onClick={onClose}>
-      <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} exit={{opacity:0, y:20}} onClick={(e)=>e.stopPropagation()} className="card max-w-2xl mx-auto my-10 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="font-display font-bold text-xl">Edit product</div>
+      <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} exit={{opacity:0, y:20}} onClick={(e)=>e.stopPropagation()} className="card max-w-3xl mx-auto my-10 p-6" data-testid="product-edit-modal">
+        <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+          <div className="min-w-0">
+            <div className="font-display font-bold text-xl truncate">Edit product</div>
+            <div className="text-[11px] text-slate-500 font-mono flex items-center gap-2">
+              {full.product_code && <span className="text-indigo-600 font-bold">{full.product_code}</span>}
+              {full.review_count > 0 && (
+                <><span className="text-slate-300">·</span>
+                <span className="inline-flex items-center gap-1"><StarIcon size={11} className="text-amber-500" fill="currentColor"/> {avg.toFixed(1)} ({full.review_count})</span></>
+              )}
+            </div>
+          </div>
           <button onClick={onClose} className="btn btn-ghost !p-2"><X size={16}/></button>
         </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Field label="Title" className="md:col-span-2"><input className="input w-full px-3 py-2" value={f.title||""} onChange={(e)=>setF({...f, title:e.target.value})}/></Field>
           <Field label="SKU"><input className="input w-full px-3 py-2 font-mono" value={f.sku||""} onChange={(e)=>setF({...f, sku:e.target.value})}/></Field>
@@ -3477,7 +3641,64 @@ function ProductEditModal({ product, categories = [], onClose, onSaved }) {
           </Field>
           <Field label="Description" className="md:col-span-2"><textarea className="input w-full px-3 py-2 h-32 leading-relaxed" value={f.description||""} onChange={(e)=>setF({...f, description:e.target.value})}/></Field>
         </div>
-        <div className="mt-4 flex justify-end gap-2">
+
+        {variants.length > 0 && (
+          <div className="mt-6" data-testid="product-variants">
+            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2">Variants · {variants.length}</div>
+            <div className="border hairline rounded-lg overflow-hidden">
+              <table className="tbl">
+                <thead><tr><th>Type</th><th>Option</th><th className="text-right">Price</th><th>Status</th><th>SKU</th></tr></thead>
+                <tbody>
+                  {Object.entries(variantsByType).flatMap(([type, rows]) =>
+                    rows.map((v, idx) => (
+                      <tr key={`${type}-${idx}-${v.option}`} data-testid={`variant-row-${type}-${v.option}`.replace(/\s+/g,"-")}>
+                        {idx === 0
+                          ? <td rowSpan={rows.length} className="align-top font-mono text-xs text-slate-600 border-r hairline bg-slate-50">{type}</td>
+                          : null}
+                        <td className="text-sm">{v.option}</td>
+                        <td className="text-right font-mono text-indigo-600 font-bold">{v.price != null ? moneyCents(v.price) : "—"}</td>
+                        <td>
+                          {v.stock_status === "live"
+                            ? <span className="chip chip-success !text-[10px]"><CheckCircle2 size={10}/> In stock</span>
+                            : <span className="chip chip-danger !text-[10px]"><Ban size={10}/> Out of stock</span>}
+                        </td>
+                        <td className="font-mono text-xs text-slate-500">{v.sku || "—"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {reviews.length > 0 && (
+          <div className="mt-6" data-testid="product-reviews-section">
+            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+              <span>Reviews · {reviews.length}</span>
+              <span className="text-slate-300">·</span>
+              <span className="inline-flex items-center gap-1"><StarIcon size={11} className="text-amber-500" fill="currentColor"/> {avg.toFixed(1)}</span>
+            </div>
+            <div className="grid gap-2 max-h-64 overflow-y-auto">
+              {reviews.slice(0, 5).map(r => (
+                <div key={r.id} className="p-3 rounded-lg bg-slate-50 border hairline">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="text-amber-500 flex items-center gap-0.5">{[1,2,3,4,5].map(i=><StarIcon key={i} size={10} fill={i<=r.rating?"currentColor":"none"}/>)}</span>
+                      <span className="text-xs font-medium">{r.customer_name}</span>
+                      {r.verified_purchase && <span className="chip chip-success !text-[9px]"><BadgeCheck size={9}/> Verified</span>}
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono">{fmtDate(r.created_at)}</span>
+                  </div>
+                  {r.title && <div className="text-sm font-medium mt-1">{r.title}</div>}
+                  {r.body && <div className="text-xs text-slate-700 mt-1 line-clamp-3">{r.body}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end gap-2">
           <button onClick={onClose} className="btn btn-ghost">Cancel</button>
           <button onClick={save} className="btn btn-primary">Save</button>
         </div>
@@ -3659,6 +3880,13 @@ function CategoryProductBrowser({ cat, onBack }) {
                 </div>
                 <div className="p-4 flex flex-col gap-2 flex-1">
                   <div className="text-sm font-medium line-clamp-2 min-h-[2.6em]" title={p.title}>{p.title}</div>
+                  {(p.review_count ?? 0) > 0 && (
+                    <div className="flex items-center gap-1 text-xs" data-testid={`cat-rating-${p.id}`}>
+                      <StarIcon size={11} className="text-amber-500" fill="currentColor"/>
+                      <span className="font-mono font-bold">{(p.average_rating ?? 0).toFixed(1)}</span>
+                      <span className="text-slate-400 font-mono">({p.review_count} review{p.review_count===1?"":"s"})</span>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
                     <div>
                       <div className="text-slate-400 font-mono uppercase tracking-widest text-[10px]">eBay</div>

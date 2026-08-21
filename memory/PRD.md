@@ -371,6 +371,38 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
 - Testing agent iteration_4.json: 100% pass (15/15 backend, 8/8 frontend), no
   defects.
 
+### Variants + Bulk Archive + Product Reviews + Global Search + Restock Alerts (2026-02-23)
+- **Variant scraper** — `_extract_variants()` in `scraper.py` parses JSON-LD
+  `hasVariant` (priority) then falls back to eBay's DOM variation select boxes.
+  Returns `[{type, option, price, currency, stock_status, sku?}]` on every
+  scrape. `ScrapedItem` and `Product` models gained `variants: List[dict]`.
+  Variants mirror to linked products on every scrape/refresh.
+- **Bulk archive/delete endpoints** — `POST /api/products/bulk-archive` and
+  `POST /api/products/bulk-delete` accept `{product_ids: [...]}` and act in one
+  call. Frontend All Products has checkbox column + master toggle + indigo
+  action bar showing "N selected", "Select all inactive", "Clear",
+  "Archive N products" primary CTA.
+- **Reviews aggregate on Products** — `GET /api/products` and
+  `GET /api/products/{id}` now include `review_count` and `average_rating`
+  (computed via a single Mongo $group over reviews). Rendered as a new "Rating"
+  column on All Products, under the title on Category browser cards, and in
+  the ProductEditModal header. The modal also embeds a "Reviews · N" section
+  with up to 5 latest verified reviews.
+- **Global (top-bar) search** — new `GET /api/search?q=` returns matching
+  products (by product_code, sku, title) and orders (by reference, id,
+  customer_email). Frontend `GlobalSearch` component debounces input,
+  shows up to 8 products + 8 orders in a dropdown, and click-through
+  uses the deep-link mechanism to open the exact product/order modal.
+- **Restock alerts** — scrape flow detects `dead→live` transition and emits a
+  `restock` notification (title "Back in stock on eBay"). Does NOT auto-activate;
+  admin restores from the Archived tab. NOTIF_META entry + green icon added.
+  Restock notifications deep-link to the product modal like OOS ones.
+- Tests: `/app/backend/tests/test_variants_and_search.py` — 10 pytest cases
+  (all pass) covering variants scraper, review aggregates on products list +
+  single, bulk archive/delete, search by code/reference/validation, and the
+  restock code-path presence.
+- Testing agent iteration_5.json: 100% pass (backend + frontend), no defects.
+
 ## Backlog / roadmap
 ### P1
 - Bulk import (paste multiple eBay URLs)
@@ -403,4 +435,7 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
   covering product_code format and dedup.
 - `/app/backend/tests/test_product_code_orders_api.py` — 6 pytest cases
   (all pass) covering API-level product_code + order.reference behavior.
-- Latest iteration report: `/app/test_reports/iteration_4.json` (100% backend & frontend).
+- `/app/backend/tests/test_variants_and_search.py` — 10 pytest cases (all pass)
+  covering variant scraper, review aggregates, bulk archive/delete, global
+  search, and restock code-path presence.
+- Latest iteration report: `/app/test_reports/iteration_5.json` (100% backend & frontend).

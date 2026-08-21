@@ -129,6 +129,7 @@ class ScrapedItem(BaseModel):
     images: List[str] = Field(default_factory=list)
     specifics: dict = Field(default_factory=dict)
     ebay_category_path: List[str] = Field(default_factory=list)
+    variants: List[dict] = Field(default_factory=list)
     category: Optional[str] = None
     method_used: Optional[str] = None
     watchlisted: bool = False
@@ -160,6 +161,7 @@ class ProductCreate(BaseModel):
     archived: bool = False
     archived_at: Optional[str] = None
     product_code: Optional[str] = None  # public reference — e.g. KF21-PC0826 (auto-generated on create)
+    variants: List[dict] = Field(default_factory=list)  # [{type, option, price, currency, stock_status, sku?}]
 
 
 class Product(ProductCreate):
@@ -449,6 +451,31 @@ async def scrape(req: ScrapeRequest) -> dict:
                         product_title=lp.get("title"),
                         image=(lp.get("images") or [None])[0],
                     )
+
+            # RESTOCK — listing went dead→live. Notify but do NOT auto-activate; admin decides.
+            status_changed_to_live = (new_status == "live") and (prev_status != "live")
+            if status_changed_to_live:
+                update_fields["restock_detected_at"] = now_iso
+                linked = await db.products.find({"source_item_id": data.get("item_id")}, {"_id": 0, "id": 1, "title": 1, "images": 1}).to_list(20)
+                targets = linked or [{"id": None, "title": data.get("title") or existing.get("title"), "images": data.get("images") or existing.get("images") or []}]
+                for lp in targets:
+                    await _emit_notification(
+                        type="restock",
+                        title="Back in stock on eBay",
+                        body=f"{lp.get('title') or 'Item'} · previously {prev_status} — now live",
+                        product_id=lp.get("id"),
+                        item_id=data.get("item_id"),
+                        ebay_url=existing.get("url"),
+                        product_title=lp.get("title"),
+                        image=(lp.get("images") or [None])[0],
+                    )
+
+            # Mirror variants (if scraper found any) onto every linked product so the admin sees them.
+            if data.get("variants"):
+                await db.products.update_many(
+                    {"source_item_id": data.get("item_id")},
+                    {"$set": {"variants": data["variants"], "updated_at": now_iso}},
+                )
             history = existing.get("price_history", [])
             last_val = history[-1]["value"] if history else None
             new_val = data.get("price_value")
@@ -601,6 +628,7 @@ async def items_bulk_action(body: ItemBulkAction):
                     images=it.get("images") or [],
                     source_url=it.get("url"),
                     source_item_id=it.get("item_id") or it.get("id"),
+                    variants=it.get("variants") or [],
                 )
                 prod.product_code = await _generate_unique_product_code(prod.title)
                 await db.products.insert_one(prod.model_dump())
@@ -2627,6 +2655,7 @@ async def create_product_from_item(item_id: str):
         source_url=it.get("url"),
         source_item_id=it.get("item_id"),
         sku=f"SKU-{(it.get('item_id') or uuid.uuid4().hex[:8])[-6:]}",
+        variants=it.get("variants") or [],
     )
     prod.product_code = await _generate_unique_product_code(prod.title)
     await db.products.insert_one(prod.model_dump())
@@ -2657,6 +2686,7 @@ async def list_products(
         query["$or"] = [
             {"title": {"$regex": q, "$options": "i"}},
             {"sku": {"$regex": q, "$options": "i"}},
+            {"product_code": {"$regex": q, "$options": "i"}},
         ]
     if category:
         query["category"] = category
@@ -2678,7 +2708,41 @@ async def list_products(
     cursor = db.products.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).limit(limit)
     products = await cursor.to_list(length=limit)
     total = await db.products.count_documents(query)
+    # Attach reviews aggregate (one aggregation, then join in Python — cheap for O(200) products).
+    ids = [p["id"] for p in products]
+    if ids:
+        pipeline = [
+            {"$match": {"product_id": {"$in": ids}, "status": "approved"}},
+            {"$group": {"_id": "$product_id", "count": {"$sum": 1}, "avg": {"$avg": "$rating"}}},
+        ]
+        agg = await db.reviews.aggregate(pipeline).to_list(length=len(ids))
+        by_id = {r["_id"]: r for r in agg}
+        for p in products:
+            row = by_id.get(p["id"])
+            p["review_count"] = int(row["count"]) if row else 0
+            p["average_rating"] = round(float(row["avg"]), 2) if row and row.get("avg") is not None else 0.0
     return {"products": products, "total": total}
+
+
+@api_router.get("/search")
+async def global_search(q: str = Query(..., min_length=1), limit: int = Query(15, le=50)):
+    """Universal product-code / SKU / title / order-reference / order-id search."""
+    q = q.strip()
+    if not q:
+        return {"products": [], "orders": []}
+    prod_query = {"$or": [
+        {"product_code": {"$regex": q, "$options": "i"}},
+        {"sku": {"$regex": q, "$options": "i"}},
+        {"title": {"$regex": q, "$options": "i"}},
+    ]}
+    products = await db.products.find(prod_query, {"_id": 0, "id": 1, "title": 1, "product_code": 1, "images": 1, "price": 1, "stock_status": 1, "archived": 1}).limit(limit).to_list(limit)
+    ord_query = {"$or": [
+        {"reference": {"$regex": q, "$options": "i"}},
+        {"id": {"$regex": q, "$options": "i"}},
+        {"customer_email": {"$regex": q, "$options": "i"}},
+    ]}
+    orders = await db.orders.find(ord_query, {"_id": 0, "id": 1, "reference": 1, "product_title": 1, "customer_name": 1, "total": 1, "status": 1, "created_at": 1}).sort("created_at", -1).limit(limit).to_list(limit)
+    return {"products": products, "orders": orders}
 
 
 @api_router.post("/products/{pid}/archive")
@@ -2708,11 +2772,40 @@ async def restore_product(pid: str):
     return await db.products.find_one({"id": pid}, {"_id": 0})
 
 
+class BulkProductIds(BaseModel):
+    product_ids: List[str]
+
+
+@api_router.post("/products/bulk-archive")
+async def bulk_archive_products(body: BulkProductIds):
+    if not body.product_ids:
+        return {"archived": 0}
+    now = datetime.now(timezone.utc).isoformat()
+    r = await db.products.update_many(
+        {"id": {"$in": body.product_ids}},
+        {"$set": {"archived": True, "archived_at": now, "active": False, "updated_at": now}},
+    )
+    return {"archived": r.modified_count}
+
+
+@api_router.post("/products/bulk-delete")
+async def bulk_delete_products(body: BulkProductIds):
+    if not body.product_ids:
+        return {"deleted": 0}
+    r = await db.products.delete_many({"id": {"$in": body.product_ids}})
+    return {"deleted": r.deleted_count}
+
+
 @api_router.get("/products/{pid}")
 async def get_product(pid: str):
     p = await db.products.find_one({"id": pid}, {"_id": 0})
     if not p:
         raise HTTPException(status_code=404, detail="Product not found")
+    # Attach live reviews aggregate for the product detail page.
+    reviews = await db.reviews.find({"product_id": pid, "status": "approved"}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    ratings = [int(r.get("rating") or 0) for r in reviews if r.get("rating")]
+    p["review_count"] = len(reviews)
+    p["average_rating"] = round(sum(ratings) / len(ratings), 2) if ratings else 0.0
     return p
 
 

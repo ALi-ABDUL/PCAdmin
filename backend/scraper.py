@@ -388,6 +388,127 @@ def _extract_specifics(soup: BeautifulSoup) -> dict[str, str]:
     return specs
 
 
+def _extract_variants(soup: BeautifulSoup, html: str) -> list[dict]:
+    """Extract eBay listing variants (Size, Colour, Memory, etc.) with per-option price + stock.
+
+    Priority:
+      1) JSON-LD ProductGroup.hasVariant (structured, most reliable when eBay ships it)
+      2) DOM variation select widgets (.x-msku__select-box / .x-flyover-variations select)
+    Returns list of {type, option, price, currency, stock_status, sku?}.
+    """
+    out: list[dict] = []
+
+    # 1) JSON-LD
+    for script in soup.select('script[type="application/ld+json"]'):
+        try:
+            payload = json.loads(script.string or "")
+        except Exception:
+            continue
+        candidates = payload if isinstance(payload, list) else [payload]
+        for node in candidates:
+            if not isinstance(node, dict):
+                continue
+            variants = node.get("hasVariant") or []
+            if not isinstance(variants, list) or not variants:
+                continue
+            for v in variants:
+                if not isinstance(v, dict):
+                    continue
+                offers = v.get("offers") or {}
+                if isinstance(offers, list):
+                    offers = offers[0] if offers else {}
+                price = None
+                try:
+                    price = float(offers.get("price")) if offers.get("price") is not None else None
+                except Exception:
+                    price = None
+                currency = offers.get("priceCurrency") or "AUD"
+                availability = (offers.get("availability") or "").lower()
+                if "outofstock" in availability or "soldout" in availability:
+                    stock_status = "out_of_stock"
+                elif "instock" in availability or "limitedavail" in availability:
+                    stock_status = "live"
+                else:
+                    stock_status = "live"
+                # Turn the variant's property map (e.g. {"color":"Red","size":"M"}) into rows.
+                # Prefer top-level fields, then additionalProperty list.
+                props: dict[str, str] = {}
+                for key in ("color", "size", "material", "pattern"):
+                    if v.get(key):
+                        props[key.capitalize()] = str(v.get(key)).strip()
+                for ap in (v.get("additionalProperty") or []):
+                    if isinstance(ap, dict):
+                        n = (ap.get("name") or "").strip()
+                        val = (ap.get("value") or "").strip()
+                        if n and val:
+                            props[n] = val
+                if not props and v.get("name"):
+                    props["Option"] = str(v["name"]).strip()
+                for vtype, vopt in props.items():
+                    out.append({
+                        "type": vtype,
+                        "option": vopt,
+                        "price": price,
+                        "currency": currency,
+                        "stock_status": stock_status,
+                        "sku": (v.get("sku") or v.get("mpn") or None),
+                    })
+        if out:
+            return _dedupe_variants(out)
+
+    # 2) DOM fallback — variation select widgets
+    for sel in soup.select("select.msku-sel__select-box, .x-msku__select-box, select[name^='msku-sel-']"):
+        vtype = None
+        # Aria-label often holds the type ("Choose Colour")
+        aria = (sel.get("aria-label") or "").strip()
+        if aria:
+            m = re.search(r"choose\s+(.+)", aria, re.I)
+            vtype = m.group(1).strip() if m else aria
+        if not vtype:
+            # Fallback: preceding label text
+            lbl = sel.find_previous(["label", "span"])
+            if lbl:
+                vtype = _text(lbl).strip(": ").strip()
+        vtype = (vtype or "Option").title()
+        for opt in sel.find_all("option"):
+            v = (opt.get_text() or "").strip()
+            if not v or v.lower().startswith("select"):
+                continue
+            disabled = opt.has_attr("disabled") or "disabled" in (opt.get("class") or [])
+            stock_status = "out_of_stock" if disabled else "live"
+            # Price hint may be baked into the label like "Red — AU $12.00"
+            m = re.search(r"AU\s*\$?\s*([\d,]+\.?\d*)", v)
+            price = None
+            if m:
+                try:
+                    price = float(m.group(1).replace(",", ""))
+                except Exception:
+                    price = None
+                v = re.sub(r"\s*[-–]\s*AU\s*\$?[\d,]+\.?\d*\s*$", "", v).strip()
+            out.append({
+                "type": vtype,
+                "option": v,
+                "price": price,
+                "currency": "AUD",
+                "stock_status": stock_status,
+                "sku": None,
+            })
+
+    return _dedupe_variants(out)
+
+
+def _dedupe_variants(rows: list[dict]) -> list[dict]:
+    seen: set[tuple] = set()
+    result: list[dict] = []
+    for r in rows:
+        key = (r.get("type"), r.get("option"))
+        if key in seen or not r.get("option"):
+            continue
+        seen.add(key)
+        result.append(r)
+    return result
+
+
 def _extract_breadcrumbs(soup: BeautifulSoup, html: str) -> list[str]:
     """Extract the eBay category breadcrumb path.
 
@@ -677,6 +798,7 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
     images = _extract_images(soup, html)
     specifics = _extract_specifics(soup)
     ebay_category_path = _extract_breadcrumbs(soup, html)
+    variants = _extract_variants(soup, html)
 
     return {
         "url": url,
@@ -703,4 +825,5 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
         "images": images,
         "specifics": specifics,
         "ebay_category_path": ebay_category_path,
+        "variants": variants,
     }

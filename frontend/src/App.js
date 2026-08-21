@@ -149,6 +149,7 @@ const PRODUCT_NAV = [
   { id: "all",            label: "All Products",       icon: Package,         group: "Catalog" },
   { id: "low-stock",      label: "Low Stock",          icon: PackageMinus,    group: "Inventory" },
   { id: "out-of-stock",   label: "Out of Stock",       icon: PackageX,        group: "Inventory" },
+  { id: "archived",       label: "Archived",           icon: Warehouse,       group: "Inventory" },
   { id: "price-alerts",   label: "Price Alerts",       icon: TrendingDownIcon, group: "Insights" },
 ];
 
@@ -1617,7 +1618,8 @@ function ProductsModule({ section, setSection }) {
     all: "Every product in your store.",
     "low-stock": "Items with 1–3 units remaining. Restock soon.",
     "out-of-stock": "Items at 0 or below. Hidden from storefront.",
-    "price-alerts": "Scraped eBay AU items whose seller changed the price. Adjust your retail price to stay competitive.",
+    archived: "Archived products are hidden from the main list. Restore them anytime.",
+    "price-alerts": "Scraped eBay AU items whose seller changed the price. Sold or out-of-stock listings are excluded automatically.",
   };
   const filtered = section === "low-stock" ? products.filter(p => (p.stock ?? 0) > 0 && (p.stock ?? 0) <= 3)
     : section === "out-of-stock" ? products.filter(p => (p.stock ?? 0) <= 0)
@@ -1629,13 +1631,16 @@ function ProductsModule({ section, setSection }) {
       {section === "all"           && <Products />}
       {section === "low-stock"     && <StockList list={filtered} tone="warning"/>}
       {section === "out-of-stock"  && <StockList list={filtered} tone="danger"/>}
+      {section === "archived"      && <ArchivedProducts />}
       {section === "price-alerts"  && <PriceAlertsView items={priceAlertItems}/>}
     </div>
   );
 }
 
 function PriceAlertsView({ items }) {
-  const alerts = items
+  // Exclude items that are sold / ended / out of stock — no point pricing what you can't sell.
+  const live = items.filter(it => !it.is_sold && (it.stock_status || "live") === "live");
+  const alerts = live
     .map(it => {
       const h = (it.price_history || []).filter(p => p.value != null);
       if (h.length < 2) return null;
@@ -1650,6 +1655,7 @@ function PriceAlertsView({ items }) {
 
   const drops = alerts.filter(a => a.delta < 0).length;
   const rises = alerts.filter(a => a.delta > 0).length;
+  const excluded = items.length - live.length;
 
   return (
     <div className="grid gap-4">
@@ -1657,8 +1663,13 @@ function PriceAlertsView({ items }) {
         <StatBox label="Alerts" value={alerts.length}/>
         <StatBox label="Price drops" value={drops} tone="success"/>
         <StatBox label="Price rises" value={rises}/>
-        <StatBox label="Items tracked" value={items.length}/>
+        <StatBox label="Items tracked" value={live.length}/>
       </div>
+      {excluded > 0 && (
+        <div className="text-[11px] text-slate-500 font-mono flex items-center gap-1" data-testid="price-alerts-excluded">
+          <Ban size={11}/> {excluded} sold / ended / out-of-stock listing{excluded===1?"":"s"} excluded
+        </div>
+      )}
       <div className="card overflow-hidden">
         {alerts.length === 0 && <div className="p-10 text-center text-slate-500">No price changes yet. Once the nightly refresh detects a change, alerts will appear here.</div>}
         <div className="overflow-x-auto"><table className="tbl">
@@ -3226,6 +3237,16 @@ function KpiCard({ label, value, sub, icon: Icon, tone }) {
 }
 
 /* -------------------------------- Products -------------------------------- */
+function statusBadge(p) {
+  // Ordered: most severe first
+  if (p.stock_status === "sold" || (p.is_sold && !p.stock_status)) return { label: "SOLD", cls: "chip-danger" };
+  if (p.stock_status === "ended") return { label: "ENDED", cls: "chip-danger" };
+  if (p.stock_status === "out_of_stock") return { label: "OUT OF STOCK", cls: "chip-danger" };
+  if ((p.stock ?? 0) <= 0) return { label: "OUT OF STOCK", cls: "chip-danger" };
+  if (!p.active) return { label: "DRAFT", cls: "chip-neutral" };
+  return null;
+}
+
 function Products() {
   const [list, setList] = useState([]); const [total, setTotal] = useState(0);
   const [q, setQ] = useState(""); const [cat, setCat] = useState(""); const [sort, setSort] = useState("created_at_desc");
@@ -3239,7 +3260,8 @@ function Products() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { axios.get(`${API}/categories`, { params: { active: true }}).then(r => setCats(r.data.categories)); }, []);
 
-  const del = async (p) => { if (!window.confirm(`Delete "${p.title}"?`)) return; await axios.delete(`${API}/products/${p.id}`); toast.success("Deleted"); load(); };
+  const del = async (p) => { if (!window.confirm(`Delete "${p.title}"? This can't be undone.`)) return; await axios.delete(`${API}/products/${p.id}`); toast.success("Deleted"); load(); };
+  const archive = async (p) => { await axios.post(`${API}/products/${p.id}/archive`); toast.success(`Archived — find it under Archived`); load(); };
   const catByslug = (slug) => cats.find(c => c.slug === slug);
 
   return (
@@ -3274,16 +3296,21 @@ function Products() {
                     const ebay = Number(p.cost) || 0;
                     const sell = Number(p.price) || 0;
                     const profit = ebay > 0 ? Math.round((sell - ebay) * 100) / 100 : 0;
+                    const badge = statusBadge(p);
+                    const dead = p.is_sold || !p.active || (p.stock_status && p.stock_status !== "live");
                     return (
-                  <tr key={p.id} data-testid="product-row" className={p.is_sold || !p.active ? "opacity-50" : ""}>
+                  <tr key={p.id} data-testid="product-row" className={dead ? "opacity-60 bg-slate-50/70" : ""}>
                     <td>
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border hairline shrink-0 ${p.is_sold ? "grayscale" : ""}`}>
+                        <div className={`w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border hairline shrink-0 ${dead ? "grayscale" : ""}`}>
                           {p.images?.[0] ? <img src={proxyImg(p.images[0])} alt="" className="w-full h-full object-cover"/> : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={16}/></div>}
                         </div>
                         <div className="min-w-0">
-                          <div className="text-sm font-medium truncate max-w-[320px] flex items-center gap-2">{p.title}{p.is_sold && <span className="chip chip-danger">SOLD</span>}</div>
-                          <div className="text-[11px] text-slate-400 truncate">{p.is_sold ? "Sold — disabled" : (p.active ? "Active" : "Draft")}</div>
+                          <div className="text-sm font-medium truncate max-w-[320px] flex items-center gap-2">
+                            {p.title}
+                            {badge && <span className={`chip ${badge.cls}`} data-testid={`product-badge-${p.id}`}>{badge.label}</span>}
+                          </div>
+                          <div className="text-[11px] text-slate-400 truncate">{dead ? "Inactive — not shown on storefront" : "Active"}</div>
                         </div>
                       </div>
                     </td>
@@ -3303,7 +3330,12 @@ function Products() {
                     <td>
                       <div className="flex items-center gap-1 justify-end">
                         <button onClick={() => setEditing(p)} className="btn btn-ghost text-xs !py-1 !px-2">Edit</button>
-                        <button onClick={() => del(p)} className="btn btn-danger text-xs !py-1 !px-2"><Trash2 size={12}/></button>
+                        {dead && (
+                          <button onClick={() => archive(p)} className="btn btn-ghost text-xs !py-1 !px-2" data-testid={`product-archive-${p.id}`} title="Archive — hide from main list, restore later">
+                            <Warehouse size={12}/> Archive
+                          </button>
+                        )}
+                        <button onClick={() => del(p)} className="btn btn-danger text-xs !py-1 !px-2" data-testid={`product-delete-${p.id}`} title="Delete permanently"><Trash2 size={12}/></button>
                       </div>
                     </td>
                   </tr>
@@ -3316,6 +3348,60 @@ function Products() {
       <AnimatePresence>
         {editing && <ProductEditModal product={editing} categories={cats} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }}/>}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function ArchivedProducts() {
+  const [list, setList] = useState([]);
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/products`, { params: { archived: true } });
+    setList(data.products || []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const restore = async (p) => { await axios.post(`${API}/products/${p.id}/restore`); toast.success(`Restored "${p.title.slice(0,40)}"`); load(); };
+  const del     = async (p) => { if (!window.confirm(`Delete "${p.title}"? This can't be undone.`)) return; await axios.delete(`${API}/products/${p.id}`); toast.success("Deleted"); load(); };
+
+  return (
+    <div className="card overflow-hidden" data-testid="archived-products">
+      {list.length === 0
+        ? <div className="p-10 text-center text-slate-500">No archived products. Archive an inactive product from All Products and it'll appear here.</div>
+        : <div className="overflow-x-auto"><table className="tbl">
+            <thead><tr><th>Product</th><th>Status</th><th>Archived</th><th className="text-right">Sell</th><th className="text-right">Stock</th><th></th></tr></thead>
+            <tbody>
+              {list.map(p => {
+                const badge = statusBadge(p);
+                return (
+                  <tr key={p.id} data-testid={`archived-row-${p.id}`} className="opacity-70">
+                    <td>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border hairline shrink-0 grayscale">
+                          {p.images?.[0] ? <img src={proxyImg(p.images[0])} alt="" className="w-full h-full object-cover"/> : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={16}/></div>}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate max-w-[360px]">{p.title}</div>
+                          <div className="text-[11px] text-slate-400 font-mono">{p.sku || "—"}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{badge ? <span className={`chip ${badge.cls}`}>{badge.label}</span> : <span className="chip chip-neutral">Archived</span>}</td>
+                    <td className="text-xs text-slate-500 font-mono">{p.archived_at ? fmtDate(p.archived_at) : "—"}</td>
+                    <td className="text-right font-mono">{moneyCents(p.price)}</td>
+                    <td className="text-right">{p.stock ?? 0}</td>
+                    <td>
+                      <div className="flex items-center gap-1 justify-end">
+                        <button onClick={() => restore(p)} className="btn btn-primary text-xs !py-1 !px-2" data-testid={`archived-restore-${p.id}`}>
+                          <Undo2 size={12}/> Restore
+                        </button>
+                        <button onClick={() => del(p)} className="btn btn-danger text-xs !py-1 !px-2" data-testid={`archived-delete-${p.id}`}><Trash2 size={12}/></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table></div>
+      }
     </div>
   );
 }

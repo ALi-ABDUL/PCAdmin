@@ -1,0 +1,28 @@
+{
+  "summary": "Tested the new eBay listing-status auto-inactivation feature end-to-end (backend + frontend). All 9 pytest cases in test_stock_status_and_archive.py pass (scraper classifier: ended/sold/out_of_stock/live; archive hides product from default list; archived=true endpoint returns only archived; restore does not re-activate sold; archive 404 on unknown). Frontend: All Products correctly grays out (opacity-60) sold/ended/out-of-stock rows, renders SOLD / ENDED / OUT OF STOCK badges via [data-testid=product-badge-<id>], and shows Archive + Delete + Edit buttons. Clicking Archive on the sold row removes it from All Products; the Archived tab shows it with a Restore [data-testid=archived-restore-<id>] + Delete button. Restoring a sold product returns it to All Products still grayed-out with a SOLD badge (does not re-activate). Price Alerts page hides all is_sold / non-live items and shows the excluded strip ('1 sold / ended / out-of-stock listing excluded') via [data-testid=price-alerts-excluded]; Items tracked reflects live-only count.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "All Products (inactive rows)", "issues": ["`grayscale` class is applied to the thumbnail image only (line 3305), not the whole row — visually acceptable but the review spec wording suggested full-row grayscale. Non-blocking."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stock_status_and_archive.py",
+    "/app/test_reports/pytest/pytest_stock_archive.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "App.js is very large (>4000 lines) — Products/ArchivedProducts/PriceAlertsView should be split into separate component files for maintainability.",
+    "statusBadge() classifier logic in App.js should live alongside a shared constants file so backend and frontend stay in sync when a new stock_status value is added."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Not required — /api/products endpoints are open.",
+  "seed_data_creation": "None — used the pre-seeded 3 inactive-stock + 1 archived product. Test flow archived then restored the sold product (34f58131...) — it is now back in All Products in its original inactive state.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All feature acceptance criteria pass. If retesting, note that the sold product 34f58131-4b26-442f-a18a-cb02b556e038 was archived+restored during this run — it is now unarchived (archived=False) and still active=False, stock_status=sold, so the archived tab has only the original 49bcf5af... item.",
+  "rca of the issue": "No issue found."
+}

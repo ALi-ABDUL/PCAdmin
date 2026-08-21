@@ -310,6 +310,38 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
   (all pass) covering register gates, login, review verification/dedup,
   public aggregate endpoint, and vote endpoint auth/validation.
 
+### Auto-inactivation on eBay status change + Archive lifecycle (2026-02-22)
+- **Scraper** (`scraper.py`): now classifies eBay listing state into
+  `stock_status` ∈ `{live | sold | ended | out_of_stock}`. Priority:
+  ended > sold > out_of_stock. `is_sold` is `True` for any non-live.
+- **Product model** (`server.py`): adds `stock_status: str = "live"`,
+  `archived: bool = False`, `archived_at: Optional[str]`. `ProductUpdate`
+  accepts both new fields.
+- **Scrape/refresh flow** (`scrape` handler): on any live→dead transition
+  mirrors the status to every linked product (`{active: False, is_sold: True,
+  stock_status, updated_at}`), inserts a `sold_events` doc stamped with
+  `stock_status`, and fires a status-aware notification
+  (`Listing ended on eBay` / `Sold on eBay` / `Out of stock on eBay`).
+- **New endpoints**:
+  - `GET /api/products` now defaults to `archived: {$ne: True}` (archived rows
+    hidden from main list). `?archived=true` returns only archived products.
+  - `POST /api/products/{pid}/archive` — sets archived+active=False+timestamp.
+  - `POST /api/products/{pid}/restore` — clears archived; only re-activates if
+    the eBay listing is still live (sold products stay inactive).
+- **Frontend**:
+  - New `Products → Archived` tab (`prd-archived`) with Restore + Delete.
+  - `Products → All Products` grays out inactive rows and shows red status
+    badges (`SOLD` / `ENDED` / `OUT OF STOCK`) via `statusBadge()` +
+    `[data-testid=product-badge-<id>]`. Inactive rows get an additional
+    `Archive` button next to Edit / Delete.
+  - `Price Alerts` filters out `!is_sold && stock_status === "live"` and
+    surfaces a `N sold / ended / out-of-stock listing(s) excluded` strip
+    (`[data-testid=price-alerts-excluded]`).
+- Tests: `/app/backend/tests/test_stock_status_and_archive.py` — 9 pytest
+  cases (all pass) covering scraper classifier for the 4 states and the
+  archive/restore lifecycle including "restore doesn't reactivate sold".
+- Testing-agent iteration_3.json: 100% pass, no defects.
+
 ## Backlog / roadmap
 ### P1
 - Bulk import (paste multiple eBay URLs)
@@ -333,4 +365,9 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
   (all pass) covering run history + retry-on-failure orchestration.
 - `/app/backend/tests/test_customer_portal.py` — 13 pytest cases (all pass)
   covering portal auth, verified-purchase reviews, and helpful voting.
-- Latest iteration report: `/app/test_reports/iteration_1.json` (100% backend & frontend).
+- `/app/backend/tests/test_aliko_portal_flow.py` — 6 pytest cases (all pass)
+  targeting the aliko@yopmail.com fresh-account regression.
+- `/app/backend/tests/test_stock_status_and_archive.py` — 9 pytest cases
+  (all pass) covering the scraper stock_status classifier + product
+  archive/restore lifecycle.
+- Latest iteration report: `/app/test_reports/iteration_3.json` (100% backend & frontend).

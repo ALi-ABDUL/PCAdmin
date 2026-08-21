@@ -625,16 +625,30 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
         m = re.search(r"Located in[:\s]+([^.]+?)(?:\.|$)", shipping)
         if m: location = m.group(1).strip()
 
-    # --- Sold / ended detection ---------------------------------------------
+    # --- Sold / ended / out-of-stock detection ------------------------------
     is_sold = False
+    stock_status = "live"   # live | sold | ended | out_of_stock
     lower_html = html.lower()
+    # 1) Seller ended the listing (no sale)
     if ("this listing has ended" in lower_html
         or "this listing was ended by the seller" in lower_html
-        or 'itemavailability">soldout' in lower_html.replace(" ", "")
+        or "the listing you're looking for has ended" in lower_html):
+        is_sold = True
+        stock_status = "ended"
+    # 2) Sold out / sold
+    elif ('itemavailability">soldout' in lower_html.replace(" ", "")
         or 'itemavailability" content="https://schema.org/soldout' in lower_html
         or re.search(r"this\s+item\s+has\s+sold", lower_html)
-    ):
+        or "this item has been sold" in lower_html):
         is_sold = True
+        stock_status = "sold"
+    # 3) Out of stock / no more units available (listing still live)
+    elif ('itemavailability">outofstock' in lower_html.replace(" ", "")
+        or 'itemavailability" content="https://schema.org/outofstock' in lower_html
+        or "out of stock" in lower_html
+        or "no longer available" in lower_html):
+        is_sold = True
+        stock_status = "out_of_stock"
 
 
     # Description will be fetched separately from the iframe.
@@ -685,6 +699,7 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
         "returns_policy": returns_policy,
         "payment_methods": payment_methods,
         "is_sold": is_sold,
+        "stock_status": stock_status,
         "images": images,
         "specifics": specifics,
         "ebay_category_path": ebay_category_path,

@@ -155,6 +155,10 @@ class ProductCreate(BaseModel):
     source_item_id: Optional[str] = None
     active: bool = True
     sku: Optional[str] = None
+    stock_status: str = "live"          # live | sold | ended | out_of_stock
+    is_sold: bool = False               # kept for backward compat (True iff stock_status != "live")
+    archived: bool = False
+    archived_at: Optional[str] = None
 
 
 class Product(ProductCreate):
@@ -174,6 +178,8 @@ class ProductUpdate(BaseModel):
     images: Optional[List[str]] = None
     active: Optional[bool] = None
     sku: Optional[str] = None
+    stock_status: Optional[str] = None
+    archived: Optional[bool] = None
 
 
 # AU address generator used by the demo seed + backfill for existing orders without addresses.
@@ -341,10 +347,13 @@ async def scrape(req: ScrapeRequest) -> dict:
             # Preserve user's feature_flags
             if "feature_flags" in existing:
                 update_fields["feature_flags"] = existing["feature_flags"]
-            # Only overwrite sold_detected_at if it's a new sold event
-            if data.get("is_sold") and not existing.get("is_sold"):
+            # Only overwrite sold_detected_at if it's a new sold/ended/OOS event
+            new_status = data.get("stock_status") or ("sold" if data.get("is_sold") else "live")
+            prev_status = existing.get("stock_status") or ("sold" if existing.get("is_sold") else "live")
+            status_changed_to_dead = (new_status != "live") and (prev_status == "live")
+            if status_changed_to_dead:
                 update_fields["sold_detected_at"] = now_iso
-                # Record a sold-event for the frontend toast feed
+                # Record an event for the frontend toast feed
                 await db.sold_events.insert_one({
                     "id": str(uuid.uuid4()),
                     "item_id": existing.get("id"),
@@ -353,19 +362,27 @@ async def scrape(req: ScrapeRequest) -> dict:
                     "url": existing.get("url"),
                     "image": (data.get("images") or existing.get("images") or [None])[0],
                     "last_price": data.get("price_value") or existing.get("price_value"),
+                    "stock_status": new_status,
                     "detected_at": now_iso,
                     "notified": False,
                 })
-                # Mirror to product if linked
-                await db.products.update_many({"source_item_id": data.get("item_id")}, {"$set": {"active": False, "is_sold": True, "updated_at": now_iso}})
-                # Notification: product went out of stock on eBay
+                # Mirror to product if linked (also stamp stock_status so the UI can show the right badge)
+                await db.products.update_many(
+                    {"source_item_id": data.get("item_id")},
+                    {"$set": {"active": False, "is_sold": True, "stock_status": new_status, "updated_at": now_iso}},
+                )
+                # Human-readable notification per status
+                status_titles = {"sold": "Sold on eBay", "ended": "Listing ended on eBay", "out_of_stock": "Out of stock on eBay"}
+                status_bodies = {"sold": "sold — no longer available", "ended": "the seller ended the listing", "out_of_stock": "out of stock — no more units"}
+                notif_title = status_titles.get(new_status, "No longer live on eBay")
+                notif_reason = status_bodies.get(new_status, "no longer available")
                 linked = await db.products.find({"source_item_id": data.get("item_id")}, {"_id": 0, "id": 1, "title": 1, "images": 1}).to_list(20)
                 targets = linked or [{"id": None, "title": data.get("title") or existing.get("title"), "images": data.get("images") or existing.get("images") or []}]
                 for lp in targets:
                     await _emit_notification(
                         type="out_of_stock",
-                        title="Sold out on eBay",
-                        body=f"{lp.get('title') or 'Item'} · listing is no longer live",
+                        title=notif_title,
+                        body=f"{lp.get('title') or 'Item'} · {notif_reason}",
                         product_id=lp.get("id"),
                         item_id=data.get("item_id"),
                         ebay_url=existing.get("url"),
@@ -2556,6 +2573,7 @@ async def list_products(
     q: Optional[str] = None,
     category: Optional[str] = None,
     active: Optional[bool] = None,
+    archived: Optional[bool] = None,     # None → exclude archived; True → only archived; False → only unarchived
     sort: str = "created_at_desc",
     limit: int = Query(200, le=1000),
 ):
@@ -2569,6 +2587,11 @@ async def list_products(
         query["category"] = category
     if active is not None:
         query["active"] = active
+    if archived is True:
+        query["archived"] = True
+    else:
+        # Default (None) or False → hide archived from the main list
+        query["archived"] = {"$ne": True}
     sort_map = {
         "created_at_desc": [("created_at", -1)],
         "created_at_asc": [("created_at", 1)],
@@ -2581,6 +2604,33 @@ async def list_products(
     products = await cursor.to_list(length=limit)
     total = await db.products.count_documents(query)
     return {"products": products, "total": total}
+
+
+@api_router.post("/products/{pid}/archive")
+async def archive_product(pid: str):
+    now = datetime.now(timezone.utc).isoformat()
+    r = await db.products.update_one(
+        {"id": pid},
+        {"$set": {"archived": True, "archived_at": now, "active": False, "updated_at": now}},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return await db.products.find_one({"id": pid}, {"_id": 0})
+
+
+@api_router.post("/products/{pid}/restore")
+async def restore_product(pid: str):
+    """Restore an archived product. Marks active=True only if the eBay listing is still live."""
+    p = await db.products.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+    now = datetime.now(timezone.utc).isoformat()
+    still_live = (p.get("stock_status") or "live") == "live" and not p.get("is_sold")
+    await db.products.update_one(
+        {"id": pid},
+        {"$set": {"archived": False, "archived_at": None, "active": bool(still_live), "updated_at": now}},
+    )
+    return await db.products.find_one({"id": pid}, {"_id": 0})
 
 
 @api_router.get("/products/{pid}")

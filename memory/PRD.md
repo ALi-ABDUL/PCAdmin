@@ -269,6 +269,47 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
 - Analytics: all-time KPIs + daily bar chart.
 - Settings: store settings + scraper API keys (localStorage) + default method.
 
+### Customer Portal + Verified-Purchase Reviews (2026-02-21)
+- **JWT auth (Bearer token, 7-day TTL)** — new collection `customer_accounts`
+  `{id, email, password_hash, name, created_at}`. bcrypt password hashing,
+  unique index on `email`. Env var `JWT_SECRET` in `backend/.env`.
+- **Registration is gated** — the submitted email must already have at least one
+  order in `db.orders`, blocking fake reviews from non-buyers.
+- **New backend endpoints**:
+  - `POST /api/portal/register` — 403 if email has no order, 409 on duplicate
+    account, else creates account and returns `{token, customer}`.
+  - `POST /api/portal/login` — returns `{token, customer}`.
+  - `GET  /api/portal/me` — current customer from bearer token.
+  - `GET  /api/portal/orders` — customer's orders + `can_review` (only paid
+    or later) + `already_reviewed` flags.
+  - `POST /api/portal/reviews` — verified-purchase review with dedupe (409 if
+    already reviewed) and rating range 1–5 (400 otherwise). Reviews are
+    auto-approved and stamped `verified_purchase: True`.
+  - `GET  /api/portal/my-reviews` — customer's own reviews.
+  - `POST /api/reviews/{rid}/vote` — `helpful | not_helpful | clear`; one vote
+    per customer, can't vote on your own review. Response includes
+    `my_vote` marker.
+  - `GET  /api/products/{product_id}/reviews` — public aggregate feed:
+    `{reviews, total, average_rating, rating_distribution}`.
+- **Enhanced Review model** — adds `customer_email, order_id,
+  verified_purchase, helpful_votes[], not_helpful_votes[]`. Public shape exposes
+  `helpful_count`/`not_helpful_count` (raw email lists stripped).
+- **Frontend — new "My Orders Portal" under Customers group** (`cus-portal`):
+  - Login / register tabbed card with the "existing purchaser" hint.
+  - Signed-in dashboard: header with Order count / Total spend / Awaiting-review
+    count / Sign-out. Order cards show status chip, price, and either
+    "You've reviewed this" chip, "Write a review" primary button, or
+    "Review available once processed" chip.
+  - Inline review composer with 1-5 star picker, optional title, body,
+    Post/Cancel actions.
+  - Under each order, an inline aggregate + up-to-3 reviews list with average
+    stars, verified badge, and 👍/👎 vote buttons (auth-gated).
+- **Enhanced admin Reviews page** — average rating card, star distribution bar
+  chart, verified-purchase chip, helpful counts. Delete now confirms.
+- Tests: `/app/backend/tests/test_customer_portal.py` — 13 pytest cases
+  (all pass) covering register gates, login, review verification/dedup,
+  public aggregate endpoint, and vote endpoint auth/validation.
+
 ## Backlog / roadmap
 ### P1
 - Bulk import (paste multiple eBay URLs)
@@ -277,12 +318,12 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
   in UI beyond the general items list)
 
 ### P2
-- Real customer accounts (currently derived from orders)
-- Public storefront reading /api/products
+- Public storefront reading /api/products (would consume `GET /api/products/{id}/reviews` already implemented)
 - Admin authentication
 - Product ↔ supplier linking (kept minimal after suppliers refactor)
-- Refactor `App.js` (2600+ lines) into per-module files: `Suppliers.jsx`,
-  `ScraperPage.jsx`, `ProductsPage.jsx`, `PriceHistoryChart.jsx`, `nav.js`.
+- Refactor `App.js` (~4300 lines) into per-module files: `Suppliers.jsx`,
+  `ScraperPage.jsx`, `ProductsPage.jsx`, `PriceHistoryChart.jsx`,
+  `CustomerPortal.jsx`, `nav.js`.
 - Replace N+1 pattern in `_build_sellers()` with a single `$lookup` aggregation
   when seller count grows beyond ~500.
 
@@ -290,4 +331,6 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
 - `/app/backend/tests/test_suppliers_and_items.py` — 12 pytest cases (all pass).
 - `/app/backend/tests/test_scheduler_history_and_retry.py` — 9 pytest cases
   (all pass) covering run history + retry-on-failure orchestration.
+- `/app/backend/tests/test_customer_portal.py` — 13 pytest cases (all pass)
+  covering portal auth, verified-purchase reviews, and helpful voting.
 - Latest iteration report: `/app/test_reports/iteration_1.json` (100% backend & frontend).

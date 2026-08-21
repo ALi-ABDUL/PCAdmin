@@ -16,6 +16,9 @@ from datetime import datetime, timezone, timedelta
 
 import asyncio
 import resend
+import bcrypt
+import jwt
+from fastapi import Depends, Header
 from scraper import (
     ScrapeError,
     NotEbayAUError,
@@ -885,6 +888,11 @@ async def _start_scheduler():
     if await db.customers.count_documents({}) == 0:
         await _rebuild_customers_from_orders()
     await _seed_transactions_and_returns()
+    try:
+        await db.customer_accounts.create_index("email", unique=True)
+        await db.reviews.create_index([("product_id", 1), ("customer_email", 1)])
+    except Exception as e:
+        logger.warning(f"index setup: {e}")
     asyncio.create_task(_scheduler_loop())
 
 
@@ -1384,15 +1392,31 @@ async def delete_coupon(cid: str):
 class ReviewBase(BaseModel):
     product_id: str
     customer_name: str = "Anonymous"
+    customer_email: Optional[str] = ""
     rating: int = 5
     title: Optional[str] = ""
     body: Optional[str] = ""
-    status: str = "pending"  # pending | approved | rejected
+    status: str = "approved"     # pending | approved | rejected — portal reviews are auto-approved (verified)
+    order_id: Optional[str] = ""
+    verified_purchase: bool = False
 
 
 class Review(ReviewBase):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    helpful_votes: List[str] = Field(default_factory=list)      # customer emails that voted helpful
+    not_helpful_votes: List[str] = Field(default_factory=list)  # customer emails that voted not-helpful
+
+
+def _shape_review(r: dict) -> dict:
+    """Attach counts, strip private lists before returning to public consumers."""
+    hv = r.get("helpful_votes") or []
+    nv = r.get("not_helpful_votes") or []
+    return {
+        **{k: v for k, v in r.items() if k not in ("helpful_votes", "not_helpful_votes")},
+        "helpful_count": len(hv),
+        "not_helpful_count": len(nv),
+    }
 
 
 @api_router.get("/reviews")
@@ -1401,7 +1425,27 @@ async def list_reviews(product_id: Optional[str] = None, status: Optional[str] =
     if product_id: q["product_id"] = product_id
     if status:     q["status"] = status
     items = await db.reviews.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return {"reviews": items, "total": len(items)}
+    return {"reviews": [_shape_review(r) for r in items], "total": len(items)}
+
+
+@api_router.get("/products/{product_id}/reviews")
+async def product_reviews(product_id: str):
+    """Public review feed for a product page: approved reviews + aggregate stats."""
+    items = await db.reviews.find(
+        {"product_id": product_id, "status": "approved"}, {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+    ratings = [int(r.get("rating") or 0) for r in items if r.get("rating")]
+    dist = {str(i): 0 for i in range(1, 6)}
+    for r in ratings:
+        if 1 <= r <= 5:
+            dist[str(r)] += 1
+    avg = round(sum(ratings) / len(ratings), 2) if ratings else 0.0
+    return {
+        "reviews": [_shape_review(r) for r in items],
+        "total": len(items),
+        "average_rating": avg,
+        "rating_distribution": dist,
+    }
 
 
 @api_router.post("/reviews", response_model=Review)
@@ -1413,9 +1457,10 @@ async def create_review(body: ReviewBase):
 
 @api_router.patch("/reviews/{rid}")
 async def update_review(rid: str, body: dict):
+    body.pop("helpful_votes", None); body.pop("not_helpful_votes", None)
     r = await db.reviews.update_one({"id": rid}, {"$set": body})
     if r.matched_count == 0: raise HTTPException(status_code=404, detail="Not found")
-    return await db.reviews.find_one({"id": rid}, {"_id": 0})
+    return _shape_review(await db.reviews.find_one({"id": rid}, {"_id": 0}))
 
 
 @api_router.delete("/reviews/{rid}")
@@ -1423,6 +1468,219 @@ async def delete_review(rid: str):
     r = await db.reviews.delete_one({"id": rid})
     if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Not found")
     return {"deleted": True}
+
+
+# --- Customer Portal (JWT auth + verified-purchase reviews) ---------------
+
+JWT_ALGO = "HS256"
+JWT_ACCESS_TTL = timedelta(days=7)  # portal sessions last a week
+
+
+def _jwt_secret() -> str:
+    s = os.environ.get("JWT_SECRET")
+    if not s:
+        raise RuntimeError("JWT_SECRET missing from backend/.env")
+    return s
+
+
+def _hash_password(pw: str) -> str:
+    return bcrypt.hashpw(pw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_password(pw: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(pw.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def _issue_token(customer_email: str) -> str:
+    payload = {
+        "sub": customer_email,
+        "type": "access",
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + JWT_ACCESS_TTL,
+    }
+    return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALGO)
+
+
+async def get_current_customer(authorization: Optional[str] = Header(None)) -> dict:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = authorization[7:]
+    try:
+        payload = jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALGO])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Session expired — please log in again")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid session token")
+    email = (payload.get("sub") or "").lower()
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid session token")
+    acct = await db.customer_accounts.find_one({"email": email}, {"_id": 0, "password_hash": 0})
+    if not acct:
+        raise HTTPException(status_code=401, detail="Account not found")
+    return acct
+
+
+class PortalRegisterBody(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = ""
+
+
+class PortalLoginBody(BaseModel):
+    email: str
+    password: str
+
+
+class PortalReviewBody(BaseModel):
+    product_id: str
+    rating: int
+    title: Optional[str] = ""
+    body: Optional[str] = ""
+
+
+class PortalReviewVoteBody(BaseModel):
+    vote: str  # "helpful" | "not_helpful" | "clear"
+
+
+async def _has_purchased(email: str, product_id: str) -> Optional[dict]:
+    """Return the first matching order (paid or later) for this customer+product, else None."""
+    valid = ["paid", "processing", "shipped", "delivered", "completed"]
+    o = await db.orders.find_one(
+        {"customer_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+         "product_id": product_id,
+         "status": {"$in": valid}},
+        {"_id": 0},
+    )
+    return o
+
+
+@api_router.post("/portal/register")
+async def portal_register(body: PortalRegisterBody):
+    email = (body.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Please enter a valid email address")
+    if len(body.password or "") < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    existing = await db.customer_accounts.find_one({"email": email})
+    if existing:
+        raise HTTPException(status_code=409, detail="An account with this email already exists — please sign in")
+    order = await db.orders.find_one({"customer_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}})
+    if not order:
+        raise HTTPException(
+            status_code=403,
+            detail="We couldn't find any orders for this email. Only customers with existing orders can register.",
+        )
+    display_name = (body.name or order.get("customer_name") or email.split("@")[0]).strip()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "email": email,
+        "name": display_name,
+        "password_hash": _hash_password(body.password),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.customer_accounts.insert_one(doc)
+    token = _issue_token(email)
+    return {"token": token, "customer": {"id": doc["id"], "email": email, "name": display_name}}
+
+
+@api_router.post("/portal/login")
+async def portal_login(body: PortalLoginBody):
+    email = (body.email or "").strip().lower()
+    acct = await db.customer_accounts.find_one({"email": email})
+    if not acct or not _verify_password(body.password or "", acct.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Wrong email or password")
+    token = _issue_token(email)
+    return {"token": token, "customer": {"id": acct["id"], "email": email, "name": acct.get("name", "")}}
+
+
+@api_router.get("/portal/me")
+async def portal_me(current: dict = Depends(get_current_customer)):
+    return {"customer": current}
+
+
+@api_router.get("/portal/orders")
+async def portal_orders(current: dict = Depends(get_current_customer)):
+    """Return every order for the logged-in customer, tagged with review status."""
+    email = current["email"]
+    cursor = db.orders.find(
+        {"customer_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+        {"_id": 0},
+    ).sort("created_at", -1).limit(500)
+    orders = await cursor.to_list(500)
+    reviewed_ids: set = set()
+    async for r in db.reviews.find({"customer_email": email}, {"_id": 0, "product_id": 1}):
+        reviewed_ids.add(r.get("product_id"))
+    for o in orders:
+        pid = o.get("product_id")
+        o["already_reviewed"] = bool(pid and pid in reviewed_ids)
+        o["can_review"] = bool(pid) and (o.get("status") in {"paid", "processing", "shipped", "delivered", "completed"})
+    return {"orders": orders, "total": len(orders)}
+
+
+@api_router.post("/portal/reviews")
+async def portal_create_review(body: PortalReviewBody, current: dict = Depends(get_current_customer)):
+    if not (1 <= int(body.rating) <= 5):
+        raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+    email = current["email"]
+    order = await _has_purchased(email, body.product_id)
+    if not order:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only review products you've purchased. No matching order found for this item.",
+        )
+    prior = await db.reviews.find_one({"product_id": body.product_id, "customer_email": email})
+    if prior:
+        raise HTTPException(status_code=409, detail="You've already reviewed this product — edit your existing review instead")
+    r = Review(
+        product_id=body.product_id,
+        customer_name=current.get("name") or email.split("@")[0],
+        customer_email=email,
+        rating=int(body.rating),
+        title=(body.title or "").strip()[:120],
+        body=(body.body or "").strip()[:4000],
+        status="approved",
+        order_id=order.get("id"),
+        verified_purchase=True,
+    )
+    await db.reviews.insert_one(r.model_dump())
+    return _shape_review(r.model_dump())
+
+
+@api_router.get("/portal/my-reviews")
+async def portal_my_reviews(current: dict = Depends(get_current_customer)):
+    email = current["email"]
+    items = await db.reviews.find({"customer_email": email}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return {"reviews": [_shape_review(r) for r in items], "total": len(items)}
+
+
+@api_router.post("/reviews/{rid}/vote")
+async def review_vote(rid: str, body: PortalReviewVoteBody, current: dict = Depends(get_current_customer)):
+    """Signed-in customers can mark a review as helpful / not-helpful / clear their vote."""
+    email = current["email"]
+    r = await db.reviews.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Review not found")
+    if r.get("customer_email") == email:
+        raise HTTPException(status_code=400, detail="You can't vote on your own review")
+    hv = [e for e in (r.get("helpful_votes") or []) if e != email]
+    nv = [e for e in (r.get("not_helpful_votes") or []) if e != email]
+    if body.vote == "helpful":
+        hv.append(email)
+    elif body.vote == "not_helpful":
+        nv.append(email)
+    elif body.vote == "clear":
+        pass
+    else:
+        raise HTTPException(status_code=400, detail="vote must be 'helpful', 'not_helpful' or 'clear'")
+    await db.reviews.update_one({"id": rid}, {"$set": {"helpful_votes": hv, "not_helpful_votes": nv}})
+    updated = await db.reviews.find_one({"id": rid}, {"_id": 0})
+    result = _shape_review(updated)
+    result["my_vote"] = "helpful" if email in hv else ("not_helpful" if email in nv else None)
+    return result
+
 
 
 class MessageBase(BaseModel):

@@ -159,6 +159,7 @@ class ProductCreate(BaseModel):
     is_sold: bool = False               # kept for backward compat (True iff stock_status != "live")
     archived: bool = False
     archived_at: Optional[str] = None
+    product_code: Optional[str] = None  # public reference — e.g. KF21-PC0826 (auto-generated on create)
 
 
 class Product(ProductCreate):
@@ -246,6 +247,65 @@ class Settings(BaseModel):
 
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-") or "cat"
+
+
+# --- Product code generator -------------------------------------------------
+# Format: [First letter of product name][First letter of day][Day number]-PC[Month][Year]
+# Example: "Keyboard" on Friday 21 Aug 2026 → "KF21-PC0826". Collisions get a "-N" suffix.
+_DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"]  # Mon..Sun (matches user spec: first letter of day)
+
+
+def _product_code_base(title: str, dt: Optional[datetime] = None) -> str:
+    dt = dt or datetime.now(timezone.utc)
+    first = next((ch for ch in (title or "") if ch.isalnum()), "X").upper()[:1]
+    day_letter = _DAY_LETTERS[dt.weekday()]
+    return f"{first}{day_letter}{dt.day:02d}-PC{dt.month:02d}{dt.year % 100:02d}"
+
+
+async def _generate_unique_product_code(title: str, dt: Optional[datetime] = None) -> str:
+    """Return a product_code guaranteed unique in db.products."""
+    base = _product_code_base(title, dt)
+    if not await db.products.find_one({"product_code": base}, {"_id": 1}):
+        return base
+    n = 2
+    while True:
+        candidate = f"{base}-{n}"
+        if not await db.products.find_one({"product_code": candidate}, {"_id": 1}):
+            return candidate
+        n += 1
+
+
+async def _ensure_product_codes_backfilled() -> None:
+    """One-shot backfill: assign product_code to any product missing one.
+    Uses the product's created_at (falls back to now) so codes reflect the real scrape day."""
+    cursor = db.products.find({"$or": [{"product_code": {"$exists": False}}, {"product_code": None}, {"product_code": ""}]}, {"_id": 0, "id": 1, "title": 1, "created_at": 1})
+    count = 0
+    async for p in cursor:
+        try:
+            dt = datetime.fromisoformat(p.get("created_at") or "") if p.get("created_at") else None
+        except Exception:
+            dt = None
+        code = await _generate_unique_product_code(p.get("title") or "Product", dt)
+        await db.products.update_one({"id": p["id"]}, {"$set": {"product_code": code}})
+        count += 1
+    if count:
+        logger.info(f"backfilled product_code on {count} products")
+
+
+async def _ensure_order_references_backfilled() -> None:
+    """Backfill reference on existing orders using their linked product's product_code."""
+    cursor = db.orders.find({"$or": [{"reference": {"$exists": False}}, {"reference": None}, {"reference": ""}]}, {"_id": 0, "id": 1, "product_id": 1})
+    count = 0
+    async for o in cursor:
+        pid = o.get("product_id")
+        if not pid:
+            continue
+        p = await db.products.find_one({"id": pid}, {"_id": 0, "product_code": 1})
+        if p and p.get("product_code"):
+            await db.orders.update_one({"id": o["id"]}, {"$set": {"reference": p["product_code"]}})
+            count += 1
+    if count:
+        logger.info(f"backfilled reference on {count} orders")
 
 
 class Category(BaseModel):
@@ -542,6 +602,7 @@ async def items_bulk_action(body: ItemBulkAction):
                     source_url=it.get("url"),
                     source_item_id=it.get("item_id") or it.get("id"),
                 )
+                prod.product_code = await _generate_unique_product_code(prod.title)
                 await db.products.insert_one(prod.model_dump())
                 await db.items.update_one({"id": iid}, {"$set": {"added_to_products": True}})
                 created += 1
@@ -905,9 +966,12 @@ async def _start_scheduler():
     if await db.customers.count_documents({}) == 0:
         await _rebuild_customers_from_orders()
     await _seed_transactions_and_returns()
+    await _ensure_product_codes_backfilled()
+    await _ensure_order_references_backfilled()
     try:
         await db.customer_accounts.create_index("email", unique=True)
         await db.reviews.create_index([("product_id", 1), ("customer_email", 1)])
+        await db.products.create_index("product_code", unique=True, sparse=True)
     except Exception as e:
         logger.warning(f"index setup: {e}")
     asyncio.create_task(_scheduler_loop())
@@ -1098,6 +1162,23 @@ async def _seed_transactions_and_returns():
         await db.abandoned_carts.insert_many(cart_docs)
 
 
+@api_router.get("/orders/status-counts")
+async def order_status_counts():
+    pipeline = [{"$group": {"_id": "$status", "count": {"$sum": 1}}}]
+    rows = await db.orders.aggregate(pipeline).to_list(50)
+    counts = {r["_id"]: r["count"] for r in rows}
+    total = sum(counts.values())
+    return {"total": total, "counts": counts}
+
+
+@api_router.get("/orders/{oid}")
+async def get_order(oid: str):
+    o = await db.orders.find_one({"id": oid}, {"_id": 0})
+    if not o:
+        raise HTTPException(status_code=404, detail="Not found")
+    return o
+
+
 @api_router.patch("/orders/{oid}")
 async def update_order(oid: str, body: dict):
     prev = await db.orders.find_one({"id": oid}, {"_id": 0})
@@ -1121,15 +1202,6 @@ async def update_order(oid: str, body: dict):
                   "customer_name": prev.get("customer_name"), "total": prev.get("total")},
         )
     return updated
-
-
-@api_router.get("/orders/status-counts")
-async def order_status_counts():
-    pipeline = [{"$group": {"_id": "$status", "count": {"$sum": 1}}}]
-    rows = await db.orders.aggregate(pipeline).to_list(50)
-    counts = {r["_id"]: r["count"] for r in rows}
-    total = sum(counts.values())
-    return {"total": total, "counts": counts}
 
 
 @api_router.get("/returns")
@@ -2556,6 +2628,7 @@ async def create_product_from_item(item_id: str):
         source_item_id=it.get("item_id"),
         sku=f"SKU-{(it.get('item_id') or uuid.uuid4().hex[:8])[-6:]}",
     )
+    prod.product_code = await _generate_unique_product_code(prod.title)
     await db.products.insert_one(prod.model_dump())
     await db.items.update_one({"id": item_id}, {"$set": {"added_to_products": True}})
     return prod.model_dump()
@@ -2564,6 +2637,8 @@ async def create_product_from_item(item_id: str):
 @api_router.post("/products", response_model=Product)
 async def create_product(body: ProductCreate):
     prod = Product(**body.model_dump())
+    if not prod.product_code:
+        prod.product_code = await _generate_unique_product_code(prod.title)
     await db.products.insert_one(prod.model_dump())
     return prod
 
@@ -2674,6 +2749,7 @@ async def create_order(body: OrderCreate):
     cost_total = round((p.get("cost") or 0) * body.quantity, 2)
     order = {
         "id": str(uuid.uuid4()),
+        "reference": p.get("product_code"),
         "product_id": p["id"],
         "product_title": p.get("title"),
         "quantity": body.quantity,

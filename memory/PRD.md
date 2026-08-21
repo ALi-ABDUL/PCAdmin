@@ -342,6 +342,35 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
   archive/restore lifecycle including "restore doesn't reactivate sold".
 - Testing-agent iteration_3.json: 100% pass, no defects.
 
+### Product codes, order refs, notification deep-links, category browser (2026-02-22b)
+- **Product code generator** — every product now gets a `product_code` in the
+  format `[first alnum of title][first-letter of weekday][2-digit day]-PC[2-digit month][2-digit year]`
+  (e.g. `KF21-PC0826` for a Keyboard on Friday 21 Aug 2026). Duplicates receive
+  a `-N` suffix (`KF21-PC0826-2`). Helpers: `_product_code_base`,
+  `_generate_unique_product_code`. Backfill on startup wrote codes to 29
+  existing products; unique sparse index enforces uniqueness.
+- **Order references** — `Order.reference` is populated from the linked
+  product's `product_code` at creation. Backfill wrote references to 787 existing
+  orders. Frontend Orders table now uses **Reference** as the first column.
+- **Notification deep-links** — clicking a notification with `order_id` or
+  `product_id` navigates to Orders/Products AND opens the specific detail
+  modal via a new `deepLink` state passed to the module. New backend endpoint
+  `GET /api/orders/{oid}` for fetch-on-demand when the item isn't in the
+  current filter.
+- **Categories → click-to-browse** — clicking a category card opens
+  `CategoryProductBrowser` (grid view) with each product showing image, status
+  badge, `product_code` chip, eBay/Sell/Margin/Stock stats, and inline
+  Edit / Update Price / Refresh from eBay / Delete buttons. `cat-back` returns
+  to the categories grid.
+- **Removed** — `Returns & Refunds` from Store Management sidebar and
+  `settingsMeta.returns-refunds`. (The Orders → Returns page is untouched.)
+- Tests: `/app/backend/tests/test_product_code.py` — 9 pytest cases (format +
+  dedup) + `/app/backend/tests/test_product_code_orders_api.py` — 6 pytest
+  cases (API-level product_code / order.reference / new /orders/{oid}
+  endpoint / regression of /orders/status-counts).
+- Testing agent iteration_4.json: 100% pass (15/15 backend, 8/8 frontend), no
+  defects.
+
 ## Backlog / roadmap
 ### P1
 - Bulk import (paste multiple eBay URLs)
@@ -370,4 +399,8 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
 - `/app/backend/tests/test_stock_status_and_archive.py` — 9 pytest cases
   (all pass) covering the scraper stock_status classifier + product
   archive/restore lifecycle.
-- Latest iteration report: `/app/test_reports/iteration_3.json` (100% backend & frontend).
+- `/app/backend/tests/test_product_code.py` — 9 pytest cases (all pass)
+  covering product_code format and dedup.
+- `/app/backend/tests/test_product_code_orders_api.py` — 6 pytest cases
+  (all pass) covering API-level product_code + order.reference behavior.
+- Latest iteration report: `/app/test_reports/iteration_4.json` (100% backend & frontend).

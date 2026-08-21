@@ -1,0 +1,46 @@
+{
+  "summary": "Verified all four new features: (1) product_code generation & display, (2) order Reference column & POST /api/orders population, (3) new GET /api/orders/{oid} + regression of /orders/status-counts, (4) Categories click-through browser with cat-edit/cat-price/cat-refresh/cat-delete/cat-product-code testids, and notification bell deep-link to order-details-modal. Also confirmed 'Returns & Refunds' is removed from Store Management sidebar (visual + testid scan).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_product_code_orders_api.py",
+    "/app/backend/tests/test_product_code.py",
+    "/app/test_reports/pytest/product_code_orders.xml"
+  ],
+  "backend_tests_executed": {
+    "test_product_code_orders_api.py": "6/6 passed (product_code on create/list/get, order.reference populated on POST, GET /api/orders/{oid} 200 + 404, /orders/status-counts regression)",
+    "test_product_code.py": "9/9 passed (format + dedup unit tests)"
+  },
+  "frontend_tests_executed": {
+    "products_show_product_code": "PASS — product-code-<id> visible on every row with pattern [A-Z][A-Z][0-9]{2}-PC[0-9]{4} (e.g. AF21-PC0826, SW19-PC0826-3)",
+    "orders_reference_column": "PASS — first header is 'Reference', ord-ref-<id> populated (TF21-PC0826-2 for the seeded TEST order)",
+    "store_no_returns_refunds": "PASS — sidebar shows Store Settings, Pricing Rules, Scraper Schedule, Push Notifications, Payment Gateway, Shipping Methods, Tax Rates, Checkout Settings, Email & Notifications, Popup Messages, Site Menus, Pages, Locations, SEO Settings, Analytics & Tracking, Integrations, Security; no 'Returns & Refunds' item",
+    "category_browser_opens": "PASS — clicking category-card-laptops-computers opens category-product-browser with 5 product cards and cat-back button",
+    "category_product_testids": "PASS — cat-product-code-<id>, cat-edit-<id>, cat-price-<id>, cat-refresh-<id>, cat-delete-<id> all present on every card; code chip format matches (e.g. SW19-PC0826-2)",
+    "category_edit_modal": "PASS — cat-edit opens the 'Edit product' modal with Title/SKU/Price/Cost/Stock/Active/Description fields and Save button",
+    "category_back_button": "PASS — cat-back closes the browser and returns to Categories grid",
+    "notification_order_deeplink": "PASS — clicking 'New order received' notification navigated to Orders → All Orders and opened order-details-modal for the exact order (TEST_Buyer / TEST_Keyboard-dad98a, ref TF21-PC0826-2)"
+  },
+  "action_items": [],
+  "critical_code_review_comments": [
+    "All notification list items share data-testid='notif-item' (non-unique). Not blocking but not ideal for targeting specific notifications from tests — consider notif-item-<id> like other list rows.",
+    "server.py is 3141 lines — approaching the 700-line guideline threshold by a wide margin. Consider splitting into routers/modules (products, orders, notifications, scraping) for maintainability. Not a bug.",
+    "Duplicate FastAPI on_event deprecation warnings (startup/shutdown) — migrate to lifespan handlers when convenient."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_product_code_orders_api.py (new)"
+  ],
+  "success_rate": {"backend": "100% (15/15 across two test files)", "frontend": "100% (8/8 assertions)"},
+  "seed_data_creation": "Test product/order created and cleaned up by test_product_code_orders_api.py. One residual TEST_Keyboard product/order was left visible in UI during manual flow but is harmless (used to demo notification deep-link).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Feature set validated end-to-end. Notification testids: all list items are `notif-item` (non-unique) — click by index/text. Category browser is only reachable via nav-categories then clicking a card that has products (Men's Clothing has 0). GET /api/orders/{oid} sits AFTER /orders/status-counts in server.py to avoid route shadowing — regression covered.",
+  "rca of the issue": "N/A — no defects found."
+}

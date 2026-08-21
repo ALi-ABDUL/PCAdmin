@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Package, Zap, ShoppingCart, Users, BarChart3, Settings2, Search, Eye, EyeOff,
   Loader2, Trash2, Star, RefreshCw, MapPin, Truck, User as UserIcon, Box, ExternalLink,
-  X, ChevronLeft, ChevronRight, ClipboardPaste, Plus, TrendingUp, TrendingDown, DollarSign,
+  X, ChevronLeft, ChevronRight, ClipboardPaste, Plus, TrendingUp, TrendingDown, DollarSign, Pencil,
   ShoppingBag, Percent, Boxes, ArrowUpRight, Filter, Download, ImageIcon, Sparkles,
   Smartphone, Laptop, Tv, Headphones, Camera, Gamepad2, Watch, Utensils, Armchair, Lamp,
   Bed, SprayCan, Flower2, Wrench, Car, Hammer, Shield, Shirt, Footprints, Dumbbell, Tent,
@@ -163,7 +163,6 @@ const STORE_NAV = [
   { id: "shipping-methods",    label: "Shipping Methods",     icon: Truck,        group: "Configuration" },
   { id: "tax-rates",           label: "Tax Rates",            icon: Receipt,      group: "Configuration" },
   { id: "checkout-settings",   label: "Checkout Settings",    icon: ShoppingCart, group: "Configuration" },
-  { id: "returns-refunds",     label: "Returns & Refunds",    icon: Undo2,        group: "Configuration" },
   { id: "email-notifications", label: "Email & Notifications",icon: Mail,         group: "Content" },
   { id: "popup-messages",      label: "Popup Messages",       icon: MessageSquare,group: "Content" },
   { id: "site-menus",          label: "Site Menus",           icon: Menu,         group: "Content" },
@@ -185,6 +184,7 @@ export default function App() {
   const [paymentsSection, setPaymentsSection] = useState("transactions");
   const [selectedItem, setSelectedItem] = useState(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [deepLink, setDeepLink] = useState(null); // { orderId?: str, productId?: str, itemId?: str }
 
   useEffect(() => { setMobileNavOpen(false); }, [tab]);
 
@@ -209,13 +209,15 @@ export default function App() {
     return () => { cancelled = true; clearInterval(iv); };
   }, []);
 
-  const navigateTo = useCallback(({ tab: t, section }) => {
+  const navigateTo = useCallback(({ tab: t, section, filter }) => {
     if (t === "orders") { setTab("orders"); if (section) setOrdersSection(section); }
     else if (t === "products") { setTab("products"); if (section) setProductSection(section); }
     else if (t === "customers") { setTab("customers"); if (section) setCustomerSection(section); }
     else if (t === "scraper") { setTab("scraper"); }
     else if (t) setTab(t);
+    if (filter) setDeepLink({ ...filter, ts: Date.now() });
   }, []);
+  const clearDeepLink = useCallback(() => setDeepLink(null), []);
 
   const inStore = tab === "store";
   const inSuppliers = tab === "suppliers";
@@ -284,8 +286,8 @@ export default function App() {
               {tab === "store"     && <StoreManagement section={storeSection} setSection={setStoreSection}/>}
               {tab === "suppliers" && <Suppliers section={supplierSection} setSection={setSupplierSection}/>}
               {tab === "customers" && <CustomersModule section={customerSection} setSection={setCustomerSection}/>}
-              {tab === "products"  && <ProductsModule section={productSection} setSection={setProductSection}/>}
-              {tab === "orders"    && <OrdersModule section={ordersSection} setSection={setOrdersSection}/>}
+              {tab === "products"  && <ProductsModule section={productSection} setSection={setProductSection} deepLink={deepLink} clearDeepLink={clearDeepLink}/>}
+              {tab === "orders"    && <OrdersModule section={ordersSection} setSection={setOrdersSection} deepLink={deepLink} clearDeepLink={clearDeepLink}/>}
               {tab === "payments"  && <PaymentsModule section={paymentsSection} setSection={setPaymentsSection}/>}
               {tab === "categories" && <Categories />}
               {tab === "scraper"   && <ScraperPage onView={setSelectedItem} />}
@@ -1601,7 +1603,7 @@ function NotesView({ list, onChanged }) {
 }
 
 /* -------------------------- Products (module wrapper) --------------------- */
-function ProductsModule({ section, setSection }) {
+function ProductsModule({ section, setSection, deepLink, clearDeepLink }) {
   const [products, setProducts] = useState([]);
   const [priceAlertItems, setPriceAlertItems] = useState([]);
 
@@ -1628,7 +1630,7 @@ function ProductsModule({ section, setSection }) {
   return (
     <div className="grid gap-6">
       <SubHero icon={Icon} group={meta.group} label={meta.label} hint={hints[section]}/>
-      {section === "all"           && <Products />}
+      {section === "all"           && <Products deepLink={deepLink} clearDeepLink={clearDeepLink}/>}
       {section === "low-stock"     && <StockList list={filtered} tone="warning"/>}
       {section === "out-of-stock"  && <StockList list={filtered} tone="danger"/>}
       {section === "archived"      && <ArchivedProducts />}
@@ -1857,7 +1859,7 @@ function StockHistoryView({ moves }) {
 }
 
 /* --------------------------------- Orders --------------------------------- */
-function OrdersModule({ section, setSection }) {
+function OrdersModule({ section, setSection, deepLink, clearDeepLink }) {
   const meta = ORDERS_NAV.find((s) => s.id === section) || ORDERS_NAV[0];
   const Icon = meta.icon;
   const hints = {
@@ -1868,7 +1870,7 @@ function OrdersModule({ section, setSection }) {
   return (
     <div className="grid gap-6">
       <SubHero icon={Icon} group={meta.group} label={meta.label} hint={hints[section]}/>
-      {section === "all"       && <AllOrdersView/>}
+      {section === "all"       && <AllOrdersView deepLink={deepLink} clearDeepLink={clearDeepLink}/>}
       {section === "returns"   && <ReturnsView/>}
       {section === "abandoned" && <AbandonedCartsView/>}
     </div>
@@ -1888,7 +1890,7 @@ const ORDER_STATUS_STYLE = {
 };
 const humaniseStatus = (s) => (s || "").replace(/_/g, " ");
 
-function AllOrdersView() {
+function AllOrdersView({ deepLink, clearDeepLink }) {
   const [status, setStatus] = useState("");
   const [orders, setOrders] = useState([]);
   const [counts, setCounts] = useState({});
@@ -1901,6 +1903,21 @@ function AllOrdersView() {
   }, [status]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { axios.get(`${API}/orders/status-counts`).then(r => setCounts(r.data.counts || {})); }, [orders.length]);
+
+  // Deep-link: open the specific order requested from a notification
+  useEffect(() => {
+    if (!deepLink?.orderId) return;
+    const found = orders.find(o => o.id === deepLink.orderId);
+    if (found) {
+      setSelected(found);
+      clearDeepLink && clearDeepLink();
+    } else if (orders.length && !status) {
+      // Order might exist but not be in this filter — fetch it directly
+      axios.get(`${API}/orders/${deepLink.orderId}`).then(r => {
+        setSelected(r.data); clearDeepLink && clearDeepLink();
+      }).catch(() => { toast.error("Order not found"); clearDeepLink && clearDeepLink(); });
+    }
+  }, [deepLink, orders, status, clearDeepLink]);
 
   const setOrderStatus = async (o, s) => {
     try { await axios.patch(`${API}/orders/${o.id}`, { status: s }); toast.success(`Marked ${humaniseStatus(s)}`); await load(); }
@@ -1926,12 +1943,12 @@ function AllOrdersView() {
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tbl">
-            <thead><tr><th>Order ID</th><th>Product</th><th>Customer</th><th>Qty</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead>
+            <thead><tr><th>Reference</th><th>Product</th><th>Customer</th><th>Qty</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead>
             <tbody>
               {orders.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-slate-500">No orders in this bucket</td></tr>}
               {orders.map(o => (
                 <tr key={o.id} data-testid="ord-row">
-                  <td className="font-mono text-xs text-slate-500">{o.id.slice(0,8)}</td>
+                  <td className="font-mono text-xs font-bold text-indigo-600" data-testid={`ord-ref-${o.id}`}>{o.reference || o.id.slice(0,8)}</td>
                   <td className="text-sm truncate max-w-[280px]" title={o.product_title}>{o.product_title}</td>
                   <td>{o.customer_name}</td>
                   <td>{o.quantity}</td>
@@ -1942,7 +1959,7 @@ function AllOrdersView() {
                     </select>
                   </td>
                   <td className="text-xs text-slate-500 font-mono">{fmtDate(o.created_at)}</td>
-                  <td><button onClick={()=>setSelected(o)} className="btn btn-ghost text-xs !py-1 !px-2"><Eye size={12}/> View</button></td>
+                  <td><button onClick={()=>setSelected(o)} className="btn btn-ghost text-xs !py-1 !px-2" data-testid={`ord-view-${o.id}`}><Eye size={12}/> View</button></td>
                 </tr>
               ))}
             </tbody>
@@ -2899,7 +2916,6 @@ function StoreManagement({ section, setSection }) {
     "shipping-methods":    { hint: "Zones, carriers, rates and free-shipping thresholds.", fields: ["Australia Post — Parcel Post","Australia Post — Express","Sendle","Aramex","Local delivery","Click & collect","Free shipping threshold"] },
     "tax-rates":           { hint: "GST and location-based tax rules.", fields: ["Australia — GST 10%","New Zealand — GST 15%","Tax-exempt customer groups","B2B / ABN entries"] },
     "checkout-settings":   { hint: "Fine-tune the buyer journey at checkout.", fields: ["Guest checkout","Require phone","Address auto-complete","Order note field","Marketing opt-in","Terms & conditions box"] },
-    "returns-refunds":     { hint: "Return window, restocking fees and refund policies.", fields: ["Return window (days)","Restocking fee","Return shipping paid by","Refund method","Auto-approve returns"] },
     "email-notifications": { hint: "Transactional emails sent to customers and staff.", fields: ["Order confirmation","Order shipped","Order delivered","Refund issued","Abandoned cart","New review request","Admin alerts"] },
     "popup-messages":      { hint: "On-site banners, promos and pop-ups.", fields: ["Announcement bar","Welcome popup","Exit-intent offer","Free-shipping banner","Cookie consent","Age gate"] },
     "site-menus":          { hint: "Header, footer and mobile navigation menus.", fields: ["Main navigation","Footer — Shop","Footer — Support","Footer — Legal","Mobile drawer","Utility bar"] },
@@ -3247,7 +3263,7 @@ function statusBadge(p) {
   return null;
 }
 
-function Products() {
+function Products({ deepLink, clearDeepLink }) {
   const [list, setList] = useState([]); const [total, setTotal] = useState(0);
   const [q, setQ] = useState(""); const [cat, setCat] = useState(""); const [sort, setSort] = useState("created_at_desc");
   const [editing, setEditing] = useState(null);
@@ -3259,6 +3275,21 @@ function Products() {
   }, [q, cat, sort]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { axios.get(`${API}/categories`, { params: { active: true }}).then(r => setCats(r.data.categories)); }, []);
+
+  // Deep-link from a notification: open the specific product modal
+  useEffect(() => {
+    if (!deepLink?.productId) return;
+    const found = list.find(p => p.id === deepLink.productId);
+    if (found) {
+      setEditing(found);
+      clearDeepLink && clearDeepLink();
+    } else if (list.length) {
+      // Product might exist but be filtered out; fetch it directly
+      axios.get(`${API}/products/${deepLink.productId}`).then(r => {
+        setEditing(r.data); clearDeepLink && clearDeepLink();
+      }).catch(() => { toast.error("Product not found"); clearDeepLink && clearDeepLink(); });
+    }
+  }, [deepLink, list, clearDeepLink]);
 
   const del = async (p) => { if (!window.confirm(`Delete "${p.title}"? This can't be undone.`)) return; await axios.delete(`${API}/products/${p.id}`); toast.success("Deleted"); load(); };
   const archive = async (p) => { await axios.post(`${API}/products/${p.id}/archive`); toast.success(`Archived — find it under Archived`); load(); };
@@ -3310,7 +3341,11 @@ function Products() {
                             {p.title}
                             {badge && <span className={`chip ${badge.cls}`} data-testid={`product-badge-${p.id}`}>{badge.label}</span>}
                           </div>
-                          <div className="text-[11px] text-slate-400 truncate">{dead ? "Inactive — not shown on storefront" : "Active"}</div>
+                          <div className="text-[11px] text-slate-400 truncate flex items-center gap-2">
+                            {p.product_code && <span className="font-mono text-indigo-600 font-bold" data-testid={`product-code-${p.id}`}>{p.product_code}</span>}
+                            <span>·</span>
+                            <span>{dead ? "Inactive — not shown on storefront" : "Active"}</span>
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -3380,7 +3415,11 @@ function ArchivedProducts() {
                         </div>
                         <div className="min-w-0">
                           <div className="text-sm font-medium truncate max-w-[360px]">{p.title}</div>
-                          <div className="text-[11px] text-slate-400 font-mono">{p.sku || "—"}</div>
+                          <div className="text-[11px] text-slate-400 font-mono flex items-center gap-2">
+                            {p.product_code && <span className="text-indigo-600 font-bold">{p.product_code}</span>}
+                            <span>·</span>
+                            <span>{p.sku || "—"}</span>
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -3454,6 +3493,7 @@ function Categories() {
   const [group, setGroup] = useState("");
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [browsing, setBrowsing] = useState(null); // category currently being drilled into
 
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/categories`);
@@ -3479,12 +3519,16 @@ function Categories() {
     catch (e) { toast.error("Reseed failed", { description: e?.response?.data?.detail }); }
   };
 
+  if (browsing) {
+    return <CategoryProductBrowser cat={browsing} onBack={() => { setBrowsing(null); load(); }}/>;
+  }
+
   return (
     <div className="grid gap-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <div className="font-display text-2xl font-bold tracking-tight">Categories</div>
-          <div className="text-xs text-slate-500 font-mono">{cats.length} categories across {groups.length} groups · used to tag products in your storefront</div>
+          <div className="text-xs text-slate-500 font-mono">{cats.length} categories across {groups.length} groups · click a card to browse products</div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <select value={group} onChange={(e)=>setGroup(e.target.value)} className="input px-3 py-2 text-sm" data-testid="cat-group-filter">
@@ -3503,7 +3547,9 @@ function Categories() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {grouped[g].map((c) => (
-              <div key={c.id} className={`card p-4 group hover:shadow-lg transition-shadow ${!c.active ? "opacity-50" : ""}`} data-testid="category-card">
+              <div key={c.id} onClick={() => setBrowsing(c)}
+                className={`card p-4 group cursor-pointer hover:shadow-lg hover:border-indigo-200 transition-all ${!c.active ? "opacity-50" : ""}`}
+                data-testid={`category-card-${c.slug}`}>
                 <div className="flex items-start gap-3">
                   <div className="w-11 h-11 rounded-xl grid place-items-center shrink-0" style={{ background: `${c.color}20`, color: c.color }}>
                     <CatIcon name={c.icon} size={18}/>
@@ -3515,7 +3561,7 @@ function Categories() {
                   <span className="chip chip-neutral">{c.product_count}</span>
                 </div>
                 <div className="text-xs text-slate-500 mt-3 leading-relaxed line-clamp-2 min-h-[2.4em]">{c.description || "—"}</div>
-                <div className="mt-3 pt-3 border-t hairline flex items-center gap-1">
+                <div className="mt-3 pt-3 border-t hairline flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                   <label className="flex items-center gap-1.5 text-[11px] font-mono uppercase text-slate-500 cursor-pointer mr-auto">
                     <input type="checkbox" checked={c.active} onChange={()=>toggleActive(c)} className="accent-indigo-600 w-3.5 h-3.5"/>Active
                   </label>
@@ -3530,6 +3576,124 @@ function Categories() {
 
       <AnimatePresence>
         {(creating || editing) && <CategoryEditModal cat={editing} groups={groups} onClose={()=>{ setCreating(false); setEditing(null); }} onSaved={()=>{ setCreating(false); setEditing(null); load(); }}/>}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function CategoryProductBrowser({ cat, onBack }) {
+  const [list, setList] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState({}); // {productId: "refresh"|"price"}
+  const [cats, setCats] = useState([]);
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/products`, { params: { category: cat.slug, sort: "created_at_desc" }});
+    setList(data.products || []); setTotal(data.total || 0);
+  }, [cat.slug]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { axios.get(`${API}/categories`, { params: { active: true }}).then(r => setCats(r.data.categories)); }, []);
+
+  const del = async (p) => { if (!window.confirm(`Delete "${p.title}"?`)) return; await axios.delete(`${API}/products/${p.id}`); toast.success("Deleted"); load(); };
+  const refresh = async (p) => {
+    if (!p.source_url) return toast.error("This product isn't linked to an eBay URL");
+    setBusy(b => ({ ...b, [p.id]: "refresh" }));
+    try {
+      const { data } = await axios.post(`${API}/scrape`, { url: p.source_url, refresh: true });
+      // Backend mirrors stock_status/price to the product; just reload
+      toast.success(`Refreshed · latest eBay price ${data?.price || "—"}`);
+      load();
+    } catch (e) {
+      toast.error("Refresh failed", { description: e?.response?.data?.detail });
+    } finally { setBusy(b => ({ ...b, [p.id]: null })); }
+  };
+  const updatePrice = async (p) => {
+    const v = window.prompt(`Set new sell price for "${p.title.slice(0,50)}"`, String(p.price ?? ""));
+    if (v == null) return;
+    const num = parseFloat(v);
+    if (!Number.isFinite(num) || num < 0) return toast.error("Enter a valid price");
+    await axios.patch(`${API}/products/${p.id}`, { price: num });
+    toast.success("Price updated"); load();
+  };
+
+  return (
+    <div className="grid gap-4" data-testid="category-product-browser">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className="btn btn-ghost text-sm" data-testid="cat-back"><ChevronLeft size={14}/> Back to categories</button>
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl grid place-items-center" style={{ background: `${cat.color}20`, color: cat.color }}>
+              <CatIcon name={cat.icon} size={18}/>
+            </div>
+            <div>
+              <div className="font-display text-xl font-bold tracking-tight">{cat.name}</div>
+              <div className="text-xs text-slate-500 font-mono">{total} product{total===1?"":"s"} · /{cat.slug}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {list.length === 0 ? (
+        <div className="card p-12 text-center text-slate-500">No products in this category yet.</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {list.map(p => {
+            const badge = statusBadge(p);
+            const dead = p.is_sold || !p.active || (p.stock_status && p.stock_status !== "live");
+            const margin = p.price ? ((p.price - (p.cost || 0)) / p.price) * 100 : 0;
+            const isBusy = busy[p.id];
+            return (
+              <div key={p.id} data-testid={`cat-product-card-${p.id}`}
+                className={`card p-0 overflow-hidden flex flex-col ${dead ? "opacity-70" : ""}`}>
+                <div className={`aspect-[4/3] bg-slate-100 relative ${dead ? "grayscale" : ""}`}>
+                  {p.images?.[0]
+                    ? <img src={proxyImg(p.images[0])} alt="" className="w-full h-full object-cover"/>
+                    : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={28}/></div>}
+                  {badge && <span className={`chip ${badge.cls} absolute top-2 left-2`}>{badge.label}</span>}
+                  {p.product_code && (
+                    <span className="absolute bottom-2 left-2 font-mono text-[10px] font-bold text-white bg-indigo-600/85 rounded-md px-2 py-0.5" data-testid={`cat-product-code-${p.id}`}>
+                      {p.product_code}
+                    </span>
+                  )}
+                </div>
+                <div className="p-4 flex flex-col gap-2 flex-1">
+                  <div className="text-sm font-medium line-clamp-2 min-h-[2.6em]" title={p.title}>{p.title}</div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
+                    <div>
+                      <div className="text-slate-400 font-mono uppercase tracking-widest text-[10px]">eBay</div>
+                      <div className="font-mono text-slate-700">{p.cost > 0 ? moneyCents(p.cost) : "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400 font-mono uppercase tracking-widest text-[10px]">Sell</div>
+                      <div className="font-mono font-bold text-indigo-600">{moneyCents(p.price)}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400 font-mono uppercase tracking-widest text-[10px]">Margin</div>
+                      <div className={`font-mono font-bold ${margin>=40?"text-emerald-600":margin>=20?"text-amber-600":"text-red-600"}`}>{margin.toFixed(1)}%</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400 font-mono uppercase tracking-widest text-[10px]">Stock</div>
+                      <div className={`font-mono font-bold ${p.stock <= 3 ? "text-red-600" : "text-slate-700"}`}>{p.stock ?? 0}</div>
+                    </div>
+                  </div>
+                  <div className="mt-auto pt-3 border-t hairline grid grid-cols-2 gap-1.5">
+                    <button onClick={() => setEditing(p)} className="btn btn-ghost text-xs !py-1.5" data-testid={`cat-edit-${p.id}`}><Pencil size={11}/> Edit</button>
+                    <button onClick={() => updatePrice(p)} className="btn btn-ghost text-xs !py-1.5" data-testid={`cat-price-${p.id}`}><DollarSign size={11}/> Update price</button>
+                    <button onClick={() => refresh(p)} disabled={!!isBusy || !p.source_url} className="btn btn-ghost text-xs !py-1.5" title={p.source_url ? "Re-scrape latest from eBay" : "Not linked to eBay"} data-testid={`cat-refresh-${p.id}`}>
+                      {isBusy === "refresh" ? <Loader2 className="animate-spin" size={11}/> : <RefreshCw size={11}/>} Refresh
+                    </button>
+                    <button onClick={() => del(p)} className="btn btn-danger text-xs !py-1.5" data-testid={`cat-delete-${p.id}`}><Trash2 size={11}/> Delete</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <AnimatePresence>
+        {editing && <ProductEditModal product={editing} categories={cats} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }}/>}
       </AnimatePresence>
     </div>
   );

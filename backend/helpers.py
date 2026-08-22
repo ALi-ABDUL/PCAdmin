@@ -209,20 +209,8 @@ async def _refresh_all_and_record(method: str = "auto", trigger: str = "schedule
     }
     await _push_run_history(entry)
 
-    # Notification: emit for FAILED and DEAD scheduled/manual refresh runs so the
-    # admin knows a refresh cycle needs attention. Success/partial is silent.
-    if status in ("failed", "dead"):
-        title = "eBay refresh failed" if status == "failed" else "eBay refresh gave up after retry"
-        stats = summary or {}
-        body = (error or
-                f"{stats.get('failed', 0)} of {stats.get('total', 0)} items failed").strip()[:200]
-        await _emit_notification(
-            type="scrape_failed",
-            title=title,
-            body=f"{trigger} run · attempt {attempt} · {body}",
-            data={"run_id": run_id, "trigger": trigger, "attempt": attempt,
-                  "status": status, "stats": stats, "error": error},
-        )
+    # NOTE: failed / blocked scrapes are silent — no admin notification. Admins
+    # can still inspect run history via GET /api/scraper/schedule.
 
     # Update last_run_at / last_run_stats on any completed attempt.
     await db.scraper_schedule.update_one(
@@ -1013,12 +1001,6 @@ def _format_notification_html(n: dict) -> tuple[str, str, str]:
                  ("Amount", f"${d.get('amount', 0):.2f}"),
                  ("Customer", d.get("customer_name") or "—"),
                  ("Order", (n.get('order_id') or '')[:8])]
-    elif t == "scrape_failed":
-        d = n.get("data") or {}
-        rows += [("Phase", d.get("phase") or "—"),
-                 ("Trigger", d.get("trigger") or "manual"),
-                 ("URL / Run", (d.get("url") or d.get("run_id") or "—")[:80]),
-                 ("Error", (d.get("error") or "—")[:120])]
 
     row_html = "".join(
         f'<tr><td style="padding:6px 12px;color:#64748B;font-size:12px;">{k}</td>'

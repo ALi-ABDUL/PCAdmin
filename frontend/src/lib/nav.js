@@ -76,7 +76,6 @@ export const STORE_NAV = [
   { id: "store-settings",      label: "Store Settings",       icon: Store,        group: "Configuration" },
   { id: "pricing-rules",       label: "Pricing Rules",        icon: Percent,      group: "Configuration" },
   { id: "scraper-schedule",    label: "Scraper Schedule",     icon: RefreshCw,    group: "Configuration" },
-  { id: "notifications-push",  label: "Push Notifications",   icon: Bell,         group: "Configuration" },
   { id: "payment-gateway",     label: "Payment Gateway",      icon: CreditCard,   group: "Configuration" },
   { id: "shipping-methods",    label: "Shipping Methods",     icon: Truck,        group: "Configuration" },
   { id: "tax-rates",           label: "Tax Rates",            icon: Receipt,      group: "Configuration" },

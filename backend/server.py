@@ -90,52 +90,23 @@ async def scrape(req: ScrapeRequest) -> dict:
             scraperapi_key=req.scraperapi_key or None,
         )
     except BlockedError as e:
-        await _emit_notification(
-            type="scrape_failed",
-            title="eBay scrape blocked",
-            body=f"{url[:80]} · {str(e)[:120]}",
-            data={"url": url, "phase": "fetch", "error": str(e)[:200]},
-        )
+        # Failed / blocked scrapes are silent — no admin notification.
         raise HTTPException(status_code=502, detail=f"Scrape blocked or failed: {e}")
     except ScrapeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("scrape failure")
-        await _emit_notification(
-            type="scrape_failed",
-            title="eBay scrape failed",
-            body=f"{url[:80]} · {str(e)[:120]}",
-            data={"url": url, "phase": "fetch", "error": str(e)[:200]},
-        )
         raise HTTPException(status_code=500, detail=f"Unexpected scrape error: {e}")
 
     try:
         data = await parse_and_enrich(html, url, fetch_desc=True)
     except BlockedError as e:
-        await _emit_notification(
-            type="scrape_failed",
-            title="eBay parse blocked",
-            body=f"{url[:80]} · {str(e)[:120]}",
-            data={"url": url, "phase": "parse", "error": str(e)[:200]},
-        )
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         logger.exception("parse failure")
-        await _emit_notification(
-            type="scrape_failed",
-            title="eBay parse failed",
-            body=f"{url[:80]} · {str(e)[:120]}",
-            data={"url": url, "phase": "parse", "error": str(e)[:200]},
-        )
         raise HTTPException(status_code=422, detail=f"Failed to parse eBay page: {e}")
 
     if not data.get("title"):
-        await _emit_notification(
-            type="scrape_failed",
-            title="eBay parse produced empty item",
-            body=f"{url[:80]} · title missing — layout may have changed",
-            data={"url": url, "phase": "parse", "error": "empty title"},
-        )
         raise HTTPException(status_code=422, detail="Could not extract item details. eBay may have blocked or changed layout.")
 
     now_iso = datetime.now(timezone.utc).isoformat()

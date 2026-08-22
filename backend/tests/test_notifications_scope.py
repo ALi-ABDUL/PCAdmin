@@ -176,62 +176,40 @@ class TestCancellationRequest:
         assert "Changed my mind" in body
 
 
-# --------------------------- ADD C (scrape_failed) ---------------------------
+# --------------------------- REMOVED: scrape_failed silent ---------------------------
 
-class TestScrapeFailed:
-    def test_bogus_ebay_url_emits_scrape_failed(self):
+class TestScrapeFailedIsSilent:
+    """Failed / blocked scrapes must NOT emit a notification (per user request).
+    Any error path in POST /api/scrape returns a normal HTTP error but does
+    NOT create a scrape_failed notification.
+    """
+    def test_bogus_ebay_url_does_not_emit_notification(self):
         before = _notif_count("scrape_failed")
-        # Bogus itm id — expected to hit BlockedError / ScrapeError / parse fail.
         r = requests.post(f"{API}/scrape", json={
             "url": "https://www.ebay.com.au/itm/000000000000",
             "method": "auto",
         }, timeout=90)
-        # Expected non-2xx due to fake URL
         assert r.status_code >= 400, f"Expected failure, got {r.status_code}: {r.text[:200]}"
         after = _notif_count("scrape_failed")
-        # If the request timed out at the ingress proxy (Cloudflare 502/504
-        # BEFORE reaching FastAPI) our backend never got a chance to emit —
-        # skip rather than false-fail.
-        if r.status_code in (502, 504) and "cloudflare" in r.text.lower():
-            pytest.skip("Ingress proxy timeout (Cloudflare) — backend not reached; scrape_failed emit path is verified by the manual smoke test.")
-        # If it produced a BlockedError/ScrapeError parse or empty title, notif is emitted.
-        # ScrapeError (400) currently does NOT emit — accept either behaviour, but note it.
-        if r.status_code == 400:
-            # ScrapeError path — no notification emitted by design
-            assert after == before
-            pytest.skip("Bogus URL surfaced as ScrapeError (400) which does not emit — acceptable")
-        else:
-            assert after >= before + 1, (
-                f"scrape_failed should have been emitted (status {r.status_code}) "
-                f"but count {before} -> {after}"
-            )
-            n = _latest_notif("scrape_failed")
-            assert n is not None
-            data = n.get("data") or {}
-            assert data.get("phase") in ("fetch", "parse")
-            assert data.get("error")
+        assert after == before, (
+            f"scrape_failed notifications must be silent — count changed "
+            f"{before} -> {after}"
+        )
 
 
-# --------------------------- ADD D (scheduler run) ---------------------------
+# --------------------------- REMOVED: scheduler failure silent ---------------------------
 
-class TestSchedulerRunNow:
-    @pytest.mark.skip(reason="POST /api/scraper/schedule/run-now blocks backend for many minutes iterating real eBay URLs which hit anti-bot. Covered by scheduler-history tests already.")
+class TestSchedulerFailureIsSilent:
+    @pytest.mark.skip(reason="POST /api/scraper/schedule/run-now blocks backend for many minutes iterating real eBay URLs.")
     def test_manual_scheduler_run_returns_ok(self):
-        # Not strictly required to fail. Just ensure endpoint responds and
-        # that IF it fails/dead a scrape_failed notif is emitted (silent on success).
+        # Failed / dead scheduled runs must NOT emit a notification.
         before = _notif_count("scrape_failed")
         r = requests.post(f"{API}/scraper/schedule/run-now", json={}, timeout=120)
         if r.status_code in (502, 504):
-            pytest.skip(f"Proxy gateway timeout ({r.status_code}) - scheduler run took too long")
+            pytest.skip(f"Proxy gateway timeout ({r.status_code})")
         assert r.status_code in (200, 202), r.text
-        payload = r.json() if r.headers.get("content-type","").startswith("application/json") else {}
-        status = (payload.get("status") or payload.get("run", {}).get("status") or "").lower()
         after = _notif_count("scrape_failed")
-        if status in ("failed", "dead"):
-            assert after >= before + 1
-        else:
-            # Success or partial => silent
-            assert after == before
+        assert after == before, "Scheduler failures must be silent."
 
 
 # --------------------------- HTML formatter smoke ---------------------------
@@ -248,8 +226,6 @@ class TestFormatNotificationHTML:
                              "customer_name": "X", "reference": "R"}),
             ("cancellation_request", {"reason": "x", "amount": 5.0,
                                        "customer_name": "Y"}),
-            ("scrape_failed", {"phase": "fetch", "url": "https://ebay.com.au/itm/1",
-                                "error": "boom"}),
             ("low_stock", {"stock": 2}),
             ("new_order", {"customer_name": "Z", "total": 9.9, "quantity": 1}),
             ("new_customer", {"name": "N", "email": "n@x.com", "group": "Retail"}),

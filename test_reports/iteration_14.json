@@ -1,0 +1,38 @@
+{
+  "summary": "Verified removal of 'Push Notifications' sidebar entry and silent handling of scrape failures. Backend: POST /api/scrape with bogus eBay URL returned non-2xx AND emitted 0 new scrape_failed notifications (confirmed via TestScrapeFailedIsSilent). PUSH_CRITICAL_TYPES no longer contains 'scrape_failed'. _format_notification_html renders without KeyError. Frontend: Store Management sidebar has 'Email & Notifications' only (Push Notifications removed). Email & Notifications page opens PushNotificationSettings with both admin-notif-heading and customer-notif-heading. Header notification bell contains no 'scrape_failed' meta. Full pytest suite: 163 passed, 10 failed, 3 skipped, 5 errors — feature-relevant tests (test_notifications_scope.py TestScrapeFailedIsSilent, TestFormatNotificationHTML, TestRemovalOrderStatusSilent, TestNewPayment, TestCancellationRequest, TestKeepNewCustomer) all PASSED. Failures are pre-existing motor+asyncio xdist flakes (test_ebay_category_api, test_scrape_e2e_stock_status, test_product_code) plus one flaky order/low_stock counter race caused by the /api/notifications endpoint capping the list at 50 items (older items drop off between before/after snapshots) — NOT caused by this change.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/notifications", "issue": "GET returns capped at limit=50; TestKeepNewOrderAndLowStock uses count-diff which is flaky when total notifications ≥ 50 (older items fall off). Test should filter server-side by type or use per-type endpoint. Pre-existing, not caused by scrape_failed removal."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Email & Notifications (Admin section hint text)", "issues": ["Copy still reads 'new orders, failed scrapes, low-stock' but failed scrapes are now silent — consider removing 'failed scrapes' from the description text."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_notifications_scope.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional/minor) Update Email & Notifications 'Admin Notifications' subtitle to drop the 'failed scrapes' mention since those events are now silent.",
+    "(Optional) Harden test_notifications_scope::TestKeepNewOrderAndLowStock to be resilient to the 50-item pagination cap on /api/notifications (query with a type filter or fetch a larger page)."
+  ],
+  "critical_code_review_comments": [
+    "PUSH_CRITICAL_TYPES correctly no longer includes 'scrape_failed'.",
+    "server.py POST /api/scrape now silently returns errors with no _emit_notification call — verified end-to-end.",
+    "helpers.py _refresh_all_and_record no longer emits scrape_failed; _format_notification_html has no special branch (falls through to generic template — verified with synthetic Notification(type='scrape_failed')).",
+    "frontend nav.js STORE_NAV no longer contains 'notifications-push'; header.jsx NOTIF_META no longer contains scrape_failed and AlertTriangle import removed."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "94%", "frontend": "100%"},
+  "test_credentials": "n/a",
+  "seed_data_creation": "Test-created products, orders, customers, transactions, returns via existing test_notifications_scope fixtures.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Feature (silent scrape failures + Push Notifications sidebar removal) is fully working. The single feature-relevant failure in test_notifications_scope (TestKeepNewOrderAndLowStock) is a pre-existing pagination race caused by /api/notifications capping at 50, NOT caused by this change. Other backend test failures (test_ebay_category_api, test_scrape_e2e_stock_status, test_product_code) are pre-existing xdist/motor flakes tracked in earlier iterations.",
+  "rca of the issue": "TestKeepNewOrderAndLowStock: /api/notifications endpoint has default limit=50. When more than 50 notifications exist, adding one new one pushes an older one off the list, so count-diff comparisons can yield a delta of 0 or −1 instead of +1. Mitigation: fetch with a larger limit (e.g. ?limit=200) or filter by type via query param, or use a database-count endpoint. Not related to the current feature change."
+}

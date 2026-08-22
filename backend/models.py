@@ -534,7 +534,7 @@ PUSH_SETTINGS_DEFAULTS: dict = {
     "customer_order_cancellation": True,           # status → cancelled
     "customer_welcome_email": True,                # portal register → welcome email
 }
-PUSH_CRITICAL_TYPES = {"new_order", "out_of_stock", "price_change", "new_payment", "cancellation_request", "low_stock", "scrape_failed"}
+PUSH_CRITICAL_TYPES = {"new_order", "out_of_stock", "price_change", "new_payment", "cancellation_request", "low_stock"}
 
 class PushSettingsUpdate(BaseModel):
     email_enabled: Optional[bool] = None

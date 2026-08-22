@@ -1,0 +1,40 @@
+{
+  "summary": "Verified the eBay-Motors / multi-word store-prefix fix for the breadcrumb pipeline. Both code sites were updated: helpers._BREADCRUMB_NOISE_PATTERNS now includes `re.compile(r'^ebay(\\s+.*)?$', re.I)` (helpers.py line 342) AND scraper._extract_breadcrumbs::_keep drops any name matching `^ebay(\\s.*)?$` (scraper.py line 534). Ran the full requested 4-file suite: test_breadcrumb_filter.py + test_breadcrumb_integration.py + test_ebay_category_api.py + test_ebay_category_autocreate.py -> 38 passed / 0 failed / 0 skipped in 2.21s. This includes: (FIX A) TestCleanBreadcrumbTrail::test_strips_ebay_multi_word_prefix PASS covering 'eBay Motors' + 'eBay Stores'; (FIX B) TestEnsureEbayCategoryUsesFilter::test_car_audio_example_from_user PASS producing category name='Car Audio In-Dash Units' with no 'eBay Motors' leak; (FIX C) TestFromItemUsesLeafCategory::test_creates_category_from_leaf_and_products_filter_by_slug PASS confirming Category.description no longer contains 'eBay Motors' end-to-end via POST /api/products/from-item/{id}; (R1) test_strips_see_more_from_jsonld PASS with updated assertion; (R2) full 37+ regression suite green. The iteration-12 soft-fail is fully resolved.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "N/A - code quality",
+        "issue": "Noise-list logic is still duplicated between helpers._BREADCRUMB_NOISE_* and scraper._extract_breadcrumbs._keep. Any future noise token must be added in both places; consider having the scraper import _clean_breadcrumb_trail from helpers as single source of truth."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_breadcrumb_filter.py",
+    "/app/backend/tests/test_breadcrumb_integration.py",
+    "/app/backend/tests/test_ebay_category_api.py",
+    "/app/backend/tests/test_ebay_category_autocreate.py",
+    "/app/test_reports/pytest/pytest_iteration13.xml"
+  ],
+  "action_items": [
+    "(Optional) De-duplicate breadcrumb noise filter between scraper.py and helpers.py - have scraper._extract_breadcrumbs call helpers._clean_breadcrumb_trail so only one file owns the noise list.",
+    "(Pre-existing, not caused by this feature) Motor+asyncio loop-binding flakes documented in iterations 10-12 still surface when the FULL suite is run in a single worker; per-file invocation (as recommended in the review request) side-steps this."
+  ],
+  "critical_code_review_comments": [
+    "Duplicate noise list: helpers.py and scraper.py maintain two parallel implementations of the same breadcrumb-noise ruleset. Any change (e.g., adding 'eBay UK Store', 'eBay Deals') has to be made in both spots or behavior will diverge between the scraping step and the leaf-picking step.",
+    "helpers.py is now 1177 lines - past the 700-line split threshold from the code-review guidelines. A future refactor should extract breadcrumb + category helpers into their own module (e.g., helpers/breadcrumbs.py).",
+    "The regex `^ebay(\\s+.*)?$` will also strip legitimate category names that literally start with 'eBay' (unlikely in eBay's own taxonomy but worth documenting). Consider anchoring more strictly to known store prefixes if false positives ever appear."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "38/38 (100%) across the 4 targeted test files",
+    "frontend": "not tested (backend-only request)"
+  },
+  "test_credentials": "N/A",
+  "seed_data_creation": "test_breadcrumb_integration.py inserts one TEST_bc_<run_id>_* item into db.items via motor and cleans up its item, product, and TEST BC <run_id>-prefixed categories in fixture teardown. Requires REACT_APP_BACKEND_URL env to be exported for the E2E test to execute (otherwise it self-skips).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "To reproduce: `REACT_APP_BACKEND_URL=https://ebay-au-harvester.preview.emergentagent.com pytest /app/backend/tests/test_breadcrumb_filter.py /app/backend/tests/test_breadcrumb_integration.py /app/backend/tests/test_ebay_category_api.py /app/backend/tests/test_ebay_category_autocreate.py -o addopts= -v`. Without the env var the E2E FIX-C test self-skips (still green, just marked skipped). Pre-existing motor+asyncio full-suite flakes described in iterations 10-12 remain unchanged and are unrelated to this feature.",
+  "rca of the issue": "N/A - previously flagged bug (iteration_12 soft-fail: 'eBay Motors' leaked into Category.description because helpers._BREADCRUMB_NOISE_EXACT only stripped the single word 'ebay') is now fixed. The main agent added a general regex `^ebay(\\s+.*)?$` to helpers._BREADCRUMB_NOISE_PATTERNS (catches 'eBay Motors', 'eBay Stores', 'eBay UK', 'eBay Home & Garden', etc.) and mirrored the same regex in scraper._extract_breadcrumbs::_keep so the noise is filtered at both extraction and cleaning stages. All 38 targeted tests pass."
+}

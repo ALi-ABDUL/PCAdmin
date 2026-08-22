@@ -514,7 +514,27 @@ def _extract_breadcrumbs(soup: BeautifulSoup, html: str) -> list[str]:
 
     eBay renders breadcrumbs in a few ways; we try structured data first (JSON-LD
     BreadcrumbList), then the visible breadcrumb widget, then a legacy fallback.
+    UI-only rows like "See more", "See all", "…" are stripped so downstream
+    category naming isn't polluted.
     """
+    # UI-only breadcrumb rows to drop
+    NOISE_EXACT = {"ebay", "home", "back", "back to home page", "back to previous page",
+                   "see more", "see all", "show more", "view all", "browse all",
+                   "shop by category", "categories", "all categories", "…", "..."}
+
+    def _keep(name: str) -> bool:
+        if not name:
+            return False
+        n = name.strip().lower()
+        if not n or n in NOISE_EXACT:
+            return False
+        if re.match(r"^(see|view|shop|show)\s+(more|all)\b", n):
+            return False
+        # Site-header store prefixes ("eBay", "eBay Motors", "eBay Stores", ...)
+        if re.match(r"^ebay(\s+.*)?$", n):
+            return False
+        return True
+
     # 1. JSON-LD BreadcrumbList
     for script in soup.select('script[type="application/ld+json"]'):
         try:
@@ -531,7 +551,7 @@ def _extract_breadcrumbs(soup: BeautifulSoup, html: str) -> list[str]:
                         continue
                     item = it.get("item") or {}
                     name = it.get("name") or (item.get("name") if isinstance(item, dict) else None)
-                    if name and name.lower() not in {"ebay", "home"}:
+                    if _keep(name):
                         names.append(str(name).strip())
                 if names:
                     return names
@@ -546,10 +566,7 @@ def _extract_breadcrumbs(soup: BeautifulSoup, html: str) -> list[str]:
     ]:
         nodes = soup.select(sel)
         if nodes:
-            names = [
-                _text(n) for n in nodes
-                if _text(n) and _text(n).lower() not in {"ebay", "home", "back to home page"}
-            ]
+            names = [_text(n) for n in nodes if _keep(_text(n))]
             if names:
                 return names
 

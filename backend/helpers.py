@@ -324,30 +324,119 @@ _EBAY_AUTO_COLORS = ["#4F46E5", "#059669", "#DC2626", "#D97706", "#7C3AED",
                      "#2563EB", "#EA580C", "#DB2777", "#0891B2", "#65A30D"]
 
 
+# Tokens that eBay sometimes emits as breadcrumb entries but which are NOT
+# actual category names. We strip them before picking the leaf.
+_BREADCRUMB_NOISE_EXACT = {
+    "ebay", "home", "back", "back to home page", "back to previous page",
+    "see more", "see all", "show more", "view all", "browse all",
+    "shop by category", "categories", "all categories", "…", "...",
+}
+_BREADCRUMB_NOISE_PATTERNS = (
+    re.compile(r"^see\s+more(\s+.*)?$", re.I),
+    re.compile(r"^see\s+all(\s+.*)?$", re.I),
+    re.compile(r"^view\s+all(\s+.*)?$", re.I),
+    re.compile(r"^shop\s+all(\s+.*)?$", re.I),
+    re.compile(r"^more\s+in\b.*$", re.I),
+    # eBay's site-header store prefixes ("eBay Motors", "eBay Stores", etc.).
+    # Always stripped so they never leak into Category names or descriptions.
+    re.compile(r"^ebay(\s+.*)?$", re.I),
+)
+
+
+def _clean_breadcrumb_trail(breadcrumbs: list) -> list:
+    """Normalize + de-noise a raw eBay breadcrumb list.
+
+    Rules:
+      - Drop empty / None entries.
+      - Drop the leading store prefix ("eBay", "Home").
+      - Drop UI-only rows like "See more", "See all", "View all", "…", etc.
+      - Collapse consecutive duplicates ("Car Audio > Car Audio" -> "Car Audio").
+      - Strip trailing punctuation and normalise whitespace.
+    """
+    cleaned: list = []
+    for raw in breadcrumbs or []:
+        s = str(raw or "").strip()
+        # Collapse internal whitespace
+        s = re.sub(r"\s+", " ", s)
+        # Strip trailing punctuation (arrows, ellipses, colons)
+        s = s.rstrip("›»→⟩>.:; \t\u00a0")
+        if not s:
+            continue
+        low = s.lower()
+        if low in _BREADCRUMB_NOISE_EXACT:
+            continue
+        if any(p.match(s) for p in _BREADCRUMB_NOISE_PATTERNS):
+            continue
+        # Skip duplicate of previous entry (case-insensitive)
+        if cleaned and cleaned[-1].lower() == low:
+            continue
+        cleaned.append(s)
+    return cleaned
+
+
+def _pick_meaningful_leaf(trail: list) -> Optional[str]:
+    """Pick the LAST meaningful breadcrumb from the cleaned trail.
+
+    Falls back to the second-to-last when the leaf looks too specific or
+    redundant. "Too specific" heuristics:
+      - > 60 chars (usually a description, not a category name)
+      - contains parenthesised qualifier like "(New)" or "(2-Pack)"
+      - starts with a number+"x " (SKU-style)
+      - contains "&" or "/" chained more than once (e.g. "Radios & Tuners & Amps")
+        chained descriptors are typically inventory-listing filters, not the
+        canonical eBay category
+      - identical (case-insensitive) to its parent
+    """
+    if not trail:
+        return None
+
+    def _looks_too_specific(name: str, parent: Optional[str]) -> bool:
+        if not name:
+            return True
+        if len(name) > 60:
+            return True
+        if re.search(r"\([^)]+\)", name):
+            return True
+        if re.match(r"^\d+\s*x\s+", name, flags=re.I):
+            return True
+        if name.count("&") + name.count("/") >= 2:
+            return True
+        if parent and parent.lower() == name.lower():
+            return True
+        return False
+
+    leaf = trail[-1]
+    parent = trail[-2] if len(trail) >= 2 else None
+    if _looks_too_specific(leaf, parent) and parent:
+        return parent
+    return leaf
+
+
 async def _ensure_ebay_category(breadcrumbs: Optional[list]) -> Optional[str]:
     """Ensure a Category exists that matches the scraped eBay listing's category
     path. Returns the canonical slug (which is what Product.category stores and
     what the Categories browser filters on).
 
     Rules:
-      - Pick the LEAF of the breadcrumb path as the category name (most specific).
-      - If the breadcrumb list starts with a store prefix like "eBay", strip it.
+      - De-noise the breadcrumb list (drop "See more", store prefixes, dupes).
+      - Pick the LAST MEANINGFUL level as the category name. If that level
+        looks too specific (long, parenthesised qualifier, chained "&/") or
+        is redundant with its parent, fall back to the second-to-last level.
       - Case-insensitive existence check by both slug and name.
-      - When a new record is inserted, `group` is the top-most breadcrumb after
-        the store prefix so the sidebar/browser can still group intelligently.
-      - Returns None if breadcrumbs is empty / unusable so callers can fall back
-        to the internal heuristic (`_guess_category`).
+      - When a new record is inserted, `group` is the top-most breadcrumb so
+        the sidebar/browser can still group intelligently.
+      - Returns None if breadcrumbs is empty / unusable so callers can fall
+        back to the internal heuristic (`_guess_category`).
     """
     if not breadcrumbs or not isinstance(breadcrumbs, list):
         return None
-    trail = [str(b or "").strip() for b in breadcrumbs if str(b or "").strip()]
-    # Strip a leading "eBay" store prefix (not a real category).
-    if trail and trail[0].lower() == "ebay":
-        trail = trail[1:]
+    trail = _clean_breadcrumb_trail(breadcrumbs)
     if not trail:
         return None
-    name = trail[-1]                                          # leaf = most specific
-    group = trail[0] if len(trail) >= 2 else "Imported"       # top of the path
+    name = _pick_meaningful_leaf(trail)
+    if not name:
+        return None
+    group = trail[0] if len(trail) >= 2 and trail[0].lower() != name.lower() else "Imported"
     slug = _slug(name)
     if not slug:
         return None

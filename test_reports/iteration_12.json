@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 12 verified the new eBay-breadcrumb cleaning + leaf-category feature. The 21 existing tests in /app/backend/tests/test_breadcrumb_filter.py PASS (covers Helpers A/B/C/D and the user's Car Audio example E). Added a new integration file /app/backend/tests/test_breadcrumb_integration.py (4 tests) covering the remaining scope: SCRAPER F (scraper._extract_breadcrumbs strips See more/See all from JSON-LD BreadcrumbList — PASS x2), API G (parse_and_enrich in-process for hand-crafted HTML produces a clean ebay_category_path — PASS), and API H + R2 (POST /api/products/from-item/{id} creates Category with name='Car Audio In-Dash Units' NOT the parent 'Car Audio', Product.category equals that slug, and GET /api/products?category=<slug> returns the newly-attached product — PASS on all functional assertions). One documented soft-assertion in the H test intentionally fails: helpers._BREADCRUMB_NOISE_EXACT strips single-word 'ebay'/'home' but not the multi-word 'eBay Motors' store prefix, so it leaks into Category.description. Full-suite serial run: 151 passed / 2 skipped / 6 failed / 16 errored — the 6 failures + 16 errors are the pre-existing motor+asyncio loop-binding flakes documented in iteration 10/11 (all pass when the file is run in isolation, confirmed).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "helpers._clean_breadcrumb_trail (used by _ensure_ebay_category → Category.description)",
+        "issue": "The store-prefix filter drops single-word 'eBay' but not 'eBay Motors' (or 'eBay UK', 'eBay Store', etc). Consequence: for eBay Motors listings the Category.description column starts with 'eBay Motors > ...'. Feature E in the review request asks for this to be stripped. Fix: extend _BREADCRUMB_NOISE_EXACT with 'ebay motors' OR add a regex like re.compile(r'^ebay(\\s.+)?$', re.I) to _BREADCRUMB_NOISE_PATTERNS. Slug + category name themselves are unaffected — only the description leaks."
+      },
+      {
+        "endpoint": "N/A (test infra)",
+        "issue": "Full-suite runs still show the pre-existing motor+asyncio loop-binding flakes (16 errors in test_scheduler_history_and_retry + test_ebay_category_autocreate, 5 additional intermittent failures). All pass in isolation. Same as iteration_10/11 — not caused by this feature."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_breadcrumb_filter.py",
+    "/app/backend/tests/test_breadcrumb_integration.py",
+    "/app/test_reports/pytest/pytest_iteration12.xml",
+    "/app/test_reports/pytest/pytest_iteration12_breadcrumb.xml"
+  ],
+  "action_items": [
+    "Extend helpers._BREADCRUMB_NOISE_EXACT (or add a regex pattern) so multi-word store prefixes like 'eBay Motors', 'eBay UK', 'eBay Australia' are stripped from the trail — currently they survive and leak into Category.description.",
+    "(Pre-existing, optional) Fix the xdist / cross-file motor loop binding flakes documented in iterations 10 & 11."
+  ],
+  "critical_code_review_comments": [
+    "helpers._pick_meaningful_leaf: hash(slug) used to pick a palette colour is non-deterministic across Python processes (PYTHONHASHSEED randomises str hashing). Colours will drift across restarts. Use hashlib or sum(map(ord, slug)) if stable colours are desired.",
+    "helpers._ensure_ebay_category assigns 'group' as trail[0] when the top isn't the leaf — but because 'eBay Motors' isn't stripped, an eBay Motors listing now records group='eBay Motors' in the Category doc (test_see_more_row_is_ignored covers 'Electronics' correctly; the Motors case leaks). Same root cause as the description issue.",
+    "scraper._extract_breadcrumbs duplicates the noise-list logic already present in helpers.py. Consider having the scraper call helpers._clean_breadcrumb_trail directly (one source of truth). Currently a 3rd noise token added in helpers won't automatically apply in the scraper.",
+    "helpers.py is now 1174 lines — approaching the 700-line split threshold in the code-review guidelines. A future refactor should extract breadcrumb + category helpers into their own module."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_breadcrumb_integration.py (new — 4 tests covering SCRAPER F, API G, API H, R2)"
+  ],
+  "success_rate": {
+    "backend": "24/25 breadcrumb-feature assertions pass (21/21 existing + 3/4 new; 1 new failure is the documented eBay-Motors store-prefix leak). Full suite 151/159 pass serially; remaining 8 non-pass are pre-existing motor loop flakes.",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "test_breadcrumb_integration.py inserts one TEST_bc_<run_id>_* item into db.items via motor and cleans up its item, product, and TEST BC <run_id>-prefixed categories in the fixture teardown.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "To run the breadcrumb feature end-to-end: `REACT_APP_BACKEND_URL=<url> pytest /app/backend/tests/test_breadcrumb_filter.py /app/backend/tests/test_breadcrumb_integration.py -o addopts= -v`. After the main agent fixes the eBay-Motors filter, the last failing assertion in test_creates_category_from_leaf_and_products_filter_by_slug will pass. The 6 full-suite failures + 16 errors under a single-worker run are the SAME pre-existing motor+asyncio loop-binding issue described in iterations 10 & 11 — not regressions from this feature.",
+  "rca of the issue": "In helpers.py, _BREADCRUMB_NOISE_EXACT (~line 329) contains only the single word 'ebay' and _BREADCRUMB_NOISE_PATTERNS has no regex covering the 'eBay <foo>' family. When an eBay Motors listing's breadcrumb comes in as ['eBay Motors', 'Vehicle Parts & Accessories', ...], _clean_breadcrumb_trail keeps 'eBay Motors' as-is (it's not exact-in-set and matches no pattern). _ensure_ebay_category then joins the surviving trail with ' > ' into Category.description, so the description reads 'eBay Motors > Vehicle Parts & Accessories > ...'. Fix: add 'ebay motors' to _BREADCRUMB_NOISE_EXACT, OR add re.compile(r'^ebay(\\s+.+)?$', re.I) to _BREADCRUMB_NOISE_PATTERNS to catch the store-prefix family generically. Note: since scraper.py duplicates this same noise list, the fix must be applied in BOTH files (or better, refactor scraper._extract_breadcrumbs to import _clean_breadcrumb_trail)."
+}

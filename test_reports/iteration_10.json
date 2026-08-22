@@ -1,0 +1,42 @@
+{
+  "summary": "Verified the eBay category auto-creation feature end-to-end. Unit tests for `_ensure_ebay_category` (test_ebay_category_autocreate.py, 7 tests) all pass. Wrote new API-level tests (test_ebay_category_api.py, 5 tests) covering API B (POST /api/products/from-item/{id} auto-creates category + product.category is leaf slug), API C (POST /api/items/bulk with add_to_products creates categories for each item), API D (duplicate imports of same category produce exactly ONE category row), API E (pre-existing categories preserved after auto-create), and R2 (GET /api/products?category=<slug> filters by auto-created slug). Full regression suite: 125 passed, 3 skipped (target was ≥121). Frontend Categories page renders correctly with category-card-<slug> testids and the sidebar link works. NOTE: the endpoint referenced in the review request as `/api/items/{id}/add_to_products` is actually implemented as `/api/products/from-item/{id}` in server.py:1276. Tests use the actual endpoint.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/products/from-item/{item_id}", "issue": "Documented in review request as /api/items/{id}/add_to_products but actual route is /api/products/from-item/{id}. Docs/task drift only — code works correctly."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard (Recharts)", "issues": ["Pre-existing Recharts warnings about width(-1)/height(-1). Unchanged from iteration_9."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ebay_category_autocreate.py",
+    "/app/backend/tests/test_ebay_category_api.py",
+    "/app/test_reports/pytest/pytest_iteration10.xml"
+  ],
+  "action_items": [
+    "(Optional) Align endpoint name across docs/tests: either rename route to /api/items/{id}/add_to_products (matches bulk action name) or update the review-request template."
+  ],
+  "critical_code_review_comments": [
+    "_ensure_ebay_category correctly handles empty/None/'eBay'-only breadcrumbs, and case-insensitive name lookup prevents slug drift when leaf casing changes.",
+    "server.py:1290 order-of-precedence is `ebay_cat_slug or it.get('category') or _guess_category(...)` — good defensive fallback that keeps legacy items functional.",
+    "Auto-created rows use `sort_order = count_documents({})` which is racy under concurrent imports (two simultaneous inserts can share the same sort_order). Not observed in tests but worth an atomic $inc counter or a monotonic timestamp.",
+    "server.py is still 1910 lines — previously flagged, no change this iteration."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ebay_category_api.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (125/125 executed; 3 pre-existing skips)",
+    "frontend": "100% (Categories page renders, seed cats visible, testids present)"
+  },
+  "seed_data_creation": "All test docs are prefixed TEST_ (items/products) and auto-api- (categories). The autouse fixture wipes them before + after each test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Two test files cover this feature: test_ebay_category_autocreate.py (helper unit tests) + test_ebay_category_api.py (API-level via requests). The API-level file MUST run serially (-n 0) because parallel autouse cleanup wipes each other's TEST_/auto-api- data — the file already inlines a shared event loop for motor. The real endpoint for single-item import is POST /api/products/from-item/{item_id}; the bulk endpoint is POST /api/items/bulk with action='add_to_products'. Auto-created categories use `_slug(leaf)` for the slug and put `group=<top-of-breadcrumb-after-eBay>` (falls back to 'Imported' for single-crumb).",
+  "rca of the issue": "N/A — feature working as specified."
+}

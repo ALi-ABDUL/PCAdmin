@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules']
+__all__ = ['_rand_au_address', '_slug', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules']
 
 
 import bcrypt
@@ -317,6 +317,66 @@ async def _ensure_categories_seeded() -> None:
         )
         await db.categories.insert_one(cat.model_dump())
     logger.info(f"Seeded {len(SEED_CATEGORIES)} categories")
+
+
+# Palette used for auto-created categories so new imports get a stable, distinct colour.
+_EBAY_AUTO_COLORS = ["#4F46E5", "#059669", "#DC2626", "#D97706", "#7C3AED",
+                     "#2563EB", "#EA580C", "#DB2777", "#0891B2", "#65A30D"]
+
+
+async def _ensure_ebay_category(breadcrumbs: Optional[list]) -> Optional[str]:
+    """Ensure a Category exists that matches the scraped eBay listing's category
+    path. Returns the canonical slug (which is what Product.category stores and
+    what the Categories browser filters on).
+
+    Rules:
+      - Pick the LEAF of the breadcrumb path as the category name (most specific).
+      - If the breadcrumb list starts with a store prefix like "eBay", strip it.
+      - Case-insensitive existence check by both slug and name.
+      - When a new record is inserted, `group` is the top-most breadcrumb after
+        the store prefix so the sidebar/browser can still group intelligently.
+      - Returns None if breadcrumbs is empty / unusable so callers can fall back
+        to the internal heuristic (`_guess_category`).
+    """
+    if not breadcrumbs or not isinstance(breadcrumbs, list):
+        return None
+    trail = [str(b or "").strip() for b in breadcrumbs if str(b or "").strip()]
+    # Strip a leading "eBay" store prefix (not a real category).
+    if trail and trail[0].lower() == "ebay":
+        trail = trail[1:]
+    if not trail:
+        return None
+    name = trail[-1]                                          # leaf = most specific
+    group = trail[0] if len(trail) >= 2 else "Imported"       # top of the path
+    slug = _slug(name)
+    if not slug:
+        return None
+    # Case-insensitive lookup by slug OR name.
+    existing = await db.categories.find_one(
+        {"$or": [
+            {"slug": slug},
+            {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}},
+        ]},
+        {"_id": 0, "slug": 1},
+    )
+    if existing:
+        return existing.get("slug") or slug
+    # Insert a new Category. Pick a stable colour from the palette based on
+    # slug hash so re-imports of the same category always render identically.
+    sort_order = await db.categories.count_documents({})
+    color = _EBAY_AUTO_COLORS[hash(slug) % len(_EBAY_AUTO_COLORS)]
+    cat = Category(
+        name=name,
+        slug=slug,
+        group=group,
+        icon="tag",
+        color=color,
+        description=" > ".join(trail),
+        sort_order=sort_order,
+    )
+    await db.categories.insert_one(cat.model_dump())
+    logger.info(f"Auto-created category from eBay import: {name} ({slug}) · group={group}")
+    return slug
 
 def _now_iso() -> str: return datetime.now(timezone.utc).isoformat()
 

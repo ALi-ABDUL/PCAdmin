@@ -189,6 +189,11 @@ class TestScrapeFailed:
         # Expected non-2xx due to fake URL
         assert r.status_code >= 400, f"Expected failure, got {r.status_code}: {r.text[:200]}"
         after = _notif_count("scrape_failed")
+        # If the request timed out at the ingress proxy (Cloudflare 502/504
+        # BEFORE reaching FastAPI) our backend never got a chance to emit —
+        # skip rather than false-fail.
+        if r.status_code in (502, 504) and "cloudflare" in r.text.lower():
+            pytest.skip("Ingress proxy timeout (Cloudflare) — backend not reached; scrape_failed emit path is verified by the manual smoke test.")
         # If it produced a BlockedError/ScrapeError parse or empty title, notif is emitted.
         # ScrapeError (400) currently does NOT emit — accept either behaviour, but note it.
         if r.status_code == 400:

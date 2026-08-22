@@ -39,7 +39,7 @@ from helpers import (
     _rand_au_address, _slug, _product_code_base, _generate_unique_product_code, 
     _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _refresh_all_items, 
     _get_scraper_schedule, _compute_next_run, _classify_run, _push_run_history, 
-    _refresh_all_and_record, _scheduler_loop, _ensure_categories_seeded, _now_iso, 
+    _refresh_all_and_record, _scheduler_loop, _ensure_categories_seeded, _ensure_ebay_category, _now_iso, 
     _seed_transactions_and_returns, _rebuild_customers_from_orders, _shape_review, _jwt_secret, 
     _hash_password, _verify_password, _issue_token, get_current_customer, _has_purchased, 
     _seller_id, _build_sellers, _match_rules, _guess_category, _get_push_settings, _mask, 
@@ -142,8 +142,11 @@ async def scrape(req: ScrapeRequest) -> dict:
         data["delivery_estimate_updated_at"] = now_iso
     if data.get("is_sold"):
         data["sold_detected_at"] = now_iso
-    # Auto-detect store category from breadcrumbs > specifics > title
-    data["category"] = _guess_category(
+    # Auto-detect store category: prefer the eBay breadcrumb (creates the
+    # Category record on the fly if it doesn't exist yet) and fall back to
+    # the internal heuristic when eBay didn't give us a usable path.
+    ebay_cat_slug = await _ensure_ebay_category(data.get("ebay_category_path") or [])
+    data["category"] = ebay_cat_slug or _guess_category(
         title=data.get("title") or "",
         breadcrumbs=data.get("ebay_category_path") or [],
         specifics=data.get("specifics") or {},
@@ -357,12 +360,13 @@ async def items_bulk_action(body: ItemBulkAction):
             try:
                 cost = it.get("price_value") or 0.0
                 pricing = calc_pricing(cost, rules=rules)
+                ebay_cat_slug = await _ensure_ebay_category(it.get("ebay_category_path") or [])
                 prod = Product(
                     title=it.get("title") or "Untitled",
                     price=pricing["sell_price"],
                     cost=cost,
                     stock=10,
-                    category=it.get("category") or _guess_category(
+                    category=ebay_cat_slug or it.get("category") or _guess_category(
                         title=it.get("title") or "",
                         breadcrumbs=it.get("ebay_category_path") or [],
                         specifics=it.get("specifics") or {},
@@ -1277,12 +1281,13 @@ async def create_product_from_item(item_id: str):
     cost = it.get("price_value") or 0.0
     rules = await _load_pricing_rules()
     pricing = calc_pricing(cost, rules=rules)
+    ebay_cat_slug = await _ensure_ebay_category(it.get("ebay_category_path") or [])
     prod = Product(
         title=it.get("title") or "Untitled",
         price=pricing["sell_price"],
         cost=cost,
         stock=10,
-        category=it.get("category") or _guess_category(
+        category=ebay_cat_slug or it.get("category") or _guess_category(
             title=it.get("title") or "",
             breadcrumbs=it.get("ebay_category_path") or [],
             specifics=it.get("specifics") or {},

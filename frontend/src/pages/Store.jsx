@@ -6,7 +6,7 @@ import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 import { STORE_NAV } from "../lib/nav";
-import { calcPricingWithRules, usePricingRules } from "../lib/pricing";
+import { calcPricingWithRules, usePricingRules, _refreshPricingRules } from "../lib/pricing";
 import { Analytics } from "./Analytics";
 import { Dashboard } from "./Dashboard";
 
@@ -16,10 +16,8 @@ export function PricingRulesEditor() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const { data } = await axios.get(`${API}/pricing-rules`);
-    setRules(data.rules);
-    _pricingRulesCache = data.rules;
-    _pricingRulesListeners.forEach((fn) => fn(data.rules));
+    const rows = await _refreshPricingRules();
+    setRules(rows);
   }, []);
   useEffect(() => { load(); }, [load]);
 

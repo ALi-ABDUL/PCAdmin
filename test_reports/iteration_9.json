@@ -1,0 +1,45 @@
+{
+  "summary": "Verified notification scope refactor end-to-end. Removals: PATCH /api/orders/{oid} no longer emits notifications and neither Orders list select nor OrderDetail status buttons show a success toast (both intentionally silent for internal admin actions). Kept: new_order + low_stock on POST /api/orders, new_customer on POST /api/customers. Added: new_payment on POST /api/transactions (kind=charge, status=successful) with refund/failed correctly suppressed, cancellation_request on POST /api/returns, scrape_failed on POST /api/scrape with bogus itm id 000000000000 (BlockedError -> fetch phase). Frontend bell dropdown renders all six new/kept types with the correct data-notif-type attribute (icons/colors from NOTIF_META). _format_notification_html renders every new type without KeyError. Full backend suite: 114 passed, 2 skipped (105 pre-existing + 9 new; scheduler run-now skipped by design because it starts a real long-running refresh loop against blocked eBay URLs and locks the backend for 10+ minutes).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/scraper/schedule/run-now", "issue": "Endpoint synchronously iterates every active product against real eBay URLs which are anti-bot blocked, monopolising the backend event loop for 10+ minutes and returning 502 through the CF proxy. Test skipped. Consider offloading to a background task or capping iteration when trigger='manual'."},
+      {"endpoint": "POST /api/scrape (ScrapeError path)", "issue": "The 400 ScrapeError branch in server.py:98-99 is the only failure path in /api/scrape that does NOT emit a scrape_failed notification. If domain team wants ALL scrape failures surfaced to admin, add an _emit_notification call there too (currently only BlockedError, generic Exception, and empty-title do)."},
+      {"endpoint": "helpers.py _format_notification_html", "issue": "Line 728 slices `(d.get('url') or d.get('run_id') or '—')[:80]` — the '—' fallback is unicode; slicing is safe but subject line may show em dash if both keys are missing. Cosmetic only."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Recharts containers (Dashboard/Analytics)", "issues": ["Repeated console warning: 'The width(-1) and height(-1) of chart should be greater than 0'. Pre-existing but visible — set explicit min-width/min-height on ResponsiveContainer parents to silence."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_notifications_scope.py",
+    "/app/test_reports/pytest/pytest_iteration9.xml",
+    "/app/test_reports/pytest/pytest_iteration9_full.xml"
+  ],
+  "action_items": [
+    "(Optional) Convert /api/scraper/schedule/run-now to a fire-and-forget background task so a manual click doesn't block the whole backend while iterating live URLs.",
+    "(Optional) Emit scrape_failed on the ScrapeError branch (server.py:98) for symmetry with the BlockedError branch.",
+    "Note: Task description referenced `data-testid='status-btn-{status}'` on OrderDetail, but the actual testid in code is `order-status-{status}`. Tests were adjusted to the real selector — main agent may want to align naming."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 1905 lines — still exceeds the 700-line guideline (previously flagged).",
+    "PUSH_CRITICAL_TYPES in models.py:531 now correctly includes new_order, out_of_stock, price_change, new_payment, cancellation_request, low_stock, scrape_failed. new_customer is intentionally NOT critical — verified aligns with product intent (registrations aren't email/telegram-pushed).",
+    "helpers.py:214 correctly gates scheduler scrape_failed on status in ('failed','dead') — success/partial is silent as specified.",
+    "Notification model.type comment (models.py:491) still lists old set 'price_change | new_order | out_of_stock | low_stock | order_status | new_customer' — update the docstring to include new_payment/cancellation_request/scrape_failed (order_status can also be removed since the code path was deleted)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_notifications_scope.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (114/114 passing tests; 2 intentionally skipped)",
+    "frontend": "100% (bell dropdown types + silent status update both verified)"
+  },
+  "seed_data_creation": "Created a single throwaway product `TEST_notif_product_*` with stock=4 to exercise the low_stock trigger. All test-created customers/orders/transactions/returns are prefixed with TEST_ for easy cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Notification refactor is solid. If retesting: /api/notifications payload shape is {notifications:[...], total:n}; scheduler run-now is skipped in tests because it holds the event loop while iterating real anti-bot-blocked eBay URLs. The actual OrderDetail status button testid is `order-status-{status}` (NOT `status-btn-{status}` as the task doc suggested). Frontend silent-success is asserted by counting `[data-sonner-toast][data-type=\"success\"]` before vs after — cleaner than snapshotting the DOM."
+}

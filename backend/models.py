@@ -528,7 +528,7 @@ PUSH_SETTINGS_DEFAULTS: dict = {
     "telegram_bot_token": "",
     "telegram_chat_id": "",
 }
-PUSH_CRITICAL_TYPES = {"new_order", "out_of_stock", "price_change"}
+PUSH_CRITICAL_TYPES = {"new_order", "out_of_stock", "price_change", "new_payment", "cancellation_request", "low_stock", "scrape_failed"}
 
 class PushSettingsUpdate(BaseModel):
     email_enabled: Optional[bool] = None

@@ -50,7 +50,8 @@ export function AllOrdersView({ deepLink, clearDeepLink, openOrderDetail }) {
   }, [deepLink, openOrderDetail, clearDeepLink]);
 
   const setOrderStatus = async (o, s) => {
-    try { await axios.patch(`${API}/orders/${o.id}`, { status: s }); toast.success(`Marked ${humaniseStatus(s)}`); await load(); }
+    // Silent success — order status update is an internal admin action.
+    try { await axios.patch(`${API}/orders/${o.id}`, { status: s }); await load(); }
     catch { toast.error("Update failed"); }
   };
 

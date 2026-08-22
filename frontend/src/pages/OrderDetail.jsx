@@ -17,9 +17,9 @@ export function OrderDetailPage({ orderId, onBack }) {
   useEffect(() => { load(); }, [load]);
 
   const setStatus = async (status) => {
+    // Silent success — order status update is an internal admin action.
     try {
       await axios.patch(`${API}/orders/${orderId}`, { status });
-      toast.success(`Marked ${humaniseStatus(status)}`);
       load();
     } catch { toast.error("Update failed"); }
   };

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Bell, BellOff, ChevronRight, HelpCircle, ImageIcon, Menu, PackageMinus, RefreshCw, Search, ShoppingBag, Store, TrendingDown, TrendingUp, UserPlus, XCircle } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Ban, Bell, BellOff, ChevronRight, DollarSign, HelpCircle, ImageIcon, Menu, PackageMinus, RefreshCw, Search, ShoppingBag, Store, TrendingDown, TrendingUp, UserPlus, XCircle } from "lucide-react";
 import { API, proxyImg } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 import { CUSTOMER_NAV, ORDERS_NAV, PAYMENTS_NAV, PRODUCT_NAV, STORE_NAV, SUPPLIER_NAV } from "../lib/nav";
@@ -240,13 +240,15 @@ export function NotificationBell({ onNavigate }) {
 }
 
 export const NOTIF_META = {
-  price_change:  { icon: TrendingDown, color: "#4F46E5", bg: "#EEF2FF" },
-  new_order:     { icon: ShoppingBag,  color: "#059669", bg: "#ECFDF5" },
-  out_of_stock:  { icon: XCircle,      color: "#DC2626", bg: "#FEE2E2" },
-  restock:       { icon: BadgeCheck,   color: "#059669", bg: "#ECFDF5" },
-  low_stock:     { icon: PackageMinus, color: "#D97706", bg: "#FEF3C7" },
-  order_status:  { icon: RefreshCw,    color: "#2563EB", bg: "#DBEAFE" },
-  new_customer:  { icon: UserPlus,     color: "#7C3AED", bg: "#EDE9FE" },
+  price_change:         { icon: TrendingDown, color: "#4F46E5", bg: "#EEF2FF" },
+  new_order:            { icon: ShoppingBag,  color: "#059669", bg: "#ECFDF5" },
+  new_payment:          { icon: DollarSign,   color: "#059669", bg: "#ECFDF5" },
+  out_of_stock:         { icon: XCircle,      color: "#DC2626", bg: "#FEE2E2" },
+  restock:              { icon: BadgeCheck,   color: "#059669", bg: "#ECFDF5" },
+  low_stock:            { icon: PackageMinus, color: "#D97706", bg: "#FEF3C7" },
+  cancellation_request: { icon: Ban,          color: "#DC2626", bg: "#FEE2E2" },
+  scrape_failed:        { icon: AlertTriangle,color: "#DC2626", bg: "#FEE2E2" },
+  new_customer:         { icon: UserPlus,     color: "#7C3AED", bg: "#EDE9FE" },
 };
 
 export function NotifRow({ n, onClick }) {

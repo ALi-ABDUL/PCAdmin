@@ -88,22 +88,52 @@ async def scrape(req: ScrapeRequest) -> dict:
             scraperapi_key=req.scraperapi_key or None,
         )
     except BlockedError as e:
+        await _emit_notification(
+            type="scrape_failed",
+            title="eBay scrape blocked",
+            body=f"{url[:80]} · {str(e)[:120]}",
+            data={"url": url, "phase": "fetch", "error": str(e)[:200]},
+        )
         raise HTTPException(status_code=502, detail=f"Scrape blocked or failed: {e}")
     except ScrapeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("scrape failure")
+        await _emit_notification(
+            type="scrape_failed",
+            title="eBay scrape failed",
+            body=f"{url[:80]} · {str(e)[:120]}",
+            data={"url": url, "phase": "fetch", "error": str(e)[:200]},
+        )
         raise HTTPException(status_code=500, detail=f"Unexpected scrape error: {e}")
 
     try:
         data = await parse_and_enrich(html, url, fetch_desc=True)
     except BlockedError as e:
+        await _emit_notification(
+            type="scrape_failed",
+            title="eBay parse blocked",
+            body=f"{url[:80]} · {str(e)[:120]}",
+            data={"url": url, "phase": "parse", "error": str(e)[:200]},
+        )
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         logger.exception("parse failure")
+        await _emit_notification(
+            type="scrape_failed",
+            title="eBay parse failed",
+            body=f"{url[:80]} · {str(e)[:120]}",
+            data={"url": url, "phase": "parse", "error": str(e)[:200]},
+        )
         raise HTTPException(status_code=422, detail=f"Failed to parse eBay page: {e}")
 
     if not data.get("title"):
+        await _emit_notification(
+            type="scrape_failed",
+            title="eBay parse produced empty item",
+            body=f"{url[:80]} · title missing — layout may have changed",
+            data={"url": url, "phase": "parse", "error": "empty title"},
+        )
         raise HTTPException(status_code=422, detail="Could not extract item details. eBay may have blocked or changed layout.")
 
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -578,19 +608,9 @@ async def update_order(oid: str, body: dict):
     if r.matched_count == 0:
         raise HTTPException(status_code=404, detail="Not found")
     updated = await db.orders.find_one({"id": oid}, {"_id": 0})
-    # Notification: order status updated
-    new_status = body.get("status")
-    if new_status and new_status != prev.get("status"):
-        await _emit_notification(
-            type="order_status",
-            title="Order status updated",
-            body=f"#{oid[:8]} · {prev.get('status')} → {new_status}",
-            order_id=oid,
-            product_id=prev.get("product_id"),
-            product_title=prev.get("product_title"),
-            data={"old_status": prev.get("status"), "new_status": new_status,
-                  "customer_name": prev.get("customer_name"), "total": prev.get("total")},
-        )
+    # NOTE: order status updates are an internal admin action and do NOT
+    # emit a notification. Notifications should only fire for external
+    # events that need the admin's attention.
     return updated
 
 
@@ -606,6 +626,17 @@ async def list_returns(status: Optional[str] = None):
 async def create_return(body: ReturnRequest):
     doc = body.model_dump(); doc["id"] = str(uuid.uuid4()); doc["created_at"] = _now_iso()
     await db.returns.insert_one(doc)
+    # Notification: order cancellation / refund request (external customer action)
+    await _emit_notification(
+        type="cancellation_request",
+        title="Order cancellation request",
+        body=f"{doc['customer_name']} · {doc['product_title'] or 'Order'} · {doc['reason']}",
+        order_id=doc.get("order_id"),
+        product_id=doc.get("product_id"),
+        product_title=doc.get("product_title"),
+        data={"amount": doc.get("amount"), "reason": doc.get("reason"),
+              "customer_name": doc.get("customer_name")},
+    )
     doc.pop("_id", None); return doc
 
 
@@ -650,6 +681,17 @@ async def list_transactions(status: Optional[str] = None, kind: Optional[str] = 
 async def create_transaction(body: Transaction):
     doc = body.model_dump(); doc["id"] = str(uuid.uuid4()); doc["created_at"] = _now_iso()
     await db.transactions.insert_one(doc)
+    # Notification: only for successful CHARGE (payment received). Refunds and
+    # chargebacks are handled through the returns flow; failed charges are noise.
+    if doc.get("kind") == "charge" and doc.get("status") == "successful":
+        await _emit_notification(
+            type="new_payment",
+            title="New payment received",
+            body=f"{doc['customer_name']} · ${doc['amount']:.2f} · {doc['method']}",
+            order_id=doc.get("order_id"),
+            data={"amount": doc["amount"], "method": doc["method"],
+                  "customer_name": doc["customer_name"], "reference": doc.get("reference")},
+        )
     doc.pop("_id", None); return doc
 
 

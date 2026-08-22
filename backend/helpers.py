@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules']
+__all__ = ['_rand_au_address', '_slug', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS']
 
 
 import bcrypt
@@ -707,6 +707,149 @@ async def _send_email(subject: str, html: str) -> None:
         })
     except Exception as e:
         logger.warning(f"[push] Resend send failed: {e}")
+
+
+# --- Customer-facing transactional emails ---------------------------------
+# These go to end-users. Each is gated by:
+#   1) `customer_email_enabled` (master switch)
+#   2) `customer_<kind>` toggle for the specific email type
+# When either is False, the email is silently skipped.
+# We reuse the Resend API key/from-address configured for admin notifications
+# so no extra credentials are needed.
+
+CUSTOMER_EMAIL_KINDS = {
+    "order_confirmation":    "customer_order_confirmation",
+    "order_status_update":   "customer_order_status_update",
+    "order_cancellation":    "customer_order_cancellation",
+    "welcome":               "customer_welcome_email",
+}
+
+
+def _customer_email_html(title: str, intro: str, rows: list, footer: str = "") -> str:
+    row_html = "".join(
+        f'<tr><td style="padding:6px 12px;color:#64748B;font-size:12px;">{k}</td>'
+        f'<td style="padding:6px 12px;color:#0F172A;font-size:13px;">{v}</td></tr>'
+        for k, v in rows
+    )
+    return f"""<!doctype html>
+<html><body style="font-family:Arial,sans-serif;background:#F7F7FB;padding:32px;color:#0F172A;">
+  <table role="presentation" cellspacing="0" cellpadding="0" width="100%" style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #EAEAF0;border-radius:12px;overflow:hidden;">
+    <tr><td style="padding:20px 24px;background:linear-gradient(135deg,#4F46E5,#EC4899);color:#fff;">
+      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:0.85;">Aussie Admin Dash</div>
+      <div style="font-size:20px;font-weight:700;margin-top:4px;">{title}</div>
+    </td></tr>
+    <tr><td style="padding:16px 24px;color:#334155;font-size:14px;">{intro}</td></tr>
+    <tr><td style="padding:0 12px 12px 12px;"><table cellspacing="0" cellpadding="0" width="100%" style="border-collapse:collapse;">{row_html}</table></td></tr>
+    {f'<tr><td style="padding:12px 24px 20px 24px;color:#64748B;font-size:12px;">{footer}</td></tr>' if footer else ''}
+  </table>
+</body></html>"""
+
+
+async def send_customer_email(kind: str, to_email: str, subject: str, html: str) -> str:
+    """Send a transactional email to a customer, respecting per-kind toggles.
+
+    Returns one of: 'sent', 'skipped_disabled', 'skipped_master_off',
+    'skipped_no_key', 'skipped_no_recipient', 'failed'.
+    """
+    if not to_email:
+        return "skipped_no_recipient"
+    if kind not in CUSTOMER_EMAIL_KINDS:
+        logger.warning(f"[customer email] unknown kind: {kind}")
+        return "skipped_disabled"
+    settings = await _get_push_settings()
+    if not settings.get("customer_email_enabled"):
+        return "skipped_master_off"
+    toggle_field = CUSTOMER_EMAIL_KINDS[kind]
+    if not settings.get(toggle_field):
+        return "skipped_disabled"
+    key = settings.get("resend_api_key")
+    frm = settings.get("resend_from_email") or "onboarding@resend.dev"
+    if not key:
+        return "skipped_no_key"
+    resend.api_key = key
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": frm, "to": [to_email], "subject": subject, "html": html,
+        })
+        logger.info(f"[customer email] sent · kind={kind} · to={to_email} · subject={subject!r}")
+        return "sent"
+    except Exception as e:
+        logger.warning(f"[customer email] send failed · kind={kind} · to={to_email} · {e}")
+        return "failed"
+
+
+async def send_customer_order_confirmation(order: dict) -> str:
+    to = order.get("customer_email") or ""
+    subject = f"Order confirmed · #{(order.get('reference') or order.get('id') or '')[:16]}"
+    html = _customer_email_html(
+        title="Thanks — we've received your order",
+        intro=f"Hi {order.get('customer_name') or 'there'}, thank you for shopping with us. "
+              "We'll email you again as soon as it ships.",
+        rows=[
+            ("Order",     order.get("reference") or (order.get("id") or "")[:8]),
+            ("Item",      order.get("product_title") or "—"),
+            ("Quantity",  str(order.get("quantity") or 1)),
+            ("Total",     f"${float(order.get('total') or 0):.2f}"),
+        ],
+        footer="Reply to this email if anything looks off.",
+    )
+    return await send_customer_email("order_confirmation", to, subject, html)
+
+
+async def send_customer_order_status_update(order: dict, old_status: str, new_status: str) -> str:
+    to = order.get("customer_email") or ""
+    friendly = {
+        "processing": "is being prepared for shipping",
+        "shipped":    "has shipped",
+        "delivered":  "has been delivered",
+    }.get(new_status, f"status is now {new_status}")
+    subject = f"Your order {friendly} · #{(order.get('reference') or order.get('id') or '')[:16]}"
+    html = _customer_email_html(
+        title=f"Your order {friendly}",
+        intro=f"Hi {order.get('customer_name') or 'there'}, an update on your recent order.",
+        rows=[
+            ("Order",     order.get("reference") or (order.get("id") or "")[:8]),
+            ("Item",      order.get("product_title") or "—"),
+            ("Status",    new_status.replace("_", " ").title()),
+            ("Total",     f"${float(order.get('total') or 0):.2f}"),
+        ],
+    )
+    return await send_customer_email("order_status_update", to, subject, html)
+
+
+async def send_customer_order_cancellation(order: dict) -> str:
+    to = order.get("customer_email") or ""
+    subject = f"Order cancelled · #{(order.get('reference') or order.get('id') or '')[:16]}"
+    html = _customer_email_html(
+        title="Your order has been cancelled",
+        intro=f"Hi {order.get('customer_name') or 'there'}, we've cancelled your recent order. "
+              "Any charge will be refunded to your original payment method within a few business days.",
+        rows=[
+            ("Order",     order.get("reference") or (order.get("id") or "")[:8]),
+            ("Item",      order.get("product_title") or "—"),
+            ("Refund",    f"${float(order.get('total') or 0):.2f}"),
+        ],
+        footer="Reply to this email if you have any questions.",
+    )
+    return await send_customer_email("order_cancellation", to, subject, html)
+
+
+async def send_customer_welcome_email(customer: dict) -> str:
+    to = customer.get("email") or ""
+    name = customer.get("name") or customer.get("full_name") or "there"
+    subject = "Welcome to Aussie Admin Dash 🎉"
+    html = _customer_email_html(
+        title=f"Welcome, {name}!",
+        intro="Your account is ready to go. You can now track your orders, "
+              "leave verified reviews, and grab exclusive coupons — all from one place.",
+        rows=[
+            ("Email",  customer.get("email") or "—"),
+            ("Joined", (customer.get("created_at") or "")[:10] or "today"),
+        ],
+        footer="Happy shopping. Reply to this email if you ever need a hand.",
+    )
+    return await send_customer_email("welcome", to, subject, html)
+
 
 
 async def _send_telegram(text: str) -> None:

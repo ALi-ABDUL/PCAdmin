@@ -248,6 +248,13 @@ export function PushNotificationSettings() {
 
   return (
     <div className="grid gap-4" data-testid="push-settings">
+      {/* ============= ADMIN NOTIFICATIONS ============= */}
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-display font-bold text-lg" data-testid="admin-notif-heading">Admin Notifications</div>
+          <div className="text-xs text-slate-500">Internal alerts pushed to <em>you</em> — new orders, failed scrapes, low-stock, etc.</div>
+        </div>
+      </div>
       <div className="grid md:grid-cols-2 gap-3">
         {/* Email channel */}
         <div className={`card p-5 ${emailOk ? "" : "border-dashed"}`} data-testid="push-email">
@@ -358,7 +365,71 @@ export function PushNotificationSettings() {
         <div className="font-display font-bold text-slate-700 text-sm mb-1 flex items-center gap-2"><HelpCircle size={14}/> How storage works</div>
         Credentials are stored in the database and read live on every send — no restart or <code className="chip chip-neutral">.env</code> edit needed. Secrets are masked when read back (only the last few characters are visible). Missing keys are silently skipped, so dashboard notifications keep working either way.
       </div>
+
+      {/* ============= CUSTOMER NOTIFICATIONS ============= */}
+      <div className="flex items-baseline justify-between gap-3 flex-wrap mt-4 pt-4 border-t hairline">
+        <div>
+          <div className="font-display font-bold text-lg" data-testid="customer-notif-heading">Customer Notifications</div>
+          <div className="text-xs text-slate-500">Transactional emails sent to <em>customers</em>. Uses the Resend API key configured above.</div>
+        </div>
+      </div>
+
+      <div className="card p-5" data-testid="customer-notif-card">
+        <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer border-b hairline pb-4 mb-1" data-testid="customer-master-toggle">
+          <input type="checkbox" checked={!!settings.customer_email_enabled} onChange={(e) => update({ customer_email_enabled: e.target.checked })} className="accent-indigo-600 mt-1 w-4 h-4"/>
+          <div className="flex-1">
+            <div className="text-sm font-medium">Send customer emails</div>
+            <div className="text-xs text-slate-500">
+              Master switch. When OFF, none of the emails below are sent to customers — regardless of the individual toggles.
+            </div>
+          </div>
+        </label>
+
+        <div className={`grid gap-1 mt-2 ${settings.customer_email_enabled ? "" : "opacity-50 pointer-events-none"}`}>
+          <CustomerEmailToggle
+            testId="toggle-order-confirmation"
+            title="Order confirmation email"
+            desc="Sent to the customer immediately after they place an order."
+            checked={!!settings.customer_order_confirmation}
+            onChange={(v) => update({ customer_order_confirmation: v })}
+          />
+          <CustomerEmailToggle
+            testId="toggle-order-status-update"
+            title="Order status update email"
+            desc="Sent when an order moves to Processing, Shipped, or Delivered."
+            checked={!!settings.customer_order_status_update}
+            onChange={(v) => update({ customer_order_status_update: v })}
+          />
+          <CustomerEmailToggle
+            testId="toggle-order-cancellation"
+            title="Order cancellation confirmation email"
+            desc="Sent when an order is cancelled, with a note about the refund."
+            checked={!!settings.customer_order_cancellation}
+            onChange={(v) => update({ customer_order_cancellation: v })}
+          />
+          <CustomerEmailToggle
+            testId="toggle-welcome"
+            title="Welcome email on new registration"
+            desc="Sent when a customer creates an account in the portal."
+            checked={!!settings.customer_welcome_email}
+            onChange={(v) => update({ customer_welcome_email: v })}
+          />
+        </div>
+      </div>
     </div>
+  );
+}
+
+function CustomerEmailToggle({ testId, title, desc, checked, onChange }) {
+  return (
+    <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer" data-testid={testId}>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="accent-indigo-600 mt-1 w-4 h-4"/>
+      <div className="flex-1">
+        <div className="text-sm font-medium">{title}</div>
+        <div className="text-xs text-slate-500">{desc}</div>
+      </div>
+      <span className={`chip ${checked ? "chip-success" : "chip-neutral"} font-mono text-[10px] shrink-0`}>{checked ? "ON" : "OFF"}</span>
+    </label>
   );
 }
 
@@ -678,7 +749,7 @@ export function StoreManagement({ section, setSection }) {
     "shipping-methods":    { hint: "Zones, carriers, rates and free-shipping thresholds.", fields: ["Australia Post — Parcel Post","Australia Post — Express","Sendle","Aramex","Local delivery","Click & collect","Free shipping threshold"] },
     "tax-rates":           { hint: "GST and location-based tax rules.", fields: ["Australia — GST 10%","New Zealand — GST 15%","Tax-exempt customer groups","B2B / ABN entries"] },
     "checkout-settings":   { hint: "Fine-tune the buyer journey at checkout.", fields: ["Guest checkout","Require phone","Address auto-complete","Order note field","Marketing opt-in","Terms & conditions box"] },
-    "email-notifications": { hint: "Transactional emails sent to customers and staff.", fields: ["Order confirmation","Order shipped","Order delivered","Refund issued","Abandoned cart","New review request","Admin alerts"] },
+    "email-notifications": { hint: "Admin alerts + transactional emails sent to customers. Uses the Resend API key configured under Push Notifications.", fields: [], custom: <PushNotificationSettings/> },
     "popup-messages":      { hint: "On-site banners, promos and pop-ups.", fields: ["Announcement bar","Welcome popup","Exit-intent offer","Free-shipping banner","Cookie consent","Age gate"] },
     "site-menus":          { hint: "Header, footer and mobile navigation menus.", fields: ["Main navigation","Footer — Shop","Footer — Support","Footer — Legal","Mobile drawer","Utility bar"] },
     "pages":               { hint: "Static content pages (About, Contact, Policies…).", fields: ["Home","About us","Contact","Shipping policy","Returns policy","Privacy policy","Terms of service","FAQ"] },

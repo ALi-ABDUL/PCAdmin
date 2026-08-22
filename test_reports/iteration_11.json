@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 11 verified the new Customer Notifications feature end-to-end. Backend: added /app/backend/tests/test_customer_email_notifications.py — 22 tests covering the 5 new push_settings fields (shape + defaults + PATCH round-trip), send_customer_email helper gating (skipped_no_recipient / skipped_master_off / skipped_disabled / skipped_no_key), POST /api/orders + PATCH /api/orders/{oid} across all 8 status values (processing/shipped/delivered/cancelled/paid/ready_to_ship/refunded/on_hold), portal/register wiring of send_customer_welcome_email, and structural verification that no separate customer_resend_api_key exists. All 22 new tests PASS. Full regression run: 142 passed / 2 skipped / 6 failed — the 6 failures are pre-existing flakes (all pass when run in isolation, they fail only under xdist parallel data-cleanup interference — already documented in iteration_10.json). Regression target ≥124 exceeded by 18. Frontend: Playwright drove Store Management → Email & Notifications and confirmed F1 (all 7 required test-ids visible), F2 (clicking toggle-order-confirmation fires PATCH /api/push/settings, checkbox flips, and state persists across full page reload), F3 (turning the customer-master-toggle OFF applies both 'opacity-50' and 'pointer-events-none' to the group of 4 toggles).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "N/A (test infra)", "issue": "test_ebay_category_api.py + test_product_code.py + test_scrape_e2e_stock_status.py show intermittent failures under `pytest -n auto` because the autouse cleanup fixture in one file wipes TEST_-prefixed docs another file just created. Pre-existing, flagged in iteration_10. All pass when run serially (-n 0) or as isolated files."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_customer_email_notifications.py",
+    "/app/test_reports/pytest/pytest_iteration11.xml"
+  ],
+  "action_items": [
+    "(Optional, pre-existing) Fix xdist parallel flakes by scoping TEST_ cleanup by-file or running the whole suite with `-p no:xdist` in CI — same recommendation as iteration_10."
+  ],
+  "critical_code_review_comments": [
+    "helpers.send_customer_email returns a well-typed string enum (sent/skipped_*/failed) making it trivially testable — nice.",
+    "server.py:626 PATCH /api/orders correctly guards the status-transition emails behind `new_status != old_status`, so idempotent PATCHes don't re-send emails to the customer. Good.",
+    "server.py:917 POST /api/portal/register calls send_customer_welcome_email AFTER inserting the customer_accounts doc, so a failed send never blocks account creation (helper also swallows failures). Good.",
+    "GET /api/push/settings masks resend_api_key but exposes the 5 new customer_* toggles unmasked — correct (they're not secrets).",
+    "server.py is now 1933 lines (up from 1910). Same split-into-modules recommendation stands from prior iterations."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_customer_email_notifications.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% for the new feature (22/22 new tests pass); 142/150 overall (6 pre-existing xdist flakes, 2 skipped)",
+    "frontend": "100% (F1 + F2 + F3 all pass)"
+  },
+  "test_credentials": "aliko@yopmail.com / secret123 — used for portal/register test in F. Account row is deleted at test start so the register call succeeds each run.",
+  "seed_data_creation": "TEST_prod_<uuid> product row + TEST_ orders inserted for D/E via a module-scope fixture; cleaned up after the module completes. Push settings toggles are restored to all-True by an autouse teardown between every test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The new test file uses a MODULE-SCOPE asyncio loop so motor stays bound to one loop across helper invocations — this pattern is required when calling helpers.* directly (motor's AsyncIOMotorClient caches its io_loop on first use). Pymongo (sync) is used for setup/teardown to avoid loop bleed. To run just this feature: `pytest /app/backend/tests/test_customer_email_notifications.py -o addopts= -v`. The 6 flaky failures under `pytest -n auto` are NOT caused by the customer-emails feature — same failures observed in iteration_10.",
+  "rca of the issue": "N/A — no issues found. Feature works as specified."
+}

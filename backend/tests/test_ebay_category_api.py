@@ -52,13 +52,17 @@ def _run(coro):
     return _LOOP.run_until_complete(coro)
 
 
+# Per-run unique suffix so parallel xdist workers don't wipe each other's items.
+_RUN_ID = uuid.uuid4().hex[:8]
+
+
 def _mk_item(ebay_category_path):
     """Insert a fake scraped item directly into Mongo and return its id."""
-    item_id = f"TEST_{uuid.uuid4().hex[:12]}"
+    item_id = f"TEST_{_RUN_ID}_{uuid.uuid4().hex[:8]}"
     doc = {
         "id": item_id,
         "item_id": item_id,
-        "title": f"TEST Auto Cat Item {item_id[-4:]}",
+        "title": f"TEST Auto Cat {_RUN_ID} Item {item_id[-4:]}",
         "url": f"https://www.ebay.com.au/itm/{uuid.uuid4().int % (10**12)}",
         "price_value": 49.99,
         "price": "AU $49.99",
@@ -79,19 +83,25 @@ def _mk_item(ebay_category_path):
 @pytest.fixture(autouse=True)
 def cleanup():
     async def _wipe():
-        await db.categories.delete_many({"slug": {"$regex": "^auto-api-"}})
-        await db.items.delete_many({"id": {"$regex": "^TEST_"}})
-        await db.products.delete_many({"title": {"$regex": "^TEST Auto Cat"}})
-    _run(_wipe())
+        # Wipe only entities created by THIS test-suite run (unique _RUN_ID prefix)
+        # so parallel xdist workers running other tests can't clobber each other.
+        await db.categories.delete_many({"slug": {"$regex": f"^auto-api-{_RUN_ID}-"}})
+        await db.items.delete_many({"id": {"$regex": f"^TEST_{_RUN_ID}_"}})
+        await db.products.delete_many({"title": {"$regex": f"^TEST Auto Cat {_RUN_ID} "}})
     yield
     _run(_wipe())
+
+
+# Helper to build a run-unique leaf so parallel workers never share a slug.
+def _uniq_leaf(name: str) -> str:
+    return f"Auto Api {_RUN_ID} {name}"
 
 
 class TestAutoCategoryOnAddToProducts:
     """API B — POST /api/products/from-item/{item_id}"""
 
     def test_before_and_after_categories(self):
-        leaf = "Auto Api Kitchen Widgets Alpha"
+        leaf = _uniq_leaf("Kitchen Widgets Alpha")
         expected_slug = _slug(leaf)
         assert expected_slug.startswith("auto-api-")
 
@@ -121,8 +131,8 @@ class TestBulkAddToProducts:
     """API C — POST /api/items/bulk action=add_to_products"""
 
     def test_bulk_creates_categories_for_each(self):
-        leaf_a = "Auto Api Bulk Cameras"
-        leaf_b = "Auto Api Bulk Speakers"
+        leaf_a = _uniq_leaf("Bulk Cameras")
+        leaf_b = _uniq_leaf("Bulk Speakers")
         id_a = _mk_item(["eBay", "Electronics", leaf_a])
         id_b = _mk_item(["eBay", "Electronics", leaf_b])
 
@@ -142,7 +152,7 @@ class TestNoDuplicateCategory:
     """API D — Second import of same category must NOT duplicate the row."""
 
     def test_duplicate_import_no_duplicate_row(self):
-        leaf = "Auto Api Duplicate Guard"
+        leaf = _uniq_leaf("Duplicate Guard")
         slug = _slug(leaf)
         id1 = _mk_item(["eBay", "Sports", leaf])
         id2 = _mk_item(["eBay", "Sports", leaf])
@@ -165,7 +175,7 @@ class TestSeededCategoriesPreserved:
         before = requests.get(f"{API}/categories").json().get("categories", [])
         before_slugs = {c["slug"] for c in before if not c["slug"].startswith("auto-api-")}
 
-        leaf = "Auto Api Preserve Seed"
+        leaf = _uniq_leaf("Preserve Seed")
         item_id = _mk_item(["eBay", "Books", leaf])
         r = requests.post(f"{API}/products/from-item/{item_id}")
         assert r.status_code == 200
@@ -181,7 +191,7 @@ class TestCategoryFilterRegression:
     """R2 — GET /api/products?category=<slug> filters correctly."""
 
     def test_filter_by_auto_created_slug(self):
-        leaf = "Auto Api Filter Target"
+        leaf = _uniq_leaf("Filter Target")
         slug = _slug(leaf)
         item_id = _mk_item(["eBay", "Toys", leaf])
         r = requests.post(f"{API}/products/from-item/{item_id}")

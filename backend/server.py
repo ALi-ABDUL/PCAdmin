@@ -47,6 +47,8 @@ from helpers import (
     _format_notification_html, _push_notification, _emit_notification, 
     _emit_price_change_notifications, calc_pricing, _ensure_pricing_rules_seeded, 
     _load_pricing_rules,
+    send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
+    send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
 )
 
 
@@ -613,8 +615,19 @@ async def update_order(oid: str, body: dict):
         raise HTTPException(status_code=404, detail="Not found")
     updated = await db.orders.find_one({"id": oid}, {"_id": 0})
     # NOTE: order status updates are an internal admin action and do NOT
-    # emit a notification. Notifications should only fire for external
+    # emit an admin notification. Notifications should only fire for external
     # events that need the admin's attention.
+    #
+    # But CUSTOMER-facing emails DO fire on the status transitions the customer
+    # cares about (processing / shipped / delivered / cancelled) — gated by the
+    # per-kind toggles in push_settings.
+    new_status = body.get("status")
+    old_status = prev.get("status")
+    if new_status and new_status != old_status:
+        if new_status in ("processing", "shipped", "delivered"):
+            await send_customer_order_status_update(updated, old_status, new_status)
+        elif new_status == "cancelled":
+            await send_customer_order_cancellation(updated)
     return updated
 
 
@@ -900,6 +913,8 @@ async def portal_register(body: PortalRegisterBody):
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.customer_accounts.insert_one(doc)
+    # Customer email: welcome (gated by customer_welcome_email toggle)
+    await send_customer_welcome_email(doc)
     token = _issue_token(email)
     return {"token": token, "customer": {"id": doc["id"], "email": email, "name": display_name}}
 
@@ -1150,6 +1165,12 @@ async def get_push_settings():
         "resend_api_key_set": bool(s.get("resend_api_key")),
         "telegram_bot_token_masked": _mask(s.get("telegram_bot_token") or ""),
         "telegram_bot_token_set": bool(s.get("telegram_bot_token")),
+        # Customer-facing transactional email toggles
+        "customer_email_enabled": s.get("customer_email_enabled", True),
+        "customer_order_confirmation": s.get("customer_order_confirmation", True),
+        "customer_order_status_update": s.get("customer_order_status_update", True),
+        "customer_order_cancellation": s.get("customer_order_cancellation", True),
+        "customer_welcome_email": s.get("customer_welcome_email", True),
         "channels": channels,
     }
 
@@ -1562,6 +1583,8 @@ async def create_order(body: OrderCreate):
             data={"stock": updated.get("stock")},
         )
     order.pop("_id", None)
+    # Customer email: order confirmation (gated by customer_order_confirmation toggle)
+    await send_customer_order_confirmation(order)
     return order
 
 

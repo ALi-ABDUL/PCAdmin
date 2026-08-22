@@ -527,6 +527,12 @@ PUSH_SETTINGS_DEFAULTS: dict = {
     "resend_from_email": "",
     "telegram_bot_token": "",
     "telegram_chat_id": "",
+    # Customer-facing transactional emails (sent to end-users via Resend). All ON by default.
+    "customer_email_enabled": True,               # master switch
+    "customer_order_confirmation": True,           # new order → confirm email to buyer
+    "customer_order_status_update": True,          # status → processing / shipped / delivered
+    "customer_order_cancellation": True,           # status → cancelled
+    "customer_welcome_email": True,                # portal register → welcome email
 }
 PUSH_CRITICAL_TYPES = {"new_order", "out_of_stock", "price_change", "new_payment", "cancellation_request", "low_stock", "scrape_failed"}
 
@@ -540,6 +546,11 @@ class PushSettingsUpdate(BaseModel):
     resend_from_email: Optional[str] = None
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
+    customer_email_enabled: Optional[bool] = None
+    customer_order_confirmation: Optional[bool] = None
+    customer_order_status_update: Optional[bool] = None
+    customer_order_cancellation: Optional[bool] = None
+    customer_welcome_email: Optional[bool] = None
 
 class PricingRuleBase(BaseModel):
     label: Optional[str] = ""

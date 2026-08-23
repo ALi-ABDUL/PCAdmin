@@ -731,6 +731,32 @@ async def list_customers(
     }
     cursor = db.customers.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).limit(limit)
     customers = await cursor.to_list(length=limit)
+    # For every customer with an email in this page, work out whether their
+    # most-recent INBOUND message is newer than any outbound reply — if so we
+    # surface a red "unread reply" dot in the UI. We do the calculation in a
+    # single aggregation and stitch results back into the list to keep the
+    # main list query fast.
+    emails = list({(c.get("email") or "").strip().lower() for c in customers if c.get("email")})
+    unread: set[str] = set()
+    if emails:
+        pipeline = [
+            {"$match": {"customer_email": {"$in": emails}}},
+            {"$group": {
+                "_id": {"email": "$customer_email", "direction": "$direction"},
+                "last_ts": {"$max": "$created_at"},
+            }},
+        ]
+        rows = await db.messages.aggregate(pipeline).to_list(length=None)
+        per_email: dict[str, dict[str, str]] = {}
+        for r in rows:
+            key = (r["_id"].get("email") or "").strip().lower()
+            direction = r["_id"].get("direction") or "inbound"
+            per_email.setdefault(key, {})[direction] = r.get("last_ts") or ""
+        for k, v in per_email.items():
+            if (v.get("inbound") or "") > (v.get("outbound") or ""):
+                unread.add(k)
+    for c in customers:
+        c["has_unread_reply"] = (c.get("email") or "").strip().lower() in unread
     total = await db.customers.count_documents(query)
     return {"customers": customers, "total": total}
 
@@ -798,6 +824,10 @@ async def get_customer(cid: str):
                 })
         # Newest first — most useful for admins scanning "what happened last".
         timeline.sort(key=lambda e: e.get("ts") or "", reverse=True)
+        # Compute unread-reply flag the same way the list endpoint does.
+        last_in  = max((m.get("created_at", "") for m in thread if m.get("direction") == "inbound"), default="")
+        last_out = max((m.get("created_at", "") for m in thread if m.get("direction") == "outbound"), default="")
+        c["has_unread_reply"] = bool(last_in and last_in > last_out)
     return {"customer": c, "orders": orders, "thread": thread, "timeline": timeline}
 
 

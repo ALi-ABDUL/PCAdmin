@@ -165,7 +165,22 @@ export function CustomerTable({ list, total, q, setQ, sort, setSort, onChanged, 
           {list.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-slate-500">No customers</td></tr>}
           {list.map(c => (
             <tr key={c.id} data-testid="cus-row" onClick={() => onOpen?.(c.id)} className="cursor-pointer hover:bg-slate-50 transition-colors">
-              <td><div className="flex items-center gap-3"><CustomerAvatar c={c}/><div className="min-w-0"><div className="text-sm font-medium truncate max-w-[240px]">{c.name}</div><div className="text-[11px] text-slate-400 truncate">{c.email || "—"}</div></div></div></td>
+              <td>
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <CustomerAvatar c={c}/>
+                    {c.has_unread_reply && (
+                      <span
+                        className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-white animate-pulse"
+                        title="Waiting for your reply"
+                        data-testid="cus-row-unread-dot"
+                        aria-label="Waiting for your reply"
+                      />
+                    )}
+                  </div>
+                  <div className="min-w-0"><div className="text-sm font-medium truncate max-w-[240px]">{c.name}</div><div className="text-[11px] text-slate-400 truncate">{c.email || "—"}</div></div>
+                </div>
+              </td>
               <td className="font-mono text-xs text-slate-500">{c.code}</td>
               <td><span className="chip chip-neutral capitalize">{c.type}</span></td>
               <td onClick={stop}>

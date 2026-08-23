@@ -1,0 +1,23 @@
+{
+  "summary": "Iter 25 — Verified has_unread_reply flag on /api/customers (list) & /api/customers/{cid} (detail), plus the red pulsing dot on customer rows and 'Waiting for your reply' chip on the profile. All 5 backend scenarios pass (zero messages, 2 inbound, outbound-newer, only outbound, inbound-newer-than-outbound). Frontend verified: dot appears with animate-pulse for unread customer, absent for clean; chip appears/absents accordingly. Regression: timeline + thread blocks still render on detail page.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_unread_reply.py",
+    "/app/test_reports/pytest/unread_reply.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "String-comparison of ISO timestamps in list_customers works because all times are UTC ISO from datetime.now(timezone.utc).isoformat() — safe as long as everyone keeps stamping via helpers. Any code that inserts a message with a naive local ISO string would break the ordering silently. Consider comparing parsed datetimes for robustness.",
+    "server.py is now >1500 lines and mixes many resource routers — consider splitting into router modules (customers.py, messages.py, etc). Non-blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_unread_reply.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "n/a — admin dashboard has no login gating in this env",
+  "seed_data_creation": "Created ephemeral TEST_ui_unread_* and TEST_ui_clean_* customers + inbound message during UI run and deleted them; backend pytest creates TEST_unread_* customers and cleans up in module fixture teardown.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 25 fully verified the unread-reply flag feature end-to-end. Data-testids used: cus-row-unread-dot (list) and customer-unread-chip (detail). Dot has animate-pulse class as required. Backend pytest suite at /app/backend/tests/test_unread_reply.py — run with `pytest -o addopts= -v` to bypass xdist config."
+}

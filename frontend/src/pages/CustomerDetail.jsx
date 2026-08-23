@@ -103,7 +103,15 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
             <span className="text-indigo-600 font-bold">{c.code}</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {c.has_unread_reply && (
+            <span
+              className="chip !bg-red-50 !text-red-700 !border-red-200 inline-flex items-center gap-1.5"
+              data-testid="customer-unread-chip"
+            >
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"/> Waiting for your reply
+            </span>
+          )}
           <StatusChip status={c.status}/>
           <span className="chip chip-primary capitalize">{c.type}</span>
         </div>

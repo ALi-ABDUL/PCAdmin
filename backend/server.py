@@ -589,7 +589,18 @@ async def update_order(oid: str, body: dict):
     prev = await db.orders.find_one({"id": oid}, {"_id": 0})
     if not prev:
         raise HTTPException(status_code=404, detail="Not found")
-    r = await db.orders.update_one({"id": oid}, {"$set": body})
+    new_status = body.get("status")
+    old_status = prev.get("status")
+    update_doc = {"$set": body}
+    # Append to the order's status_history when the status actually changes so
+    # the customer profile can render a full audit trail on the timeline.
+    if new_status and new_status != old_status:
+        update_doc["$push"] = {"status_history": {
+            "from": old_status,
+            "to": new_status,
+            "changed_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    r = await db.orders.update_one({"id": oid}, update_doc)
     if r.matched_count == 0:
         raise HTTPException(status_code=404, detail="Not found")
     updated = await db.orders.find_one({"id": oid}, {"_id": 0})
@@ -600,8 +611,6 @@ async def update_order(oid: str, body: dict):
     # But CUSTOMER-facing emails DO fire on the status transitions the customer
     # cares about (processing / shipped / delivered / cancelled) — gated by the
     # per-kind toggles in push_settings.
-    new_status = body.get("status")
-    old_status = prev.get("status")
     if new_status and new_status != old_status:
         if new_status in ("processing", "shipped", "delivered"):
             await send_customer_order_status_update(updated, old_status, new_status)
@@ -740,29 +749,56 @@ async def customers_summary():
 
 @api_router.get("/customers/{cid}")
 async def get_customer(cid: str):
-    """Full profile for a single customer plus their recent orders (last 25)
-    and the full message thread (inbound + outbound, chronological) so the
+    """Full profile for a single customer plus their recent orders (last 25),
+    the full message thread (inbound + outbound, chronological), and a flat
+    timeline of order lifecycle events (created + every status change) so the
     admin detail page can render everything in one round-trip."""
     c = await db.customers.find_one({"id": cid}, {"_id": 0})
     if not c:
         raise HTTPException(status_code=404, detail="Not found")
     orders: list[dict] = []
     thread: list[dict] = []
+    timeline: list[dict] = []
     email = (c.get("email") or "").strip().lower()
     if email:
-        orders = await db.orders.find(
-            {"customer_email": email},
-            {"_id": 0, "id": 1, "reference": 1, "status": 1, "total": 1, "created_at": 1, "items": 1, "customer_name": 1},
+        orders_full = await db.orders.find(
+            {"customer_email": email}, {"_id": 0},
         ).sort("created_at", -1).limit(25).to_list(25)
+        # Keep the compact shape for the Recent orders table.
+        orders = [
+            {k: o.get(k) for k in ("id", "reference", "status", "total", "created_at", "items", "customer_name")}
+            for o in orders_full
+        ]
         thread = await db.messages.find(
-            {"customer_email": email},
-            {"_id": 0},
+            {"customer_email": email}, {"_id": 0},
         ).sort("created_at", 1).to_list(500)
-        # Normalise: legacy inbound rows may not have `direction` — default to inbound.
         for m in thread:
             if not m.get("direction"):
                 m["direction"] = "inbound"
-    return {"customer": c, "orders": orders, "thread": thread}
+        # Build the flat timeline: one "order_created" event per order + one
+        # "status_change" event for every entry in status_history.
+        for o in orders_full:
+            timeline.append({
+                "type": "order_created",
+                "ts": o.get("created_at"),
+                "order_id": o.get("id"),
+                "order_reference": o.get("reference"),
+                "status": o.get("status"),
+                "total": o.get("total"),
+                "product_title": o.get("product_title"),
+            })
+            for h in (o.get("status_history") or []):
+                timeline.append({
+                    "type": "status_change",
+                    "ts": h.get("changed_at"),
+                    "order_id": o.get("id"),
+                    "order_reference": o.get("reference"),
+                    "from": h.get("from"),
+                    "to": h.get("to"),
+                })
+        # Newest first — most useful for admins scanning "what happened last".
+        timeline.sort(key=lambda e: e.get("ts") or "", reverse=True)
+    return {"customer": c, "orders": orders, "thread": thread, "timeline": timeline}
 
 
 @api_router.post("/customers/{cid}/message")
@@ -1632,7 +1668,7 @@ async def create_order(body: OrderCreate):
         "cost_total": cost_total,
         "profit": round(total - cost_total, 2),
         "customer_name": body.customer_name or "Guest",
-        "customer_email": body.customer_email,
+        "customer_email": (body.customer_email or "").strip().lower() or None,
         "shipping_address": (body.shipping_address.model_dump() if body.shipping_address else None),
         "status": body.status,
         "created_at": datetime.now(timezone.utc).isoformat(),

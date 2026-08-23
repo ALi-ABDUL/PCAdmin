@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, ChevronLeft, Loader2, Mail, MessageSquare, Phone, Reply, ShoppingBag, Trash2 } from "lucide-react";
+import { BadgeCheck, ChevronLeft, Circle, Loader2, Mail, MessageSquare, PackagePlus, Phone, Reply, ShoppingBag, Trash2 } from "lucide-react";
 import { Field, StatusChip } from "../components/atoms";
 import { MessageCustomerDialog } from "../components/MessageCustomerDialog";
 import { CustomerAvatar } from "./Customers";
@@ -12,6 +12,7 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
   const [c, setC] = useState(null);
   const [orders, setOrders] = useState([]);
   const [thread, setThread] = useState([]);
+  const [timeline, setTimeline] = useState([]);
   const [f, setF] = useState({});
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -24,6 +25,7 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
       setC(data.customer);
       setOrders(data.orders || []);
       setThread(data.thread || []);
+      setTimeline(data.timeline || []);
       setF({
         name: data.customer.name || "",
         email: data.customer.email || "",
@@ -158,6 +160,26 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
         )}
       </div>
 
+      {/* Order timeline */}
+      <div className="card overflow-hidden" data-testid="customer-detail-timeline">
+        <div className="p-4 border-b hairline font-display font-bold flex items-center gap-2">
+          <Circle size={14}/> Order timeline · <span className="text-slate-500 font-mono text-sm">{timeline.length}</span>
+        </div>
+        {timeline.length === 0 ? (
+          <div className="p-8 text-center text-sm text-slate-500">Once this customer places an order, its lifecycle will appear here.</div>
+        ) : (
+          <div className="p-5 pl-6 relative">
+            {/* vertical rail */}
+            <div className="absolute left-[27px] top-6 bottom-6 w-px bg-slate-200" aria-hidden="true"/>
+            <ol className="space-y-4">
+              {timeline.map((e, idx) => (
+                <TimelineEvent key={`${e.type}-${e.order_id}-${e.ts}-${idx}`} event={e}/>
+              ))}
+            </ol>
+          </div>
+        )}
+      </div>
+
       {/* Messages thread */}
       <div className="card overflow-hidden" data-testid="customer-detail-thread">
         <div className="p-4 border-b hairline flex items-center justify-between">
@@ -238,5 +260,72 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
         onSent={() => load()}
       />
     </div>
+  );
+}
+
+
+/**
+ * A single row in the customer's order lifecycle timeline.
+ *
+ * The vertical rail is drawn by the parent (absolute-positioned line); each
+ * event just needs a status-tinted dot on the rail + a label / meta line.
+ */
+const STATUS_TONE = {
+  pending:    { bg: "bg-slate-400",   ring: "ring-slate-100",   text: "Pending" },
+  paid:       { bg: "bg-sky-500",     ring: "ring-sky-100",     text: "Paid" },
+  processing: { bg: "bg-indigo-500",  ring: "ring-indigo-100",  text: "Processing" },
+  shipped:    { bg: "bg-amber-500",   ring: "ring-amber-100",   text: "Shipped" },
+  delivered:  { bg: "bg-emerald-500", ring: "ring-emerald-100", text: "Delivered" },
+  cancelled:  { bg: "bg-red-500",     ring: "ring-red-100",     text: "Cancelled" },
+  refunded:   { bg: "bg-fuchsia-500", ring: "ring-fuchsia-100", text: "Refunded" },
+};
+const _tone = (s) => STATUS_TONE[s] || { bg: "bg-slate-400", ring: "ring-slate-100", text: (s || "unknown").replace(/_/g, " ") };
+
+function TimelineEvent({ event: e }) {
+  const isCreate = e.type === "order_created";
+  const tone = isCreate ? _tone(e.status) : _tone(e.to);
+  const Icon = isCreate ? PackagePlus : Circle;
+  return (
+    <li className="relative pl-8" data-testid={`timeline-event-${e.type}`}>
+      <span
+        className={`absolute -left-[3px] top-1 w-4 h-4 rounded-full ${tone.bg} ring-4 ${tone.ring} shadow-sm flex items-center justify-center`}
+        aria-hidden="true"
+      >
+        <Icon size={9} className="text-white"/>
+      </span>
+      <div className="text-sm text-slate-800">
+        {isCreate ? (
+          <>
+            <span className="font-bold">Order placed</span>
+            {" "}
+            <span className="text-slate-500">·</span>{" "}
+            <span className="font-mono text-indigo-600 font-bold">{e.order_reference}</span>
+            {e.total != null && (
+              <>
+                {" "}
+                <span className="text-slate-400">·</span>{" "}
+                <span className="font-mono font-bold">{moneyCents(e.total)}</span>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <span className="font-bold capitalize">{tone.text}</span>
+            <span className="text-slate-500"> · </span>
+            <span className="font-mono text-indigo-600 font-bold">{e.order_reference}</span>
+            {e.from && (
+              <>
+                <span className="text-slate-400"> · </span>
+                <span className="text-slate-500 text-xs">from {(_tone(e.from).text)}</span>
+              </>
+            )}
+          </>
+        )}
+      </div>
+      {isCreate && e.product_title && (
+        <div className="text-xs text-slate-500 truncate mt-0.5" title={e.product_title}>{e.product_title}</div>
+      )}
+      <div className="text-[11px] text-slate-400 font-mono mt-0.5">{fmtDate(e.ts)}</div>
+    </li>
   );
 }

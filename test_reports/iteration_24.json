@@ -1,0 +1,32 @@
+{
+  "summary": "Backend + frontend verification of the customer profile Order Timeline feature. Backend: 5/5 pytest in /app/backend/tests/test_order_timeline.py PASS — (1) PATCH /api/orders/{oid} appends {from,to,changed_at} to status_history only when status changes; PATCH with non-status body OR PATCH with same status does NOT touch status_history. (2) GET /api/customers/{cid} returns `timeline` array with 1 order_created event (order_reference, status, total, product_title, ts) per order + 1 status_change event per status_history row (from, to, order_reference, ts). (3) Sort is newest-first (verified by asserting ts_list == sorted(reverse=True)). (4) Empty case: freshly-created customer with no orders returns timeline == []. Frontend: on Customers → Timeline UI detail, the [data-testid=customer-detail-timeline] card renders between Recent Orders and Messages, header 'Order timeline · 4', 1 [data-testid=timeline-event-order_created] + 3 [data-testid=timeline-event-status_change] children. Colored dots verified via DOM inspection — delivered event has class 'bg-emerald-500 ring-emerald-100'; shipped=amber, processing=indigo (visible in screenshot). Product title 'Everfit 12PCS Pickleballs…' rendered beneath the create event. Each status_change shows 'from <PrevStatus>' correctly. Regression: Recent Orders table + Messages thread + editable Profile inputs (customer-name-input visible/editable) all still render on the same page.",
+  "backend_issues": {"critical": [], "minor": [
+    {"endpoint": "POST /api/orders", "issue": "customer_email is stored verbatim (no .lower()), while GET /api/customers/{cid} looks it up as email.strip().lower(). If an order is created with a mixed-case customer_email, it will not surface in that customer's timeline/orders. POST /api/messages already lowercases (server.py L1127-1128); POST /api/orders should do the same for consistency."}
+  ]},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "CustomerDetail — Order timeline", "issues": ["When initial order status is 'paid' (default from POST /api/orders), the first status_change renders 'from paid' with lowercase 'paid' because STATUS_TONE map has no 'paid' entry (falls through to the default branch which passes the raw status through .replace('_',' ')). Not broken, just inconsistent with other statuses which display Capitalized ('Delivered', 'Shipped'). Consider adding 'paid' + 'new' + 'ready_to_ship' to STATUS_TONE."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_order_timeline.py",
+    "/app/test_reports/pytest/timeline.xml"
+  ],
+  "action_items": [
+    "(Minor) Lowercase customer_email in POST /api/orders to match POST /api/messages behavior — prevents timeline/order lookup mismatches when order emails come in mixed case.",
+    "(Cosmetic) Extend STATUS_TONE in CustomerDetail.jsx to include 'paid', 'new', 'ready_to_ship' so status_change labels render consistently capitalized."
+  ],
+  "critical_code_review_comments": [
+    "server.py update_order: `update_doc = {\"$set\": body}` — untrusted client-supplied `body` is spread directly into $set. This lets a caller overwrite fields like `total`, `profit`, `product_id`, `status_history` itself, or even inject `_id`. Recommend a whitelist of PATCH-able fields.",
+    "server.py get_customer builds `timeline` by iterating full `orders_full` (limit 25) — the order_created events therefore respect the 25-order cap but a very-active customer's status_history rows are unbounded per order. If needed, cap or paginate the whole timeline for very heavy accounts.",
+    "CustomerDetail.jsx TimelineEvent key uses `${e.type}-${e.order_id}-${e.ts}-${idx}` — the `idx` fallback masks any real duplicate-ts collision but is fine as a stable list key."
+  ],
+  "updated_files": ["/app/backend/tests/test_order_timeline.py"],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "100% (all acceptance criteria met)"},
+  "seed_data_creation": "Created 2 test customers via POST /api/customers: 'Timeline UI' (id 102b9f0e-0b7e-4329-86c4-01d8eb73f81c, email timeline_ui_88fa18@example.com) with 1 order transitioned pending→processing→shipped→delivered; and 'DBG' (test_dbg_b3bd67@example.com) with the same. Plus pytest generated ~4 short-lived test_timeline_* and test_empty_* customers.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Timeline test lives at /app/backend/tests/test_order_timeline.py (5 tests, pytest via configfile /app/backend/pytest.ini uses xdist by default — LoadScopeScheduling keeps class-scoped fixtures per worker). One nuance: POST /api/orders default status is 'paid' (not 'pending' as the review request assumed), so the first status_change on a freshly-seeded order transitions from 'paid'→'processing'. Full timeline for a seed with 3 transitions therefore has 4 events (1 create + 3 change), matching the spec."
+}

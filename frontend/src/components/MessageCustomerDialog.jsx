@@ -8,17 +8,29 @@ import { API } from "../lib/api";
  * Modal that lets an admin compose an email straight to a customer.
  * Posts to POST /api/customers/:id/message which routes through Resend.
  */
-export function MessageCustomerDialog({ open, customer, onClose, onSent }) {
+export function MessageCustomerDialog({ open, customer, replyTo = null, onClose, onSent }) {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setSubject("");
-    setBody("");
+    // Prefill "Re: …" and a quoted-original when replying to an inbound message.
+    if (replyTo) {
+      const rawSubj = (replyTo.subject || "").trim();
+      const withRe = rawSubj && !/^re:/i.test(rawSubj) ? `Re: ${rawSubj}` : rawSubj || "Re: your message";
+      setSubject(withRe);
+      const quoted = (replyTo.body || "")
+        .split(/\r?\n/)
+        .map((l) => `> ${l}`)
+        .join("\n");
+      setBody(`\n\n---\nOn ${replyTo.created_at ? new Date(replyTo.created_at).toLocaleString() : ""} ${replyTo.customer_name || "you"} wrote:\n${quoted}`);
+    } else {
+      setSubject("");
+      setBody("");
+    }
     setSending(false);
-  }, [open]);
+  }, [open, replyTo]);
 
   if (!open || !customer) return null;
 

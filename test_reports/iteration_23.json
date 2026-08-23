@@ -1,0 +1,29 @@
+{
+  "summary": "Full backend + frontend testing for (1) Message threads on Customer profile and (2) Drag-to-reorder product images. Backend: 4/4 pytest in /app/backend/tests/test_message_thread.py PASS — GET /api/customers/{id} returns thread array (empty for new customer), POST /api/messages stamps direction='inbound' AND lowercases customer_email (verified by posting with UPPERCASED email then finding it in the thread lookup keyed on lowercase), thread is sorted asc by created_at, and outbound POST /api/customers/{id}/message correctly returns 400 (Resend not configured — by design). Frontend: Customer profile 'Messages · N' card ([data-testid=customer-detail-thread]) renders inbound bubbles (grey, left) with Reply buttons ([data-testid^=thread-reply-]); clicking Reply opens MessageCustomerDialog with subject prefilled 'Re: Order status' and body containing a quoted-original block ('> Hi, has my order shipped?'); Cancel closes the dialog cleanly; 'New message' header button ([data-testid=thread-new-message-btn]) opens the dialog blank (subject='', body=''). Image reorder: on the Everfit Pickleballs product detail page, first thumbnail shows 'Hero' chip, using Playwright's built-in drag_to on [data-testid=product-image-1] onto [data-testid=product-image-0] swapped the array, PATCH persisted (verified by re-GETting product), and toast 'New listing hero image' rendered. Original order restored after test. No regressions observed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "ProductDetail — Category select", "issues": ["Hydration warning in console: '<span> cannot be a child of <option>'. Not blocking, but caused by an editor/dev instrumentation wrapper injecting <span data-ve-dynamic> inside <option> tags in the category dropdown."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_message_thread.py",
+    "/app/test_reports/pytest/thread.xml"
+  ],
+  "action_items": [
+    "(Optional) Investigate hydration warning on <option> children in ProductDetail category select — appears to be caused by dev-only instrumentation wrapper, but worth confirming it doesn't leak into prod build."
+  ],
+  "critical_code_review_comments": [
+    "server.py get_customer(): to_list(500) for thread has no upper-bound protection — for very active customers this could balloon the payload. Consider pagination or a sensible ceiling with a 'load more'.",
+    "MessageCustomerDialog useEffect prefills body with a leading '\\n\\n---\\nOn <date> ... wrote:' block including the date-time even when replyTo.created_at is falsy (renders 'On  wrote:' with double-space). Minor cosmetic.",
+    "ProductDetail reorderImages does optimistic UI update but on failure re-loads — good. However there is no debounce/throttle if the user rapidly drags many times; each drop fires an immediate PATCH. Consider queueing/debouncing."
+  ],
+  "updated_files": ["/app/backend/tests/test_message_thread.py"],
+  "success_rate": {"backend": "100% (4/4 new + prior suites unaffected)", "frontend": "100% (all thread + reorder acceptance criteria met)"},
+  "seed_data_creation": "Seeded 2 inbound messages against existing customer id 1a51d1a5-9aa6-4523-9595-adf0cc37091f ('Thread Test', email thread_1787485426@example.com) via POST /api/messages (subjects: 'Order status?', 'Tracking'). Used existing product 3d5f73a3-a853-4e74-a366-11af25bc231b (Everfit Pickleballs, 20 images) for drag reorder; original image order restored after test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Both features fully verified. Thread pytest lives at /app/backend/tests/test_message_thread.py. For any future UI drag-reorder tests, Playwright's src_locator.drag_to(tgt_locator, force=True) reliably triggers HTML5 DnD — manual DragEvent dispatch does NOT work because React setState in onDragStart hasn't flushed before drop fires synchronously."
+}

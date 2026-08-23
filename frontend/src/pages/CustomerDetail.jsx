@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, ChevronLeft, Loader2, Mail, Phone, ShoppingBag, Trash2 } from "lucide-react";
+import { BadgeCheck, ChevronLeft, Loader2, Mail, MessageSquare, Phone, Reply, ShoppingBag, Trash2 } from "lucide-react";
 import { Field, StatusChip } from "../components/atoms";
 import { MessageCustomerDialog } from "../components/MessageCustomerDialog";
 import { CustomerAvatar } from "./Customers";
@@ -11,16 +11,19 @@ import { fmtDate, fmtLongDateTime, moneyCents } from "../lib/format";
 export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
   const [c, setC] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [thread, setThread] = useState([]);
   const [f, setF] = useState({});
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msgOpen, setMsgOpen] = useState(false);
+  const [replyTo, setReplyTo] = useState(null);
 
   const load = useCallback(async () => {
     try {
       const { data } = await axios.get(`${API}/customers/${customerId}`);
       setC(data.customer);
       setOrders(data.orders || []);
+      setThread(data.thread || []);
       setF({
         name: data.customer.name || "",
         email: data.customer.email || "",
@@ -155,6 +158,70 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
         )}
       </div>
 
+      {/* Messages thread */}
+      <div className="card overflow-hidden" data-testid="customer-detail-thread">
+        <div className="p-4 border-b hairline flex items-center justify-between">
+          <div className="font-display font-bold flex items-center gap-2">
+            <MessageSquare size={14}/> Messages · <span className="text-slate-500 font-mono text-sm">{thread.length}</span>
+          </div>
+          <button
+            onClick={() => { setReplyTo(null); setMsgOpen(true); }}
+            disabled={!c.email}
+            className="btn btn-ghost text-xs"
+            data-testid="thread-new-message-btn"
+          >
+            <Mail size={12}/> New message
+          </button>
+        </div>
+        {thread.length === 0 ? (
+          <div className="p-8 text-center text-sm text-slate-500">
+            No messages yet. Send the first one from the "Message customer" button above.
+          </div>
+        ) : (
+          <div className="p-4 space-y-3 max-h-[520px] overflow-y-auto">
+            {thread.map((m) => {
+              const isOut = m.direction === "outbound";
+              return (
+                <div
+                  key={m.id}
+                  className={`flex ${isOut ? "justify-end" : "justify-start"}`}
+                  data-testid={`thread-msg-${m.direction}`}
+                >
+                  <div
+                    className={`rounded-2xl px-4 py-3 max-w-[80%] shadow-sm ${
+                      isOut
+                        ? "bg-indigo-600 text-white rounded-tr-md"
+                        : "bg-slate-100 text-slate-800 rounded-tl-md"
+                    }`}
+                  >
+                    <div className={`text-[10px] font-mono uppercase tracking-widest mb-1 ${isOut ? "text-indigo-200" : "text-slate-500"}`}>
+                      {isOut ? "You" : (m.customer_name || "Customer")} · {fmtDate(m.created_at)}
+                    </div>
+                    {m.subject && (
+                      <div className={`text-sm font-bold mb-1 ${isOut ? "text-white" : "text-slate-900"}`}>{m.subject}</div>
+                    )}
+                    <div className={`text-sm leading-relaxed whitespace-pre-wrap ${isOut ? "text-white/95" : "text-slate-700"}`}>{m.body}</div>
+                    {!isOut && (
+                      <button
+                        onClick={() => {
+                          setReplyTo(m);
+                          setMsgOpen(true);
+                        }}
+                        disabled={!c.email}
+                        className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 transition-colors"
+                        data-testid={`thread-reply-${m.id}`}
+                      >
+                        <Reply size={11}/> Reply
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* Sticky footer save */}
       <div className="sticky bottom-4 flex items-center justify-end gap-2 py-2 z-20">
         <button onClick={onBack} className="btn btn-ghost text-sm">Cancel</button>
@@ -166,7 +233,9 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
       <MessageCustomerDialog
         open={msgOpen}
         customer={c}
+        replyTo={replyTo}
         onClose={() => setMsgOpen(false)}
+        onSent={() => load()}
       />
     </div>
   );

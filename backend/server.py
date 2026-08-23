@@ -740,19 +740,29 @@ async def customers_summary():
 
 @api_router.get("/customers/{cid}")
 async def get_customer(cid: str):
-    """Full profile for a single customer, plus their recent orders (last 25)
-    so the admin detail page can render everything in one round-trip."""
+    """Full profile for a single customer plus their recent orders (last 25)
+    and the full message thread (inbound + outbound, chronological) so the
+    admin detail page can render everything in one round-trip."""
     c = await db.customers.find_one({"id": cid}, {"_id": 0})
     if not c:
         raise HTTPException(status_code=404, detail="Not found")
-    orders = []
+    orders: list[dict] = []
+    thread: list[dict] = []
     email = (c.get("email") or "").strip().lower()
     if email:
         orders = await db.orders.find(
             {"customer_email": email},
             {"_id": 0, "id": 1, "reference": 1, "status": 1, "total": 1, "created_at": 1, "items": 1, "customer_name": 1},
         ).sort("created_at", -1).limit(25).to_list(25)
-    return {"customer": c, "orders": orders}
+        thread = await db.messages.find(
+            {"customer_email": email},
+            {"_id": 0},
+        ).sort("created_at", 1).to_list(500)
+        # Normalise: legacy inbound rows may not have `direction` — default to inbound.
+        for m in thread:
+            if not m.get("direction"):
+                m["direction"] = "inbound"
+    return {"customer": c, "orders": orders, "thread": thread}
 
 
 @api_router.post("/customers/{cid}/message")
@@ -801,7 +811,7 @@ async def message_customer(cid: str, body: dict):
     # Log outbound copy in the Messages inbox for a full audit trail.
     m = Message(
         customer_name=c.get("name") or "",
-        customer_email=to_email,
+        customer_email=to_email.lower(),
         subject=subject,
         body=message,
         status="archived",  # outbound messages don't need admin action
@@ -1076,8 +1086,14 @@ async def list_messages(status: Optional[str] = None):
 
 @api_router.post("/messages", response_model=Message)
 async def create_message(body: MessageBase):
-    m = Message(**body.model_dump())
-    await db.messages.insert_one(m.model_dump())
+    payload = body.model_dump()
+    # Normalise email so the customer-profile thread lookup finds it.
+    if payload.get("customer_email"):
+        payload["customer_email"] = payload["customer_email"].strip().lower()
+    m = Message(**payload)
+    doc = m.model_dump()
+    doc["direction"] = "inbound"
+    await db.messages.insert_one(doc)
     return m
 
 

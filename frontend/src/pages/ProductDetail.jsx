@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, CheckCircle2, ChevronLeft, ExternalLink, Layout, Loader2, Plus, RefreshCw, Star as StarIcon, Trash2 } from "lucide-react";
+import { BadgeCheck, Ban, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Plus, RefreshCw, Star as StarIcon, Trash2 } from "lucide-react";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
@@ -18,6 +18,10 @@ export function ProductDetailPage({ productId, onBack }) {
   const [refreshing, setRefreshing] = useState(false);
   const [showCatPopover, setShowCatPopover] = useState(false);
   const [imgDialog, setImgDialog] = useState({ open: false, mode: "add", idx: null, current: "" });
+  // Drag-reorder state: the index currently being dragged + which slot is
+  // being hovered. Persist to server on drop.
+  const [dragFrom, setDragFrom] = useState(null);
+  const [dragOver, setDragOver] = useState(null);
 
   const load = useCallback(async () => {
     const [prod, rev] = await Promise.all([
@@ -98,6 +102,26 @@ export function ProductDetailPage({ productId, onBack }) {
     await load();
   };
 
+  /**
+   * Persist a reordered images array. Called by onDrop after the user drags
+   * one thumbnail onto another. If the source == target index, this is a no-op.
+   */
+  const reorderImages = async (from, to) => {
+    if (from === to || from == null || to == null) return;
+    const list = [...(p.images || [])];
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    // Optimistic UI so the drag feels snappy.
+    setP((prev) => ({ ...prev, images: list }));
+    try {
+      await axios.patch(`${API}/products/${productId}`, { images: list });
+      toast.success(to === 0 ? "New listing hero image" : "Image order saved");
+    } catch {
+      toast.error("Reorder failed");
+      await load();
+    }
+  };
+
   if (!p) return <div className="text-slate-500 py-24 text-center">loading product…</div>;
 
   const badge = statusBadge(p);
@@ -159,21 +183,52 @@ export function ProductDetailPage({ productId, onBack }) {
 
       {/* Images */}
       <div className="card p-5">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="font-display font-bold">Images · <span className="text-slate-500 font-mono text-sm">{(p.images || []).length}</span></div>
-          <button onClick={openAdd} className="btn btn-ghost text-xs" data-testid="product-add-image-btn"><Plus size={12}/> Add image</button>
+          <div className="flex items-center gap-3">
+            {(p.images || []).length > 1 && (
+              <div className="text-[11px] text-slate-400 hidden sm:flex items-center gap-1">
+                <GripVertical size={11}/> Drag to reorder · first image = listing hero
+              </div>
+            )}
+            <button onClick={openAdd} className="btn btn-ghost text-xs" data-testid="product-add-image-btn"><Plus size={12}/> Add image</button>
+          </div>
         </div>
         <div className="flex gap-3 overflow-x-auto pb-1" data-testid="product-images-strip">
           {(p.images || []).length === 0 && <div className="text-slate-400 text-sm py-8 text-center flex-1">No images yet.</div>}
-          {(p.images || []).map((src, i) => (
-            <div key={i} className="relative shrink-0 w-40 h-40 rounded-xl overflow-hidden bg-slate-100 border hairline group" data-testid={`product-image-${i}`}>
-              <img src={proxyImg(src)} alt="" className="w-full h-full object-cover"/>
-              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                <button onClick={() => openReplace(i)} className="btn btn-ghost !bg-white text-xs !py-1" data-testid={`product-image-replace-${i}`}><RefreshCw size={11}/> Replace</button>
-                <button onClick={() => removeImage(i)} className="btn btn-danger text-xs !py-1" data-testid={`product-image-delete-${i}`}><Trash2 size={11}/></button>
+          {(p.images || []).map((src, i) => {
+            const isDragging = dragFrom === i;
+            const isOver = dragOver === i && dragFrom !== null && dragFrom !== i;
+            return (
+              <div
+                key={`${i}-${src.slice(0, 32)}`}
+                draggable
+                onDragStart={(e) => { setDragFrom(i); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", String(i)); } catch {} }}
+                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragOver !== i) setDragOver(i); }}
+                onDragEnter={(e) => { e.preventDefault(); }}
+                onDragLeave={() => { if (dragOver === i) setDragOver(null); }}
+                onDrop={async (e) => {
+                  e.preventDefault();
+                  const from = dragFrom;
+                  setDragFrom(null); setDragOver(null);
+                  await reorderImages(from, i);
+                }}
+                onDragEnd={() => { setDragFrom(null); setDragOver(null); }}
+                className={`relative shrink-0 w-40 h-40 rounded-xl overflow-hidden bg-slate-100 border hairline group cursor-grab active:cursor-grabbing transition ${isDragging ? "opacity-40 scale-95" : ""} ${isOver ? "ring-2 ring-indigo-500 scale-[1.02]" : ""}`}
+                data-testid={`product-image-${i}`}
+                data-image-idx={i}
+              >
+                <img src={proxyImg(src)} alt="" className="w-full h-full object-cover pointer-events-none"/>
+                {i === 0 && (
+                  <span className="absolute top-2 left-2 chip chip-primary !text-[10px] !py-0.5 shadow-sm">Hero</span>
+                )}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                  <button onClick={() => openReplace(i)} className="btn btn-ghost !bg-white text-xs !py-1" data-testid={`product-image-replace-${i}`}><RefreshCw size={11}/> Replace</button>
+                  <button onClick={() => removeImage(i)} className="btn btn-danger text-xs !py-1" data-testid={`product-image-delete-${i}`}><Trash2 size={11}/></button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

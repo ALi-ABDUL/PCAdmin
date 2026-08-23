@@ -213,7 +213,7 @@ export function NotificationBell({ onNavigate }) {
       {open && (
         <div
           data-testid="notif-dropdown"
-          className="absolute right-0 top-11 w-[400px] max-w-[92vw] bg-white border hairline shadow-2xl rounded-xl overflow-hidden z-50"
+          className="fixed left-2 right-2 top-14 w-auto sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-[400px] sm:max-w-[92vw] bg-white border hairline shadow-2xl rounded-xl overflow-hidden z-50"
         >
           <div className="p-3 flex items-center justify-between border-b hairline bg-slate-50">
             <div className="font-display font-bold text-sm flex items-center gap-2"><Bell size={14}/> Notifications</div>

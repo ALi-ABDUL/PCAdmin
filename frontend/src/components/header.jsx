@@ -185,10 +185,21 @@ export function NotificationBell({ onNavigate }) {
   const onClickRow = async (n) => {
     await markOne(n);
     setOpen(false);
-    // Deep-link: prefer order → product → customer → item detail
+    // Type-first routing so specific notification kinds land on the right page:
+    //  • price_change → Products › Price Alerts, scrolled to & highlighting the row
+    //  • new_customer → Customers › customer profile page (not the list)
+    if (n.type === "price_change") {
+      onNavigate?.({ tab: "products", section: "price-alerts", filter: { itemId: n.item_id, notifId: n.id } });
+      return;
+    }
+    if (n.type === "new_customer" && n.customer_id) {
+      onNavigate?.({ tab: "customers", filter: { customerId: n.customer_id } });
+      return;
+    }
+    // Generic deep-link chain: prefer order → product → customer → item detail
     if (n.order_id) onNavigate?.({ tab: "orders", section: "all", filter: { orderId: n.order_id } });
     else if (n.product_id) onNavigate?.({ tab: "products", section: "all", filter: { productId: n.product_id } });
-    else if (n.customer_id) onNavigate?.({ tab: "customers", section: "all", filter: { customerId: n.customer_id } });
+    else if (n.customer_id) onNavigate?.({ tab: "customers", filter: { customerId: n.customer_id } });
     else if (n.item_id) onNavigate?.({ tab: "scraper", filter: { itemId: n.item_id } });
   };
 

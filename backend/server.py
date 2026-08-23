@@ -734,6 +734,25 @@ async def customers_summary():
     return {"total": total, "active": active, "pending": pending, "blocked": blocked, "guest": guest, "registered": registered, "top": top, "by_group": by_group}
 
 
+@api_router.get("/customers/{cid}")
+async def get_customer(cid: str):
+    """Full profile for a single customer, plus their recent orders (last 25)
+    so the admin detail page can render everything in one round-trip."""
+    c = await db.customers.find_one({"id": cid}, {"_id": 0})
+    if not c:
+        raise HTTPException(status_code=404, detail="Not found")
+    orders = []
+    email = (c.get("email") or "").strip().lower()
+    if email:
+        orders = await db.orders.find(
+            {"customer_email": email},
+            {"_id": 0, "id": 1, "reference": 1, "status": 1, "total": 1, "created_at": 1, "items": 1, "customer_name": 1},
+        ).sort("created_at", -1).limit(25).to_list(25)
+    return {"customer": c, "orders": orders}
+
+
+
+
 @api_router.post("/customers", response_model=Customer)
 async def create_customer(body: CustomerBase):
     c = Customer(**body.model_dump())

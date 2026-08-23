@@ -7,10 +7,11 @@ import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 import { CUSTOMER_NAV } from "../lib/nav";
 import { CustomerPortal } from "./CustomerPortal";
+import { CustomerDetailPage } from "./CustomerDetail";
 import { Orders } from "./Orders";
 import { Products } from "./ProductsList";
 
-export function CustomersModule({ section, setSection }) {
+export function CustomersModule({ section, setSection, customerDetailId, openCustomerDetail }) {
   const [list, setList] = useState([]); const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
   const [q, setQ] = useState(""); const [sort, setSort] = useState("created_at_desc"); const [group, setGroup] = useState("");
@@ -36,6 +37,15 @@ export function CustomersModule({ section, setSection }) {
   useEffect(() => { if (section === "coupons") axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons)); }, [section]);
   useEffect(() => { if (section === "reviews") axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews)); }, [section]);
 
+  // Customer detail takes over the module UI when a specific customer is open.
+  if (customerDetailId) {
+    return <CustomerDetailPage
+      customerId={customerDetailId}
+      onBack={() => openCustomerDetail?.(null)}
+      onDeleted={() => { openCustomerDetail?.(null); load(); }}
+    />;
+  }
+
   const meta = CUSTOMER_NAV.find((s) => s.id === section) || CUSTOMER_NAV[0];
   const Icon = meta.icon;
   const hints = {
@@ -56,7 +66,7 @@ export function CustomersModule({ section, setSection }) {
       {section === "portal"     && <CustomerPortal/>}
       {section === "create"     && <CreateCustomer onCreated={() => { load(); setSection("all"); }}/>}
       {section === "import"     && <ImportCustomers onImported={() => { load(); setSection("all"); }}/>}
-      {(["all","pending","active","guest","registered","blocked"].includes(section)) && <CustomerTable list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} group={group} setGroup={setGroup} groups={summary?.by_group?.map(g=>g.group)||[]} onChanged={load}/>}
+      {(["all","pending","active","guest","registered","blocked"].includes(section)) && <CustomerTable list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} group={group} setGroup={setGroup} groups={summary?.by_group?.map(g=>g.group)||[]} onChanged={load} onOpen={openCustomerDetail}/>}
       {section === "top"        && <TopCustomers list={summary?.top || []}/>}
       {section === "groups"     && <CustomerGroups groups={summary?.by_group || []}/>}
       {section === "messages"   && <CustomerMessages messages={messages} reload={() => axios.get(`${API}/messages`).then(r => setMessages(r.data.messages))}/>}
@@ -137,9 +147,10 @@ export function ImportCustomers({ onImported }) {
   );
 }
 
-export function CustomerTable({ list, total, q, setQ, sort, setSort, group, setGroup, groups, onChanged }) {
+export function CustomerTable({ list, total, q, setQ, sort, setSort, group, setGroup, groups, onChanged, onOpen }) {
   const setStatus = async (c, status) => { await axios.patch(`${API}/customers/${c.id}`, { status }); onChanged(); };
   const del = async (c) => { if (!window.confirm(`Delete ${c.name}?`)) return; await axios.delete(`${API}/customers/${c.id}`); toast.success("Deleted"); onChanged(); };
+  const stop = (e) => e.stopPropagation();
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -157,19 +168,19 @@ export function CustomerTable({ list, total, q, setQ, sort, setSort, group, setG
         <tbody>
           {list.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-slate-500">No customers</td></tr>}
           {list.map(c => (
-            <tr key={c.id} data-testid="cus-row">
+            <tr key={c.id} data-testid="cus-row" onClick={() => onOpen?.(c.id)} className="cursor-pointer hover:bg-slate-50 transition-colors">
               <td><div className="flex items-center gap-3"><CustomerAvatar c={c}/><div className="min-w-0"><div className="text-sm font-medium truncate max-w-[240px]">{c.name}</div><div className="text-[11px] text-slate-400 truncate">{c.email || "—"}</div></div></div></td>
               <td className="font-mono text-xs text-slate-500">{c.code}</td>
               <td><span className="chip chip-primary">{c.group}</span></td>
               <td><span className="chip chip-neutral capitalize">{c.type}</span></td>
-              <td>
+              <td onClick={stop}>
                 <select value={c.status} onChange={(e)=>setStatus(c, e.target.value)} className="input px-2 py-1 text-xs">
                   {["pending","active","blocked"].map(s=><option key={s}>{s}</option>)}
                 </select>
               </td>
               <td>{c.orders_count}</td>
               <td className="font-mono font-bold text-indigo-600">{moneyCents(c.total_spend)}</td>
-              <td><button onClick={()=>del(c)} className="btn btn-danger !p-2"><Trash2 size={12}/></button></td>
+              <td onClick={stop}><button onClick={()=>del(c)} className="btn btn-danger !p-2"><Trash2 size={12}/></button></td>
             </tr>
           ))}
         </tbody>

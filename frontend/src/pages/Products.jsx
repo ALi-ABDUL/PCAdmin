@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { Activity, BadgeCheck, Ban, ExternalLink, ImageIcon, Loader2, Plus } from "lucide-react";
@@ -49,13 +49,13 @@ export function ProductsModule({ section, setSection, deepLink, clearDeepLink, o
       {section === "low-stock"     && <StockList list={filtered} tone="warning" openProductDetail={openProductDetail}/>}
       {section === "out-of-stock"  && <StockList list={filtered} tone="danger" openProductDetail={openProductDetail}/>}
       {section === "archived"      && <ArchivedProducts openProductDetail={openProductDetail}/>}
-      {section === "price-alerts"  && <PriceAlertsView items={priceAlertItems}/>}
+      {section === "price-alerts"  && <PriceAlertsView items={priceAlertItems} highlightItemId={deepLink?.itemId} clearDeepLink={clearDeepLink}/>}
       <BackToTopButton />
     </div>
   );
 }
 
-export function PriceAlertsView({ items }) {
+export function PriceAlertsView({ items, highlightItemId, clearDeepLink }) {
   // Exclude items that are sold / ended / out of stock — no point pricing what you can't sell.
   const live = items.filter(it => !it.is_sold && (it.stock_status || "live") === "live");
   const alerts = live
@@ -74,6 +74,29 @@ export function PriceAlertsView({ items }) {
   const drops = alerts.filter(a => a.delta < 0).length;
   const rises = alerts.filter(a => a.delta > 0).length;
   const excluded = items.length - live.length;
+
+  // Scroll to & flash-highlight the row for the item passed via deepLink from the
+  // notification bell. Runs once per highlight target, then clears the deepLink so
+  // regular navigation isn't sticky.
+  const rowRefs = useRef({});
+  const [pulseId, setPulseId] = useState(null);
+  useEffect(() => {
+    if (!highlightItemId) return;
+    // Wait a tick so refs are populated after the alerts render.
+    const t = setTimeout(() => {
+      const el = rowRefs.current[highlightItemId];
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        setPulseId(highlightItemId);
+        // Fade the highlight out after 2.4s.
+        setTimeout(() => setPulseId(null), 2400);
+      } else {
+        toast("Item not in current price-alerts list", { description: "The seller price change may no longer be active." });
+      }
+      clearDeepLink?.();
+    }, 120);
+    return () => clearTimeout(t);
+  }, [highlightItemId, alerts.length, clearDeepLink]);
 
   return (
     <div className="grid gap-4">
@@ -94,7 +117,13 @@ export function PriceAlertsView({ items }) {
           <thead><tr><th>eBay AU item</th><th>Seller</th><th>First price</th><th>Latest</th><th>Change</th><th>Data points</th><th></th></tr></thead>
           <tbody>
             {alerts.slice(0, 100).map(({ it, first, last, delta, pct, changes }) => (
-              <tr key={it.id} data-testid="price-alert-row">
+              <tr
+                key={it.id}
+                ref={(el) => { if (el) rowRefs.current[it.item_id] = el; }}
+                data-testid="price-alert-row"
+                data-item-id={it.item_id}
+                className={`transition-colors duration-500 ${pulseId === it.item_id ? "bg-amber-100 ring-2 ring-amber-400" : ""}`}
+              >
                 <td>
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border hairline shrink-0">

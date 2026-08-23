@@ -36,6 +36,7 @@ export default function App() {
   const [deepLink, setDeepLink] = useState(null); // { orderId?: str, productId?: str, itemId?: str }
   const [productDetailId, setProductDetailId] = useState(null);
   const [orderDetailId, setOrderDetailId] = useState(null);
+  const [customerDetailId, setCustomerDetailId] = useState(null);
 
   useEffect(() => { setMobileNavOpen(false); }, [tab]);
 
@@ -65,6 +66,7 @@ export default function App() {
     // filter re-opens the appropriate one below.
     setProductDetailId(null);
     setOrderDetailId(null);
+    setCustomerDetailId(null);
     if (t === "orders") { setTab("orders"); if (section) setOrdersSection(section); }
     else if (t === "products") { setTab("products"); if (section) setProductSection(section); }
     else if (t === "customers") { setTab("customers"); if (section) setCustomerSection(section); }
@@ -73,18 +75,20 @@ export default function App() {
     // Detail-page deep-links (from notifications / global search)
     if (filter?.productId) setProductDetailId(filter.productId);
     else if (filter?.orderId) setOrderDetailId(filter.orderId);
+    else if (filter?.customerId) setCustomerDetailId(filter.customerId);
     if (filter) setDeepLink({ ...filter, ts: Date.now() });
   }, []);
   const clearDeepLink = useCallback(() => setDeepLink(null), []);
 
   // Wrapped setters ensure that ANY sidebar / submenu / top-nav click collapses an
   // open detail page — the edit view should only survive when explicitly opened by
-  // clicking a product/order card. Direct setTab / setProductSection calls would
-  // skip this because React bails out on same-value updates and useEffect wouldn't
-  // fire.
+  // clicking a product/order/customer card. Direct setTab / setProductSection calls
+  // would skip this because React bails out on same-value updates and useEffect
+  // wouldn't fire.
   const changeTab = useCallback((t) => {
     setProductDetailId(null);
     setOrderDetailId(null);
+    setCustomerDetailId(null);
     setTab(t);
   }, []);
   const changeProductSection = useCallback((s) => {
@@ -95,10 +99,15 @@ export default function App() {
     setOrderDetailId(null);
     setOrdersSection(s);
   }, []);
+  const changeCustomerSection = useCallback((s) => {
+    setCustomerDetailId(null);
+    setCustomerSection(s);
+  }, []);
 
   // Safety net: leaving the module entirely still collapses the detail.
-  useEffect(() => { if (tab !== "products") setProductDetailId(null); }, [tab]);
-  useEffect(() => { if (tab !== "orders")   setOrderDetailId(null); }, [tab]);
+  useEffect(() => { if (tab !== "products")  setProductDetailId(null); }, [tab]);
+  useEffect(() => { if (tab !== "orders")    setOrderDetailId(null); }, [tab]);
+  useEffect(() => { if (tab !== "customers") setCustomerDetailId(null); }, [tab]);
 
   const inStore = tab === "store";
   const inSuppliers = tab === "suppliers";
@@ -132,7 +141,7 @@ export default function App() {
         )}
         {inCustomers && (
           <motion.aside key="customer-sidebar" initial={{ opacity: 0, x: -20, width: 0 }} animate={{ opacity: 1, x: 0, width: 280 }} exit={{ opacity: 0, x: -20, width: 0 }} transition={{ duration: 0.22 }} className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden">
-            <SubSideNav title="Customers" subtitle="Grow and support your buyers" icon={Users} nav={CUSTOMER_NAV} testPrefix="cus" active={customerSection} setActive={setCustomerSection}/>
+            <SubSideNav title="Customers" subtitle="Grow and support your buyers" icon={Users} nav={CUSTOMER_NAV} testPrefix="cus" active={customerSection} setActive={changeCustomerSection}/>
           </motion.aside>
         )}
         {inProducts && (
@@ -156,7 +165,7 @@ export default function App() {
         <TopHeader tab={tab} storeSection={storeSection} supplierSection={supplierSection} customerSection={customerSection} productSection={productSection} ordersSection={ordersSection} paymentsSection={paymentsSection} onMenu={() => setMobileNavOpen(true)} onNavigate={navigateTo}/>
         {inStore     && <SubMobileNav nav={STORE_NAV}    testPrefix="store-m" active={storeSection}    setActive={setStoreSection}/>}
         {inSuppliers && <SubMobileNav nav={SUPPLIER_NAV} testPrefix="sup-m"   active={supplierSection} setActive={setSupplierSection}/>}
-        {inCustomers && <SubMobileNav nav={CUSTOMER_NAV} testPrefix="cus-m"   active={customerSection} setActive={setCustomerSection}/>}
+        {inCustomers && <SubMobileNav nav={CUSTOMER_NAV} testPrefix="cus-m"   active={customerSection} setActive={changeCustomerSection}/>}
         {inProducts  && <SubMobileNav nav={PRODUCT_NAV}  testPrefix="prd-m"   active={productSection}  setActive={changeProductSection}/>}
         {inOrders    && <SubMobileNav nav={ORDERS_NAV}   testPrefix="ord-m"   active={ordersSection}   setActive={changeOrdersSection}/>}
         {inPayments  && <SubMobileNav nav={PAYMENTS_NAV} testPrefix="pay-m"   active={paymentsSection} setActive={setPaymentsSection}/>}
@@ -166,7 +175,7 @@ export default function App() {
               {tab === "dashboard" && <Dashboard />}
               {tab === "store"     && <StoreManagement section={storeSection} setSection={setStoreSection}/>}
               {tab === "suppliers" && <Suppliers section={supplierSection} setSection={setSupplierSection}/>}
-              {tab === "customers" && <CustomersModule section={customerSection} setSection={setCustomerSection}/>}
+              {tab === "customers" && <CustomersModule section={customerSection} setSection={changeCustomerSection} customerDetailId={customerDetailId} openCustomerDetail={setCustomerDetailId}/>}
               {tab === "products"  && <ProductsModule section={productSection} setSection={changeProductSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openProductDetail={setProductDetailId} productDetailId={productDetailId}/>}
               {tab === "orders"    && <OrdersModule section={ordersSection} setSection={changeOrdersSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openOrderDetail={setOrderDetailId} orderDetailId={orderDetailId}/>}
               {tab === "payments"  && <PaymentsModule section={paymentsSection} setSection={setPaymentsSection}/>}

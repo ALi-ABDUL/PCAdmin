@@ -1,0 +1,32 @@
+{
+  "summary": "Fully verified notification-driven deep-link navigation for price_change and new_customer types, plus the new CustomerDetailPage. Backend GET /api/customers/{cid} returns customer + last 25 orders and 404 on unknown id (4/4 pytest cases pass). UI: price_change notification navigates to Products > Price Alerts and flashes bg-amber-100 on the correct row (data-item-id=277687259947) for ~2.4s then clears. new_customer notification opens the specific customer's profile page (customer-detail-page) with identity card, editable fields (name/email/phone/status/group/notes) and Recent Orders card. Edit → Save shows 'Customer saved' toast and persists after reload. Back button collapses detail. Row click opens profile. Sidebar Dashboard navigation collapses detail. In-row status select stopPropagation works.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard charts", "issues": ["Recharts warning 'width(-1) and height(-1) of chart should be greater than 0' — pre-existing, not blocking; occurs when a chart container renders with 0 dimension (likely a collapsed pane). Consider adding minWidth/minHeight to ResponsiveContainer parent."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_customer_detail_endpoint.py",
+    "/app/test_reports/pytest/pytest_iteration18.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "CustomerDetailPage cleanly loads customer + orders in one round-trip; 404 correctly falls back via onBack + toast.",
+    "App.js changeCustomerSection wrapper correctly clears customerDetailId, and the tab-change useEffect provides a safety-net collapse — behaviour matches the spec.",
+    "PriceAlertsView deep-link flash uses a 2.4s timer, then calls clearDeepLink() — verified highlight clears after ~2.6s wait.",
+    "header.jsx onClickRow uses type-first routing; both branches marked notifications as read (side effect visible in fetched data).",
+    "Minor DRY: three parallel change*Section wrappers in App.js could be generalised, but code is fine as-is for readability."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_customer_detail_endpoint.py"
+  ],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "seed_data_creation": "None — leveraged existing seeded notifications (price_change item 277687259947 and new_customer 83578a83-...). Created & reverted a test edit on the customer 'TEST_UPDATED_d59541' to verify save+reload persistence.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend uses in-memory AsyncMockDB; a restart wipes state. Seeded notifications include at least one price_change with item_id=277687259947 and one new_customer with customer_id=83578a83-581e-4384-b5b7-60e0822afc30. The Playwright test uses [data-notif-type='price_change'/'new_customer'] to target rows. The Recharts negative-dimension warning is pre-existing.",
+  "rca of the issue": "N/A — all specified behaviours verified working."
+}

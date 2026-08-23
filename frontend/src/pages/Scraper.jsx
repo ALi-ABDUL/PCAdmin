@@ -3,6 +3,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import { AlertTriangle, BadgeCheck, Boxes, ClipboardPaste, Filter, ImageIcon, Loader2, MapPin, PackageX, Plus, RefreshCw, Search, Tags, Trash2, TrendingUp, X, Zap } from "lucide-react";
 import { API, KEYS, loadKeys, proxyImg } from "../lib/api";
+import { BackToTopButton } from "../components/BackToTopButton";
 import { fmtDate, moneyCents } from "../lib/format";
 import { calcPricing, usePricingRules } from "../lib/pricing";
 import { Orders } from "./Orders";
@@ -377,6 +378,7 @@ export function ScraperPage({ onView }) {
           </>
         )}
       </section>
+      <BackToTopButton />
     </div>
   );
 }

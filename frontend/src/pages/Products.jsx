@@ -3,6 +3,8 @@ import axios from "axios";
 import { toast } from "sonner";
 import { Activity, BadgeCheck, Ban, ExternalLink, ImageIcon, Loader2, Plus } from "lucide-react";
 import { Field, StatBox, SubHero } from "../components/atoms";
+import { BackToTopButton } from "../components/BackToTopButton";
+import { ProductGrid } from "../components/ProductGrid";
 import { API, proxyImg } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 import { PRODUCT_NAV } from "../lib/nav";
@@ -48,6 +50,7 @@ export function ProductsModule({ section, setSection, deepLink, clearDeepLink, o
       {section === "out-of-stock"  && <StockList list={filtered} tone="danger" openProductDetail={openProductDetail}/>}
       {section === "archived"      && <ArchivedProducts openProductDetail={openProductDetail}/>}
       {section === "price-alerts"  && <PriceAlertsView items={priceAlertItems}/>}
+      <BackToTopButton />
     </div>
   );
 }
@@ -243,17 +246,21 @@ export function StockAdjustPage({ list, kind, title }) {
   );
 }
 
-export function StockList({ list, tone }) {
+export function StockList({ list, tone, openProductDetail }) {
+  const empty =
+    tone === "danger"
+      ? "No out-of-stock products. Nice — everything's in stock."
+      : tone === "warning"
+      ? "Nothing running low. Nice."
+      : "No products in this bucket.";
   return (
-    <div className="card overflow-hidden"><div className="overflow-x-auto"><table className="tbl">
-      <thead><tr><th>Product</th><th>SKU</th><th>Stock</th><th>Sold</th></tr></thead>
-      <tbody>
-        {list.length === 0 && <tr><td colSpan={4} className="text-center py-10 text-slate-500">No products in this bucket</td></tr>}
-        {list.map(p => (
-          <tr key={p.id}><td className="text-sm truncate max-w-[320px]">{p.title}</td><td className="font-mono text-xs text-slate-500">{p.sku||"—"}</td><td className={`font-mono ${tone==="danger"?"text-red-600 font-bold":tone==="warning"?"text-amber-600 font-bold":"text-slate-800"}`}>{p.stock ?? 0}</td><td>{p.sold_count||0}</td></tr>
-        ))}
-      </tbody>
-    </table></div></div>
+    <ProductGrid
+      list={list}
+      onOpen={(p) => openProductDetail && openProductDetail(p.id)}
+      emptyLabel={empty}
+      tone={tone || "default"}
+      testId={`stock-grid-${tone || "default"}`}
+    />
   );
 }
 

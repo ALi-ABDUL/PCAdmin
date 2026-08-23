@@ -12,6 +12,27 @@ Light, modern theme.
 - Frontend: React 19 + Tailwind + Framer Motion + Recharts + Sonner. Light theme
   (#F7F7FB background, indigo/pink accents, Outfit/Inter/JetBrains Mono fonts).
 
+
+## Product Edit Page Layout Fix (2026-02-23)
+**Bug**: The Product Edit page (`ProductDetail.jsx`) was stretching edge-to-edge and pushing action
+buttons off-screen. Root cause: the container used `display: grid` with a 20-image
+horizontal scroll strip child; the grid track auto-expanded to intrinsic child size
+(~3470 px), so `max-w-4xl` capped visible width but children escaped horizontally —
+Save/Refresh/Delete buttons ended up at x=4164 (off-screen).
+
+**Fix** (`/app/frontend/src/pages/ProductDetail.jsx` line 108):
+- `grid gap-4 max-w-4xl mx-auto w-full` → `flex flex-col gap-4 max-w-5xl mx-auto w-full min-w-0 px-1 sm:px-2`
+- Flexbox column doesn't auto-size tracks to intrinsic content, so `overflow-x-auto`
+  on the images strip now scrolls inside the card instead of blowing out the container.
+- `max-w-5xl` (~1024 px) balances form density with readability per user preference.
+
+**Verified** (iter 16, frontend 100%):
+- No horizontal overflow at 1920 / 1440 / 1280 / 1024 px viewports.
+- All 5 header buttons (Back, Refresh, Change category, Delete, Save) fully visible.
+- 3-column product-details grid renders correctly on md+ (SKU 314 px per column).
+- Edit + Save round-trip works; Back returns to product grid.
+
+
 ### Backend endpoints
 - `GET /api/analytics/report` (2026-02-19) — supplies the new Reporting page:
   `top_suppliers` (top 5 by revenue), `margin_trend` (30 days with margin %),

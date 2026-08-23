@@ -105,7 +105,7 @@ export function ProductDetailPage({ productId, onBack }) {
   const margin = f.price ? ((Number(f.price) - Number(f.cost || 0)) / Number(f.price)) * 100 : 0;
 
   return (
-    <div className="grid gap-4 max-w-4xl mx-auto w-full" data-testid="product-detail-page">
+    <div className="flex flex-col gap-4 max-w-5xl mx-auto w-full min-w-0 px-1 sm:px-2" data-testid="product-detail-page">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <button onClick={onBack} className="btn btn-ghost text-sm" data-testid="product-back-btn"><ChevronLeft size={14}/> Back to products</button>

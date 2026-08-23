@@ -26,7 +26,6 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
         email: data.customer.email || "",
         phone: data.customer.phone || "",
         status: data.customer.status || "active",
-        group: data.customer.group || "Retail",
         notes: data.customer.notes || "",
       });
       setDirty(false);
@@ -102,7 +101,6 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
         <div className="flex items-center gap-2">
           <StatusChip status={c.status}/>
           <span className="chip chip-primary capitalize">{c.type}</span>
-          <span className="chip chip-neutral">{c.group}</span>
         </div>
       </div>
 
@@ -124,11 +122,6 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
           <Field label="Status">
             <select className="input w-full px-3 py-2" value={f.status} onChange={(e) => setField("status", e.target.value)} data-testid="customer-status-select">
               {["active", "pending", "blocked"].map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </Field>
-          <Field label="Group">
-            <select className="input w-full px-3 py-2" value={f.group} onChange={(e) => setField("group", e.target.value)} data-testid="customer-group-select">
-              {["Retail", "VIP", "Wholesale", "Trade"].map(g => <option key={g} value={g}>{g}</option>)}
             </select>
           </Field>
         </div>

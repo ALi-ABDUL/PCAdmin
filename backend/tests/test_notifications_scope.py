@@ -110,7 +110,6 @@ class TestKeepNewCustomer:
         r = requests.post(f"{API}/customers", json={
             "name": f"TEST_cust_{uuid.uuid4().hex[:5]}",
             "email": f"test_{uuid.uuid4().hex[:5]}@example.com",
-            "group": "Retail",
         }, timeout=30)
         assert r.status_code in (200, 201), r.text
         assert _notif_count("new_customer") == before + 1
@@ -228,7 +227,7 @@ class TestFormatNotificationHTML:
                                        "customer_name": "Y"}),
             ("low_stock", {"stock": 2}),
             ("new_order", {"customer_name": "Z", "total": 9.9, "quantity": 1}),
-            ("new_customer", {"name": "N", "email": "n@x.com", "group": "Retail"}),
+            ("new_customer", {"name": "N", "email": "n@x.com"}),
         ]:
             subject, html, plain = helpers._format_notification_html({
                 "type": t, "title": f"T {t}", "body": "b",

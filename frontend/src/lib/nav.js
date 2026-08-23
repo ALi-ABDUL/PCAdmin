@@ -1,4 +1,4 @@
-import { Activity, Award, Ban, Bell, Building2, Cable, ClipboardList, CreditCard, FileText, Globe, Heart, History, List, Lock, Mail, MapPinned, Menu, MessageCircle, MessageSquare, Package, PackageMinus, PackageSearch, PackageX, Percent, Receipt, RefreshCw, ShieldCheck, ShoppingCart, Star as StarIcon, StickyNote, Store, Ticket, TrendingDown as TrendingDownIcon, Truck, Undo2, Upload, UserCheck, User as UserIcon, UserPlus, Users, Users2, Warehouse } from "lucide-react";
+import { Activity, Award, Ban, Bell, Building2, Cable, ClipboardList, CreditCard, FileText, Globe, Heart, History, List, Lock, Mail, MapPinned, Menu, MessageCircle, MessageSquare, Package, PackageMinus, PackageSearch, PackageX, Percent, Receipt, RefreshCw, ShieldCheck, ShoppingCart, Star as StarIcon, StickyNote, Store, Ticket, TrendingDown as TrendingDownIcon, Truck, Undo2, Upload, UserCheck, User as UserIcon, UserPlus, Users, Warehouse } from "lucide-react";
 import { Analytics } from "../pages/Analytics";
 import { Orders } from "../pages/Orders";
 import { Products } from "../pages/ProductsList";
@@ -52,7 +52,6 @@ export const CUSTOMER_NAV = [
   { id: "registered", label: "Registered customers",icon: Users,          group: "Directory" },
   { id: "messages",   label: "Customer messages",   icon: MessageCircle,  group: "Engagement" },
   { id: "top",        label: "Top customers",       icon: Award,          group: "Engagement" },
-  { id: "groups",     label: "Customer groups",     icon: Users2,         group: "Engagement" },
   { id: "addresses",  label: "Addresses",           icon: MapPinned,      group: "Data" },
   { id: "orders",     label: "Orders",              icon: ShoppingCart,   group: "Data" },
   { id: "wishlist",   label: "Wishlist",            icon: Heart,          group: "Data" },

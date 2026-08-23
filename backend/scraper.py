@@ -18,6 +18,183 @@ except Exception:  # pragma: no cover
     HAS_CURL_CFFI = False
 
 
+# ---------------------------------------------------------------------------
+# Title cleaner
+# ---------------------------------------------------------------------------
+
+# Words used to identify the product-type noun in a title. Once found, size
+# tokens are inserted *before* the descriptor cluster leading to it, so we get
+# "Samsung Odyssey Ark 2nd Gen 55\" Curved UHD Gaming Monitor" instead of
+# "... UHD Gaming 55\" Monitor".
+_TYPE_WORDS = {
+    "monitor", "tv", "television", "fridge", "freezer", "washer", "dryer",
+    "laptop", "notebook", "camera", "phone", "smartphone", "tablet", "printer",
+    "microwave", "oven", "dishwasher", "vacuum", "cooker", "projector",
+    "speaker", "headphones", "earbuds", "console", "display", "screen",
+    "stove", "cooktop", "rangehood", "kettle", "toaster", "blender", "fan",
+    "heater", "smartwatch", "watch", "router", "modem", "keyboard", "mouse",
+    "webcam", "chair", "desk", "bike", "scooter", "treadmill", "drone",
+}
+# Adjectives / spec words that typically sit between the model and the type
+# noun. Kept small on purpose — being too greedy would eat model tokens like
+# "Pro" or "Max" that belong to the model name.
+_DESCRIPTORS = {
+    "curved", "flat", "uhd", "fhd", "hd", "4k", "8k", "2k", "hdr", "gaming",
+    "smart", "wireless", "bluetooth", "portable", "cordless", "rechargeable",
+    "led", "lcd", "oled", "qled", "mini", "stainless", "matte", "glossy",
+    "waterproof", "touch", "touchscreen", "dolby", "atmos", "surround",
+    "electric", "gas", "induction", "convection", "dual", "single", "triple",
+    "quad", "full", "super", "premium", "professional", "noise", "cancelling",
+    "cancellation", "active", "passive", "hybrid", "compact", "slim",
+    "handheld", "upright", "robot", "front-load", "top-load",
+}
+_COLOURS = {
+    "black", "white", "silver", "grey", "gray", "gold", "rose gold", "red",
+    "blue", "green", "beige", "titanium", "graphite", "midnight", "starlight",
+    "purple", "pink", "orange", "brown", "cream", "navy", "yellow", "charcoal",
+    "bronze", "champagne", "space grey", "space gray", "matte black",
+    "matte white", "pearl white", "pearl black", "chrome", "copper",
+    "platinum", "sky blue", "royal blue", "olive", "khaki", "burgundy", "ivory",
+}
+_SIZE_RE = re.compile(
+    r'(?<!\d)(\d+(?:\.\d+)?)\s*(?:"|″|”|inches?\b|inch\b|in\.?\b|cm\b|mm\b)',
+    re.IGNORECASE,
+)
+_MULTISPACE = re.compile(r"\s{2,}")
+
+
+def _norm_size(match: re.Match) -> str:
+    """Normalise any detected size to inch-mark form (e.g. 55\")."""
+    raw = match.group(0).lower()
+    val = match.group(1)
+    if "cm" in raw:
+        return f'{val}cm'
+    if "mm" in raw:
+        return f'{val}mm'
+    return f'{val}"'
+
+
+def clean_ebay_title(raw: str) -> str:
+    """Normalise a scraped eBay title.
+
+    Rules (matches the requested spec):
+      1. Deduplicate repeated tokens / specs.
+      2. Move size / dimensions (e.g. 55\") to sit *after* the brand + model
+         name, right before the descriptor cluster (Curved / UHD / Gaming …).
+      3. Colour or finish from trailing brackets moves to the end with an
+         em-dash separator ("Samsung … Monitor – Black").
+      4. Empty brackets and stray double punctuation get stripped.
+    """
+    if not raw:
+        return raw
+    s = raw.strip()
+
+    # 1. Peel trailing bracketed clauses so we can classify their contents.
+    end_bracket_contents: list[str] = []
+    while True:
+        m = re.search(r"\s*\(([^()]*)\)\s*$", s)
+        if not m:
+            break
+        contents = m.group(1).strip()
+        if contents:
+            end_bracket_contents.insert(0, contents)
+        s = s[: m.start()].rstrip()
+
+    # 2. Strip any inline empty ().
+    s = re.sub(r"\(\s*\)", "", s)
+
+    # 3. Tokenise bracket contents by comma / semicolon / slash.
+    bracket_tokens: list[str] = []
+    for group in end_bracket_contents:
+        for t in re.split(r"[,;/]", group):
+            t = t.strip()
+            if t:
+                bracket_tokens.append(t)
+
+    # 4. Extract sizes from the title body — keep normalised form.
+    body_sizes = [_norm_size(m) for m in _SIZE_RE.finditer(s)]
+    body_no_size = _SIZE_RE.sub("", s)
+    body_no_size = _MULTISPACE.sub(" ", body_no_size).strip()
+
+    # 5. Classify bracket tokens as size / colour / other.
+    bracket_sizes: list[str] = []
+    bracket_colours: list[str] = []
+    bracket_others: list[str] = []
+    for t in bracket_tokens:
+        t_clean = t.strip().rstrip(".")
+        m = _SIZE_RE.search(t_clean)
+        if m and _SIZE_RE.sub("", t_clean).strip() == "":
+            bracket_sizes.append(_norm_size(m))
+        elif t_clean.lower() in _COLOURS:
+            bracket_colours.append(t_clean.title())
+        else:
+            bracket_others.append(t_clean)
+
+    # 6. De-duplicate sizes, keeping first occurrence.
+    all_sizes = list(dict.fromkeys(body_sizes + bracket_sizes))
+    primary_size = all_sizes[0] if all_sizes else None
+
+    # 7. Word-level dedupe on the body (case-insensitive, punctuation-stripped).
+    words = body_no_size.split()
+    seen_lc: set[str] = set()
+    dedup: list[str] = []
+    for w in words:
+        key = re.sub(r"[^\w]", "", w).lower()
+        if key and key in seen_lc:
+            continue
+        if key:
+            seen_lc.add(key)
+        dedup.append(w)
+    body_no_size = " ".join(dedup)
+
+    # 8. Work out where to re-insert the primary size.
+    tokens = body_no_size.split()
+    insert_idx: Optional[int] = None
+    for i, w in enumerate(tokens):
+        key = re.sub(r"[^\w-]", "", w).lower()
+        if key in _TYPE_WORDS:
+            # Walk backwards while previous token is a descriptor — the size
+            # goes at the head of the descriptor cluster.
+            j = i
+            while j > 0:
+                prev_key = re.sub(r"[^\w-]", "", tokens[j - 1]).lower()
+                if prev_key in _DESCRIPTORS:
+                    j -= 1
+                else:
+                    break
+            insert_idx = j
+            break
+    if insert_idx is None:
+        # Fallback: assume "Brand Model …" — insert after the 4th token, or
+        # at end if the title is very short.
+        insert_idx = min(4, len(tokens))
+
+    if primary_size:
+        tokens = tokens[:insert_idx] + [primary_size] + tokens[insert_idx:]
+
+    body_final = " ".join(tokens)
+
+    # 9. Append colours (unique) as " – Colour, Colour2".
+    unique_colours = list(dict.fromkeys(bracket_colours))
+    if unique_colours:
+        body_final = f"{body_final} – {', '.join(unique_colours)}"
+
+    # 10. Preserve any other bracket tokens (rare — not size, not colour).
+    unique_others = list(dict.fromkeys(bracket_others))
+    if unique_others:
+        body_final = f"{body_final} ({', '.join(unique_others)})"
+
+    # 11. Final tidy — collapse spaces, strip trailing punctuation.
+    body_final = _MULTISPACE.sub(" ", body_final).strip()
+    body_final = re.sub(r"[\s,;]+$", "", body_final)
+    body_final = re.sub(r"–\s*(?:[,;]\s*)?$", "", body_final).strip()
+    body_final = re.sub(r"–\s*–", "–", body_final)
+    return body_final
+
+
+
+
+
 # Curated pool of modern real-world desktop User-Agents.
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -633,6 +810,8 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
             if title:
                 title = re.sub(r"^Details about\s+", "", title).strip()
                 break
+    if title:
+        title = clean_ebay_title(title)
 
     # Price
     price_display, price_value, currency = _extract_price(soup)

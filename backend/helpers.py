@@ -546,9 +546,8 @@ async def _rebuild_customers_from_orders():
     for key, agg in by_email.items():
         existing = await db.customers.find_one({"email": agg["email"]}, {"_id": 0}) if agg["email"] else None
         if not existing:
-            group = "VIP" if agg["total_spend"] > 500 else "Retail"
             c = Customer(
-                name=agg["name"], email=agg["email"], group=group,
+                name=agg["name"], email=agg["email"],
                 status="active", type="registered",
                 orders_count=agg["orders_count"], total_spend=round(agg["total_spend"], 2),
             )

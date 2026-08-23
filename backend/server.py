@@ -28,7 +28,7 @@ from models import (
     OrderCreate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, ItemBulkAction, 
     RefreshAllRequest, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
     FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ORDER_STATUSES, ReturnRequest, 
-    AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate, CUSTOMER_GROUPS, 
+    AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate,
     CouponBase, Coupon, ReviewBase, Review, JWT_ALGO, JWT_ACCESS_TTL, PortalRegisterBody, 
     PortalLoginBody, PortalReviewBody, PortalReviewVoteBody, MessageBase, Message, StockMove, 
     _CATEGORY_RULES, _EBAY_BREADCRUMB_MAP, Notification, PUSH_SETTINGS_DEFAULTS, 
@@ -479,6 +479,13 @@ async def _start_scheduler():
     await _ensure_pricing_rules_seeded()
     if await db.customers.count_documents({}) == 0:
         await _rebuild_customers_from_orders()
+    # One-shot migration: the customer-group feature was removed — strip legacy
+    # `group` field from any existing customer docs so it no longer surfaces
+    # in list/summary responses.
+    try:
+        await db.customers.update_many({"group": {"$exists": True}}, {"$unset": {"group": ""}})
+    except Exception as e:
+        logger.warning(f"group unset migration: {e}")
     await _seed_transactions_and_returns()
     await _ensure_product_codes_backfilled()
     await _ensure_order_references_backfilled()
@@ -694,14 +701,12 @@ async def list_customers(
     q: Optional[str] = None,
     status: Optional[str] = None,
     type: Optional[str] = None,
-    group: Optional[str] = None,
     sort: str = "created_at_desc",
     limit: int = Query(500, le=2000),
 ):
     query: dict[str, Any] = {}
     if status: query["status"] = status
     if type:   query["type"] = type
-    if group:  query["group"] = group
     if q:
         query["$or"] = [
             {"name":  {"$regex": q, "$options": "i"}},
@@ -718,7 +723,7 @@ async def list_customers(
     cursor = db.customers.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).limit(limit)
     customers = await cursor.to_list(length=limit)
     total = await db.customers.count_documents(query)
-    return {"customers": customers, "total": total, "groups": CUSTOMER_GROUPS}
+    return {"customers": customers, "total": total}
 
 
 @api_router.get("/customers/summary")
@@ -730,9 +735,7 @@ async def customers_summary():
     guest = await db.customers.count_documents({"type": "guest"})
     registered = await db.customers.count_documents({"type": "registered"})
     top = await db.customers.find({}, {"_id": 0}).sort("total_spend", -1).limit(10).to_list(10)
-    by_group = await db.customers.aggregate([{"$group": {"_id": "$group", "count": {"$sum": 1}, "spend": {"$sum": "$total_spend"}}}]).to_list(50)
-    by_group = [{"group": g["_id"] or "Retail", "count": g["count"], "spend": round(g["spend"], 2)} for g in by_group]
-    return {"total": total, "active": active, "pending": pending, "blocked": blocked, "guest": guest, "registered": registered, "top": top, "by_group": by_group}
+    return {"total": total, "active": active, "pending": pending, "blocked": blocked, "guest": guest, "registered": registered, "top": top}
 
 
 @api_router.get("/customers/{cid}")
@@ -822,7 +825,7 @@ async def create_customer(body: CustomerBase):
         title="New customer registered",
         body=f"{c.name} · {c.email or 'no email'}",
         customer_id=c.id,
-        data={"name": c.name, "email": c.email, "group": c.group},
+        data={"name": c.name, "email": c.email},
     )
     return c
 

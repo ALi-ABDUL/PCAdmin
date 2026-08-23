@@ -14,7 +14,7 @@ import { Products } from "./ProductsList";
 export function CustomersModule({ section, setSection, customerDetailId, openCustomerDetail }) {
   const [list, setList] = useState([]); const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
-  const [q, setQ] = useState(""); const [sort, setSort] = useState("created_at_desc"); const [group, setGroup] = useState("");
+  const [q, setQ] = useState(""); const [sort, setSort] = useState("created_at_desc");
   const [messages, setMessages] = useState([]);
   const [coupons, setCoupons] = useState([]);
   const [reviews, setReviews] = useState([]);
@@ -23,7 +23,6 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
   if (["pending","active","blocked"].includes(section)) params.status = section;
   if (section === "guest") params.type = "guest";
   if (section === "registered") params.type = "registered";
-  if (group) params.group = group;
   if (q) params.q = q;
   params.sort = sort;
 
@@ -53,7 +52,7 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
     create:"Add a customer profile manually.", import:"Bulk-import customers via JSON.",
     all:"Every customer in your database.", pending:"Awaiting verification.", active:"Verified & shopping.",
     guest:"One-off shoppers without an account.", registered:"Customers with an account.",
-    messages:"Inbound contact-form messages.", top:"Highest lifetime value.", groups:"Segments like VIP, Wholesale, Trade.",
+    messages:"Inbound contact-form messages.", top:"Highest lifetime value.",
     addresses:"Customer shipping & billing addresses.", orders:"All orders across all customers.",
     wishlist:"Products customers have starred.", reviews:"Product reviews left by customers.",
     coupons:"Discount codes and campaigns.", activity:"Recent customer activity.", notes:"Internal notes on customers.",
@@ -66,9 +65,8 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
       {section === "portal"     && <CustomerPortal/>}
       {section === "create"     && <CreateCustomer onCreated={() => { load(); setSection("all"); }}/>}
       {section === "import"     && <ImportCustomers onImported={() => { load(); setSection("all"); }}/>}
-      {(["all","pending","active","guest","registered","blocked"].includes(section)) && <CustomerTable list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} group={group} setGroup={setGroup} groups={summary?.by_group?.map(g=>g.group)||[]} onChanged={load} onOpen={openCustomerDetail}/>}
+      {(["all","pending","active","guest","registered","blocked"].includes(section)) && <CustomerTable list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} onChanged={load} onOpen={openCustomerDetail}/>}
       {section === "top"        && <TopCustomers list={summary?.top || []}/>}
-      {section === "groups"     && <CustomerGroups groups={summary?.by_group || []}/>}
       {section === "messages"   && <CustomerMessages messages={messages} reload={() => axios.get(`${API}/messages`).then(r => setMessages(r.data.messages))}/>}
       {section === "coupons"    && <CouponsView coupons={coupons} reload={() => axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons))}/>}
       {section === "reviews"    && <ReviewsView reviews={reviews} reload={() => axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews))}/>}
@@ -87,7 +85,7 @@ export function CustomerAvatar({ c, size = 36 }) {
 }
 
 export function CreateCustomer({ onCreated }) {
-  const empty = { name:"", email:"", phone:"", country:"Australia", state:"", city:"", address:"", postcode:"", status:"active", type:"registered", group:"Retail", tags:[], notes:"" };
+  const empty = { name:"", email:"", phone:"", country:"Australia", state:"", city:"", address:"", postcode:"", status:"active", type:"registered", tags:[], notes:"" };
   const [f, setF] = useState(empty); const [saving, setSaving] = useState(false);
   const save = async () => {
     if (!f.name.trim()) return toast.error("Name is required");
@@ -105,7 +103,6 @@ export function CreateCustomer({ onCreated }) {
         <Field label="Name *"><input className="input px-3 py-2 w-full" value={f.name} onChange={(e)=>setF({...f, name:e.target.value})} data-testid="cus-name"/></Field>
         <Field label="Email"><input type="email" className="input px-3 py-2 w-full" value={f.email} onChange={(e)=>setF({...f, email:e.target.value})}/></Field>
         <Field label="Phone"><input className="input px-3 py-2 w-full" value={f.phone} onChange={(e)=>setF({...f, phone:e.target.value})}/></Field>
-        <Field label="Group"><select className="input px-3 py-2 w-full" value={f.group} onChange={(e)=>setF({...f, group:e.target.value})}>{["Retail","VIP","Wholesale","Trade"].map(g=><option key={g}>{g}</option>)}</select></Field>
         <Field label="Status"><select className="input px-3 py-2 w-full" value={f.status} onChange={(e)=>setF({...f, status:e.target.value})}>{["pending","active","blocked"].map(s=><option key={s}>{s}</option>)}</select></Field>
         <Field label="Type"><select className="input px-3 py-2 w-full" value={f.type} onChange={(e)=>setF({...f, type:e.target.value})}>{["registered","guest"].map(s=><option key={s}>{s}</option>)}</select></Field>
         <Field label="City"><input className="input px-3 py-2 w-full" value={f.city} onChange={(e)=>setF({...f, city:e.target.value})}/></Field>
@@ -122,7 +119,7 @@ export function CreateCustomer({ onCreated }) {
 
 export function ImportCustomers({ onImported }) {
   const [text, setText] = useState(`[
-  { "name": "Sample User", "email": "sample@example.com", "group": "Retail", "status": "active", "type": "registered" }
+  { "name": "Sample User", "email": "sample@example.com", "status": "active", "type": "registered" }
 ]`);
   const [busy, setBusy] = useState(false);
   const doImport = async () => {
@@ -147,7 +144,7 @@ export function ImportCustomers({ onImported }) {
   );
 }
 
-export function CustomerTable({ list, total, q, setQ, sort, setSort, group, setGroup, groups, onChanged, onOpen }) {
+export function CustomerTable({ list, total, q, setQ, sort, setSort, onChanged, onOpen }) {
   const setStatus = async (c, status) => { await axios.patch(`${API}/customers/${c.id}`, { status }); onChanged(); };
   const del = async (c) => { if (!window.confirm(`Delete ${c.name}?`)) return; await axios.delete(`${API}/customers/${c.id}`); toast.success("Deleted"); onChanged(); };
   const stop = (e) => e.stopPropagation();
@@ -157,21 +154,19 @@ export function CustomerTable({ list, total, q, setQ, sort, setSort, group, setG
         <div className="text-sm text-slate-500 font-mono">{total} customer{total===1?"":"s"}</div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search name / email" className="input pl-9 pr-3 py-2 text-sm w-64"/></div>
-          <select value={group} onChange={(e)=>setGroup(e.target.value)} className="input px-3 py-2 text-sm"><option value="">All groups</option>{["Retail","VIP","Wholesale","Trade"].map(g=><option key={g}>{g}</option>)}</select>
           <select value={sort} onChange={(e)=>setSort(e.target.value)} className="input px-3 py-2 text-sm">
             <option value="created_at_desc">Newest</option><option value="name_asc">Name A→Z</option><option value="spend_desc">Spend ↓</option><option value="orders_desc">Orders ↓</option>
           </select>
         </div>
       </div>
       <div className="card overflow-hidden"><div className="overflow-x-auto"><table className="tbl">
-        <thead><tr><th>Customer</th><th>Code</th><th>Group</th><th>Type</th><th>Status</th><th>Orders</th><th>Spend</th><th>Joined</th><th></th></tr></thead>
+        <thead><tr><th>Customer</th><th>Code</th><th>Type</th><th>Status</th><th>Orders</th><th>Spend</th><th>Joined</th><th></th></tr></thead>
         <tbody>
-          {list.length === 0 && <tr><td colSpan={9} className="text-center py-10 text-slate-500">No customers</td></tr>}
+          {list.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-slate-500">No customers</td></tr>}
           {list.map(c => (
             <tr key={c.id} data-testid="cus-row" onClick={() => onOpen?.(c.id)} className="cursor-pointer hover:bg-slate-50 transition-colors">
               <td><div className="flex items-center gap-3"><CustomerAvatar c={c}/><div className="min-w-0"><div className="text-sm font-medium truncate max-w-[240px]">{c.name}</div><div className="text-[11px] text-slate-400 truncate">{c.email || "—"}</div></div></div></td>
               <td className="font-mono text-xs text-slate-500">{c.code}</td>
-              <td><span className="chip chip-primary">{c.group}</span></td>
               <td><span className="chip chip-neutral capitalize">{c.type}</span></td>
               <td onClick={stop}>
                 <select value={c.status} onChange={(e)=>setStatus(c, e.target.value)} className="input px-2 py-1 text-xs">
@@ -205,21 +200,6 @@ export function TopCustomers({ list }) {
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-export function CustomerGroups({ groups }) {
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-      {groups.length === 0 && <div className="col-span-full card p-10 text-center text-slate-500">No group data yet</div>}
-      {groups.map(g => (
-        <div key={g.group} className="card p-5">
-          <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500">{g.group}</div>
-          <div className="font-display text-3xl font-bold mt-1">{g.count}</div>
-          <div className="text-sm text-slate-500 mt-1">members · {moneyCents(g.spend)} lifetime</div>
-        </div>
-      ))}
     </div>
   );
 }
@@ -284,7 +264,7 @@ export function CustomerActivity({ list }) {
       {rows.length === 0 && <div className="p-10 text-center text-slate-500">No activity</div>}
       {rows.map(c => (
         <div key={c.id} className="p-4 border-b hairline last:border-0 flex items-center gap-3">
-          <CustomerAvatar c={c} size={32}/><div className="flex-1 min-w-0"><div className="text-sm"><span className="font-medium">{c.name}</span> <span className="text-slate-500">joined as {c.group}</span></div><div className="text-[11px] text-slate-400 font-mono">{fmtDate(c.created_at)}</div></div><span className="chip chip-neutral">{c.status}</span>
+          <CustomerAvatar c={c} size={32}/><div className="flex-1 min-w-0"><div className="text-sm"><span className="font-medium">{c.name}</span> <span className="text-slate-500">joined</span></div><div className="text-[11px] text-slate-400 font-mono">{fmtDate(c.created_at)}</div></div><span className="chip chip-neutral">{c.status}</span>
         </div>
       ))}
     </div>

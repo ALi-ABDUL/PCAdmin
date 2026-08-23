@@ -1,0 +1,25 @@
+{
+  "summary": "Verified end-to-end removal of the Customer Groups feature. Backend: 6/6 pytest cases pass in /app/backend/tests/test_customer_groups_removed.py — (1) GET /api/customers?limit=25 has no top-level 'groups' key and no customer object contains 'group' field; (2) GET /api/customers/summary has no 'by_group' key while total/active/pending/blocked/guest/registered/top still work; (3) POST /api/customers with body {group:'VIP'} returns 200 and Pydantic drops 'group' from persisted doc (verified via GET); (4) GET /api/customers?group=Retail still returns 200 (unknown param ignored), no crash; (5) PATCH /api/customers/{id} with body {group:'VIP', name:...} returns 200, name persists, 'group' does NOT persist; (6) POST /api/customers/rebuild-from-orders returns 200 and no customer has 'group' field afterwards. Startup migration ($unset group on db.customers) is present in server.py:482-486. Frontend: Customers page loaded — sidebar submenu shows Portal / Manage / Directory / Engagement / Data / Marketing / Security groups with NO 'Customer groups' link; All Customers table headers exactly = ['CUSTOMER','CODE','TYPE','STATUS','ORDERS','SPEND','JOINED'] with no Group column and no 'All groups' filter; Joined column format 'Sunday, 23 Aug 2026 at 10:58 AM' matches spec. On CustomerDetail and CreateCustomer pages: [data-testid='customer-group-select'] count = 0, no <label>Group</label>, no 'Group' chip. nav.js `group:` fields are SECTION labels (Directory/Manage/Engagement) — correctly untouched. models.py CATEGORIES 'group' field for Electronics/Home/Tools — correctly untouched.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_customer_groups_removed.py",
+    "/app/test_reports/pytest/pytest_iteration20.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Startup migration correctly uses $unset with $exists filter — idempotent and safe on repeat starts.",
+    "CustomerBase and CustomerUpdate cleanly stripped of 'group' field; Pydantic silently drops unknown keys, so old clients sending 'group' still succeed with a clean stored doc — good backward-compat behaviour.",
+    "list_customers signature no longer accepts a `group` query param; FastAPI ignores unknown query params, so old bookmarked URLs (?group=Retail) don't 500 — nice.",
+    "Frontend nav.js reuses the key `group` as a section-label field (Directory/Manage/Engagement) — this is unrelated to the removed customer group concept and correctly left in place. Consider renaming to `section` in a future refactor to avoid future confusion but not needed now.",
+    "helpers._rebuild_customers_from_orders no longer references group — confirmed by rebuild-from-orders test.",
+    "GET /api/customers/summary keys are stable (total/active/pending/blocked/guest/registered/top) — no by_group key emitted."
+  ],
+  "updated_files": ["/app/backend/tests/test_customer_groups_removed.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Created a few TEST_ prefixed customers via POST during pytest run (TEST_no_group_body, TEST_patch_group_v2) — safe to leave; AsyncMockDB resets on backend restart.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "In-memory AsyncMockDB — backend restart wipes state. If verifying migration, insert a doc with 'group' field manually then restart backend and check it's stripped. Frontend layout has two <aside> elements (main sidebar + Customers sub-menu) — use nth or a more scoped selector when clicking. Custom /customers/{id} route requires clicking a customer name link in table (not the row itself, since row-level click can hit inline status <select> or delete button).",
+  "rca of the issue": "N/A — all specified removal behaviours verified working across backend + frontend."
+}

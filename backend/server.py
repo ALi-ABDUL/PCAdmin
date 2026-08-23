@@ -1545,6 +1545,21 @@ async def bulk_delete_products(body: BulkProductIds):
     return {"deleted": r.deleted_count}
 
 
+@api_router.post("/products/bulk-restore")
+async def bulk_restore_products(body: BulkProductIds):
+    """Move a set of archived products back to the active catalogue."""
+    if not body.product_ids:
+        return {"restored": 0}
+    now = datetime.now(timezone.utc).isoformat()
+    r = await db.products.update_many(
+        {"id": {"$in": body.product_ids}},
+        {"$set": {"archived": False, "active": True, "updated_at": now}, "$unset": {"archived_at": ""}},
+    )
+    return {"restored": r.modified_count}
+
+
+
+
 @api_router.get("/products/{pid}")
 async def get_product(pid: str):
     p = await db.products.find_one({"id": pid}, {"_id": 0})

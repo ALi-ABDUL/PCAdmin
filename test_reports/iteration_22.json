@@ -1,0 +1,20 @@
+{
+  "summary": "Full backend + frontend testing for archived-products bulk restore/delete feature. Backend: 3/3 pytest tests pass in test_bulk_restore.py — empty payload returns {restored:0}; bulk-restore flips archived=false, active=true and unsets archived_at; bulk-delete verified with subsequent GET returning 404. Frontend: navigated Products > Archived, verified bulk buttons hidden at 0-selection, Select-all toggles all cards on/off, indeterminate state true with partial selection, restore/delete buttons show live count. Bulk Restore: selected 2 seeded archived products → clicked Restore (no confirm) → toast 'Restored 2 products' visible → cards disappeared from Archived list → GET /api/products/{id} confirms archived=false, active=true, no archived_at. Bulk Delete: selected 2, window.confirm dialog captured ('Permanently delete 2 products? This cannot be undone.'), accepted → toast 'Deleted 2 products permanently' → cards removed from list → GET returns 404 for both ids. All acceptance criteria met.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_bulk_restore.py",
+    "/app/test_reports/pytest/bulk_restore.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ArchivedProducts.jsx bulkDelete uses window.confirm which is fine per spec, but tied to native dialog — automated e2e must attach page.on('dialog') before triggering. Consider a custom dialog for consistency with other destructive flows.",
+    "bulkRestore/bulkDelete catch clauses swallow error details — logging server error message would help debugging."
+  ],
+  "updated_files": ["/app/backend/tests/test_bulk_restore.py"],
+  "success_rate": {"backend": "100% (3/3)", "frontend": "100% (all scenarios)"},
+  "seed_data_creation": "Seeded TEST_arch_* and TEST_del_* products via POST /api/products then POST /api/products/bulk-archive; cleaned up after each run via bulk-delete.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Feature complete and verified. Regressions on title cleaner and customer profile were not re-executed in this iteration (out of scope of this run — flagged as OK based on prior iteration_21). If needed, re-run test_title_cleaner.py + test_title_integration.py."
+}

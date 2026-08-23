@@ -1,0 +1,32 @@
+{
+  "summary": "Fully verified the new ImageSourceDialog end-to-end: Add & Replace flows, Upload from PC (data URL) and Paste URL tabs, invalid-URL rejection, close via Cancel/X/backdrop, inside-click stopPropagation, Delete image, and backend PATCH accepting large base64 lists. All 5 backend pytest cases pass and all UI assertions pass.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Product detail · Category <select>", "issues": ["Pre-existing React hydration warning: '<span> cannot be a child of <option>'. Caused by dynamic content in ProductDetail.jsx line 218 <option> children. Not related to this feature but should be cleaned up (interpolate as plain string)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_product_images.py",
+    "/app/test_reports/pytest/pytest_iteration17.xml"
+  ],
+  "action_items": [
+    "(Optional/minor) Fix hydration warning in ProductDetail.jsx <option> children by using a template literal: `${c.group} · ${c.name}` — this is likely already the case; warning originates from an instrumented <span> wrapper. Safe to ignore for this feature."
+  ],
+  "critical_code_review_comments": [
+    "ImageSourceDialog cleanly handles both modes; onSubmit awaited before onClose so errors keep the dialog open — good.",
+    "fileToResizedDataURL correctly clamps to maxDim 1600 and outputs JPEG q=0.85; PNG transparency loss is documented in the source.",
+    "proxyImg now bypasses /api/image-proxy for data: and blob: URLs — verified: uploaded images render directly from data URL, no proxy call.",
+    "Backend ProductUpdate.images: Optional[List[str]] accepts arbitrary strings incl. multi-MB base64 payloads (tested 1.5MB payload, 200 OK, GET-persisted).",
+    "Minor: dialog does not release object URL from URL.createObjectURL(file) on close — small memory leak per open; consider revokeObjectURL in cleanup."
+  ],
+  "updated_files": ["/app/backend/tests/test_product_images.py"],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "seed_data_creation": "Generated a tiny 2x2 PNG at /tmp/test_pixel.png for upload testing.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend uses in-memory AsyncMockDB and resets on backend restart, so any images added via tests won't persist across restarts. test_product_images.py picks the first product from GET /api/products for its subject; safe to re-run. UI test uses /tmp/test_pixel.png (2x2 PNG); regenerate if missing.",
+  "rca of the issue": "N/A — all specified behaviors verified working."
+}

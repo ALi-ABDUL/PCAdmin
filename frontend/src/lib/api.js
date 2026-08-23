@@ -5,4 +5,6 @@ export const loadKeys = () => ({
   scraperapi_key:  localStorage.getItem(KEYS.sa) || "",
   method: localStorage.getItem(KEYS.method) || "auto",
 });
-export const proxyImg = (u) => `${API}/image-proxy?url=${encodeURIComponent(u)}`;
+// Data URLs (from local uploads) and blob URLs are served in-place; only external
+// http(s) URLs go through the CORS-friendly proxy.
+export const proxyImg = (u) => (/^(data:|blob:)/i.test(u || "") ? u : `${API}/image-proxy?url=${encodeURIComponent(u)}`);

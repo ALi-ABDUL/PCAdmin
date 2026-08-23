@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { BadgeCheck, Ban, CheckCircle2, ChevronLeft, ExternalLink, Layout, Loader2, Plus, RefreshCw, Star as StarIcon, Trash2 } from "lucide-react";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
+import { ImageSourceDialog } from "../components/ImageSourceDialog";
 import { API, proxyImg } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 
@@ -16,6 +17,7 @@ export function ProductDetailPage({ productId, onBack }) {
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showCatPopover, setShowCatPopover] = useState(false);
+  const [imgDialog, setImgDialog] = useState({ open: false, mode: "add", idx: null, current: "" });
 
   const load = useCallback(async () => {
     const [prod, rev] = await Promise.all([
@@ -81,19 +83,19 @@ export function ProductDetailPage({ productId, onBack }) {
     try { await axios.patch(`${API}/products/${productId}`, { images: next }); toast.success("Image removed"); load(); }
     catch { toast.error("Failed"); }
   };
-  const replaceImage = async (idx) => {
-    const url = window.prompt("Replace with image URL (leave blank to cancel):", p.images?.[idx] || "");
-    if (!url) return;
-    const next = [...(p.images || [])]; next[idx] = url;
-    try { await axios.patch(`${API}/products/${productId}`, { images: next }); toast.success("Image replaced"); load(); }
-    catch { toast.error("Failed"); }
-  };
-  const addImage = async () => {
-    const url = window.prompt("Paste an image URL to add:");
-    if (!url) return;
-    const next = [...(p.images || []), url];
-    try { await axios.patch(`${API}/products/${productId}`, { images: next }); toast.success("Image added"); load(); }
-    catch { toast.error("Failed"); }
+  const openReplace = (idx) => setImgDialog({ open: true, mode: "replace", idx, current: p.images?.[idx] || "" });
+  const openAdd = () => setImgDialog({ open: true, mode: "add", idx: null, current: "" });
+  const closeImgDialog = () => setImgDialog((s) => ({ ...s, open: false }));
+  const submitImage = async (value) => {
+    const list = [...(p.images || [])];
+    if (imgDialog.mode === "replace" && imgDialog.idx != null) {
+      list[imgDialog.idx] = value;
+    } else {
+      list.push(value);
+    }
+    await axios.patch(`${API}/products/${productId}`, { images: list });
+    toast.success(imgDialog.mode === "replace" ? "Image replaced" : "Image added");
+    await load();
   };
 
   if (!p) return <div className="text-slate-500 py-24 text-center">loading product…</div>;
@@ -159,7 +161,7 @@ export function ProductDetailPage({ productId, onBack }) {
       <div className="card p-5">
         <div className="flex items-center justify-between mb-3">
           <div className="font-display font-bold">Images · <span className="text-slate-500 font-mono text-sm">{(p.images || []).length}</span></div>
-          <button onClick={addImage} className="btn btn-ghost text-xs" data-testid="product-add-image-btn"><Plus size={12}/> Add image</button>
+          <button onClick={openAdd} className="btn btn-ghost text-xs" data-testid="product-add-image-btn"><Plus size={12}/> Add image</button>
         </div>
         <div className="flex gap-3 overflow-x-auto pb-1" data-testid="product-images-strip">
           {(p.images || []).length === 0 && <div className="text-slate-400 text-sm py-8 text-center flex-1">No images yet.</div>}
@@ -167,7 +169,7 @@ export function ProductDetailPage({ productId, onBack }) {
             <div key={i} className="relative shrink-0 w-40 h-40 rounded-xl overflow-hidden bg-slate-100 border hairline group" data-testid={`product-image-${i}`}>
               <img src={proxyImg(src)} alt="" className="w-full h-full object-cover"/>
               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                <button onClick={() => replaceImage(i)} className="btn btn-ghost !bg-white text-xs !py-1" data-testid={`product-image-replace-${i}`}><RefreshCw size={11}/> Replace</button>
+                <button onClick={() => openReplace(i)} className="btn btn-ghost !bg-white text-xs !py-1" data-testid={`product-image-replace-${i}`}><RefreshCw size={11}/> Replace</button>
                 <button onClick={() => removeImage(i)} className="btn btn-danger text-xs !py-1" data-testid={`product-image-delete-${i}`}><Trash2 size={11}/></button>
               </div>
             </div>
@@ -264,6 +266,14 @@ export function ProductDetailPage({ productId, onBack }) {
           {saving ? <Loader2 className="animate-spin" size={13}/> : <BadgeCheck size={13}/>} Save changes
         </button>
       </div>
+
+      <ImageSourceDialog
+        open={imgDialog.open}
+        mode={imgDialog.mode}
+        initialUrl={imgDialog.current}
+        onClose={closeImgDialog}
+        onSubmit={submitImage}
+      />
     </div>
   );
 }

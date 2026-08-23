@@ -61,20 +61,42 @@ export default function App() {
   }, []);
 
   const navigateTo = useCallback(({ tab: t, section, filter }) => {
+    // Any navigation collapses currently open detail pages first — a deep-link with a
+    // filter re-opens the appropriate one below.
+    setProductDetailId(null);
+    setOrderDetailId(null);
     if (t === "orders") { setTab("orders"); if (section) setOrdersSection(section); }
     else if (t === "products") { setTab("products"); if (section) setProductSection(section); }
     else if (t === "customers") { setTab("customers"); if (section) setCustomerSection(section); }
     else if (t === "scraper") { setTab("scraper"); }
     else if (t) setTab(t);
     // Detail-page deep-links (from notifications / global search)
-    if (filter?.productId) { setProductDetailId(filter.productId); setOrderDetailId(null); }
-    else if (filter?.orderId) { setOrderDetailId(filter.orderId); setProductDetailId(null); }
+    if (filter?.productId) setProductDetailId(filter.productId);
+    else if (filter?.orderId) setOrderDetailId(filter.orderId);
     if (filter) setDeepLink({ ...filter, ts: Date.now() });
   }, []);
   const clearDeepLink = useCallback(() => setDeepLink(null), []);
 
-  // When user changes tab, don't force-close a detail page IF they navigated INTO the matching module.
-  // But if they leave the module entirely (dashboard/scraper/etc), collapse the detail.
+  // Wrapped setters ensure that ANY sidebar / submenu / top-nav click collapses an
+  // open detail page — the edit view should only survive when explicitly opened by
+  // clicking a product/order card. Direct setTab / setProductSection calls would
+  // skip this because React bails out on same-value updates and useEffect wouldn't
+  // fire.
+  const changeTab = useCallback((t) => {
+    setProductDetailId(null);
+    setOrderDetailId(null);
+    setTab(t);
+  }, []);
+  const changeProductSection = useCallback((s) => {
+    setProductDetailId(null);
+    setProductSection(s);
+  }, []);
+  const changeOrdersSection = useCallback((s) => {
+    setOrderDetailId(null);
+    setOrdersSection(s);
+  }, []);
+
+  // Safety net: leaving the module entirely still collapses the detail.
   useEffect(() => { if (tab !== "products") setProductDetailId(null); }, [tab]);
   useEffect(() => { if (tab !== "orders")   setOrderDetailId(null); }, [tab]);
 
@@ -95,7 +117,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <Sidebar tab={tab} setTab={setTab} mobileOpen={mobileNavOpen} setMobileOpen={setMobileNavOpen} />
+      <Sidebar tab={tab} setTab={changeTab} mobileOpen={mobileNavOpen} setMobileOpen={setMobileNavOpen} />
 
       <AnimatePresence>
         {inStore && (
@@ -115,12 +137,12 @@ export default function App() {
         )}
         {inProducts && (
           <motion.aside key="product-sidebar" initial={{ opacity: 0, x: -20, width: 0 }} animate={{ opacity: 1, x: 0, width: 280 }} exit={{ opacity: 0, x: -20, width: 0 }} transition={{ duration: 0.22 }} className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden">
-            <SubSideNav title="Products" subtitle="Catalog, inventory & pricing" icon={Package} nav={PRODUCT_NAV} testPrefix="prd" active={productSection} setActive={setProductSection}/>
+            <SubSideNav title="Products" subtitle="Catalog, inventory & pricing" icon={Package} nav={PRODUCT_NAV} testPrefix="prd" active={productSection} setActive={changeProductSection}/>
           </motion.aside>
         )}
         {inOrders && (
           <motion.aside key="orders-sidebar" initial={{ opacity: 0, x: -20, width: 0 }} animate={{ opacity: 1, x: 0, width: 280 }} exit={{ opacity: 0, x: -20, width: 0 }} transition={{ duration: 0.22 }} className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden">
-            <SubSideNav title="Orders" subtitle="Fulfilment & returns" icon={ShoppingCart} nav={ORDERS_NAV} testPrefix="ord" active={ordersSection} setActive={setOrdersSection}/>
+            <SubSideNav title="Orders" subtitle="Fulfilment & returns" icon={ShoppingCart} nav={ORDERS_NAV} testPrefix="ord" active={ordersSection} setActive={changeOrdersSection}/>
           </motion.aside>
         )}
         {inPayments && (
@@ -135,8 +157,8 @@ export default function App() {
         {inStore     && <SubMobileNav nav={STORE_NAV}    testPrefix="store-m" active={storeSection}    setActive={setStoreSection}/>}
         {inSuppliers && <SubMobileNav nav={SUPPLIER_NAV} testPrefix="sup-m"   active={supplierSection} setActive={setSupplierSection}/>}
         {inCustomers && <SubMobileNav nav={CUSTOMER_NAV} testPrefix="cus-m"   active={customerSection} setActive={setCustomerSection}/>}
-        {inProducts  && <SubMobileNav nav={PRODUCT_NAV}  testPrefix="prd-m"   active={productSection}  setActive={setProductSection}/>}
-        {inOrders    && <SubMobileNav nav={ORDERS_NAV}   testPrefix="ord-m"   active={ordersSection}   setActive={setOrdersSection}/>}
+        {inProducts  && <SubMobileNav nav={PRODUCT_NAV}  testPrefix="prd-m"   active={productSection}  setActive={changeProductSection}/>}
+        {inOrders    && <SubMobileNav nav={ORDERS_NAV}   testPrefix="ord-m"   active={ordersSection}   setActive={changeOrdersSection}/>}
         {inPayments  && <SubMobileNav nav={PAYMENTS_NAV} testPrefix="pay-m"   active={paymentsSection} setActive={setPaymentsSection}/>}
         <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 xl:p-10">
           <AnimatePresence mode="wait">
@@ -145,8 +167,8 @@ export default function App() {
               {tab === "store"     && <StoreManagement section={storeSection} setSection={setStoreSection}/>}
               {tab === "suppliers" && <Suppliers section={supplierSection} setSection={setSupplierSection}/>}
               {tab === "customers" && <CustomersModule section={customerSection} setSection={setCustomerSection}/>}
-              {tab === "products"  && <ProductsModule section={productSection} setSection={setProductSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openProductDetail={setProductDetailId} productDetailId={productDetailId}/>}
-              {tab === "orders"    && <OrdersModule section={ordersSection} setSection={setOrdersSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openOrderDetail={setOrderDetailId} orderDetailId={orderDetailId}/>}
+              {tab === "products"  && <ProductsModule section={productSection} setSection={changeProductSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openProductDetail={setProductDetailId} productDetailId={productDetailId}/>}
+              {tab === "orders"    && <OrdersModule section={ordersSection} setSection={changeOrdersSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openOrderDetail={setOrderDetailId} orderDetailId={orderDetailId}/>}
               {tab === "payments"  && <PaymentsModule section={paymentsSection} setSection={setPaymentsSection}/>}
               {tab === "categories" && <Categories navigateTo={navigateTo}/>}
               {tab === "scraper"   && <ScraperPage onView={setSelectedItem} />}

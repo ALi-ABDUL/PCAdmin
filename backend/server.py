@@ -49,6 +49,7 @@ from helpers import (
     _load_pricing_rules,
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
+    _customer_email_html,
 )
 
 
@@ -749,6 +750,64 @@ async def get_customer(cid: str):
             {"_id": 0, "id": 1, "reference": 1, "status": 1, "total": 1, "created_at": 1, "items": 1, "customer_name": 1},
         ).sort("created_at", -1).limit(25).to_list(25)
     return {"customer": c, "orders": orders}
+
+
+@api_router.post("/customers/{cid}/message")
+async def message_customer(cid: str, body: dict):
+    """Admin composes and sends a direct email to a customer via Resend.
+
+    Bypasses the transactional email toggle system (this is an explicit admin action).
+    Uses the store's configured `resend_api_key` / `resend_from_email`. The outbound
+    copy is also logged into `db.messages` (direction=outbound) so it appears in
+    the Customer Messages inbox.
+    """
+    c = await db.customers.find_one({"id": cid}, {"_id": 0})
+    if not c:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    to_email = (c.get("email") or "").strip()
+    if not to_email:
+        raise HTTPException(status_code=400, detail="Customer has no email on file")
+
+    subject = (body or {}).get("subject", "").strip()
+    message = (body or {}).get("body", "").strip()
+    if not subject or not message:
+        raise HTTPException(status_code=400, detail="Both subject and body are required")
+
+    settings = await _get_push_settings()
+    key = settings.get("resend_api_key")
+    if not key:
+        raise HTTPException(status_code=400, detail="Resend API key is not configured. Add it in Store Management › Email & Notifications.")
+    frm = settings.get("resend_from_email") or "onboarding@resend.dev"
+
+    # Reuse the store's card template so the email looks on-brand.
+    html = _customer_email_html(
+        title=subject,
+        intro=f"Hi {c.get('name') or 'there'},",
+        rows=[("Message", message.replace('\n', '<br/>'))],
+        footer="Reply to this email to reach us directly.",
+    )
+
+    resend.api_key = key
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": frm, "to": [to_email], "subject": subject, "html": html,
+        })
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Send failed: {e}")
+
+    # Log outbound copy in the Messages inbox for a full audit trail.
+    m = Message(
+        customer_name=c.get("name") or "",
+        customer_email=to_email,
+        subject=subject,
+        body=message,
+        status="archived",  # outbound messages don't need admin action
+    )
+    doc = m.model_dump()
+    doc["direction"] = "outbound"
+    await db.messages.insert_one(doc)
+
+    return {"sent": True, "to": to_email, "message_id": m.id}
 
 
 

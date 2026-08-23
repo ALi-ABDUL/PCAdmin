@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Award, BadgeCheck, History, Loader2, MessageCircle, Plus, Search, Star as StarIcon, Tags, Ticket, Trash2, Upload } from "lucide-react";
 import { Field, StatusChip, SubHero } from "../components/atoms";
 import { API } from "../lib/api";
-import { fmtDate, moneyCents } from "../lib/format";
+import { fmtDate, fmtLongDateTime, moneyCents } from "../lib/format";
 import { CUSTOMER_NAV } from "../lib/nav";
 import { CustomerPortal } from "./CustomerPortal";
 import { CustomerDetailPage } from "./CustomerDetail";
@@ -164,9 +164,9 @@ export function CustomerTable({ list, total, q, setQ, sort, setSort, group, setG
         </div>
       </div>
       <div className="card overflow-hidden"><div className="overflow-x-auto"><table className="tbl">
-        <thead><tr><th>Customer</th><th>Code</th><th>Group</th><th>Type</th><th>Status</th><th>Orders</th><th>Spend</th><th></th></tr></thead>
+        <thead><tr><th>Customer</th><th>Code</th><th>Group</th><th>Type</th><th>Status</th><th>Orders</th><th>Spend</th><th>Joined</th><th></th></tr></thead>
         <tbody>
-          {list.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-slate-500">No customers</td></tr>}
+          {list.length === 0 && <tr><td colSpan={9} className="text-center py-10 text-slate-500">No customers</td></tr>}
           {list.map(c => (
             <tr key={c.id} data-testid="cus-row" onClick={() => onOpen?.(c.id)} className="cursor-pointer hover:bg-slate-50 transition-colors">
               <td><div className="flex items-center gap-3"><CustomerAvatar c={c}/><div className="min-w-0"><div className="text-sm font-medium truncate max-w-[240px]">{c.name}</div><div className="text-[11px] text-slate-400 truncate">{c.email || "—"}</div></div></div></td>
@@ -180,6 +180,7 @@ export function CustomerTable({ list, total, q, setQ, sort, setSort, group, setG
               </td>
               <td>{c.orders_count}</td>
               <td className="font-mono font-bold text-indigo-600">{moneyCents(c.total_spend)}</td>
+              <td className="text-xs text-slate-600 whitespace-nowrap" data-testid="cus-row-joined">{fmtLongDateTime(c.created_at)}</td>
               <td onClick={stop}><button onClick={()=>del(c)} className="btn btn-danger !p-2"><Trash2 size={12}/></button></td>
             </tr>
           ))}

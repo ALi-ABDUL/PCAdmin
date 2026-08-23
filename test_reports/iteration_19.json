@@ -1,0 +1,30 @@
+{
+  "summary": "Verified new Message Customer feature and fmtLongDateTime formatter. Backend POST /api/customers/{cid}/message: 404 on unknown id, 400 on missing subject, 400 on missing body, 400 with 'Resend API key is not configured…' descriptive detail when no key set — 4/4 pytest cases pass. Frontend: Customers list Joined column and Customer profile Joined stat both render exact format 'Saturday, 22 Aug 2026 at 8:48 AM' (matches strict regex ^Weekday, D Mon YYYY at H:MM AM|PM$). MessageCustomerDialog: opens from customer-message-btn, To preview shows name + email, Send disabled until subject+body filled, inside click does NOT close, Cancel/X/backdrop all close. Send with no Resend key → dialog stays open + Sonner toast 'Send failed' with backend detail 'Resend API key is not configured. Add it in Store Management › Email & Notifications.'. No regressions observed in customer list/profile flows.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard charts", "issues": ["Pre-existing Recharts width(-1)/height(-1) warning still present when Customers tab initial load; not blocking."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_message_customer.py",
+    "/app/test_reports/pytest/pytest_iteration19.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "fmtLongDateTime correctly uppercases AM/PM via regex on en-AU locale output — deterministic on the sample data tested.",
+    "MessageCustomerDialog properly stops propagation on inner container so inside clicks don't dismiss; backdrop onClick=onClose behaves as spec.",
+    "Backend endpoint returns descriptive 400 detail strings (asserted substrings 'not found', 'Resend API key', 'subject/body') — good UX for admin.",
+    "Outbound message is inserted with direction='outbound' and status='archived' — audit trail flow is sound; not exercised because Resend key intentionally absent per test note.",
+    "Send button is also disabled when customer.email is falsy — nice safety guard."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None — used existing seeded customer (TEST_cust_703e5, email test_78fcc@example.com) for profile + send-flow verification.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "AsyncMockDB in-memory; restart wipes state. Resend key intentionally not configured — POST /api/customers/{cid}/message returns 400 with detail containing 'Resend API key is not configured'. To exercise the happy-path outbound-log insertion, PATCH /api/push/settings with a resend_api_key first (still likely 502 from Resend itself unless a real key is set). fmtLongDateTime is deterministic under en-AU locale on Linux node runtime; if tests run on a different ICU build, minute padding could differ — current impl uses minute:'2-digit' so ':05' etc are safe.",
+  "rca of the issue": "N/A — all specified behaviours verified working."
+}

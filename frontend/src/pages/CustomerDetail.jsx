@@ -3,9 +3,10 @@ import axios from "axios";
 import { toast } from "sonner";
 import { BadgeCheck, ChevronLeft, Loader2, Mail, Phone, ShoppingBag, Trash2 } from "lucide-react";
 import { Field, StatusChip } from "../components/atoms";
+import { MessageCustomerDialog } from "../components/MessageCustomerDialog";
 import { CustomerAvatar } from "./Customers";
 import { API } from "../lib/api";
-import { fmtDate, moneyCents } from "../lib/format";
+import { fmtDate, fmtLongDateTime, moneyCents } from "../lib/format";
 
 export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
   const [c, setC] = useState(null);
@@ -13,6 +14,7 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
   const [f, setF] = useState({});
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [msgOpen, setMsgOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -67,6 +69,15 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
           <ChevronLeft size={14}/> Back to customers
         </button>
         <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setMsgOpen(true)}
+            disabled={!c.email}
+            className="btn btn-ghost text-sm"
+            data-testid="customer-message-btn"
+            title={c.email ? "Send an email to this customer" : "Add an email address first"}
+          >
+            <Mail size={13}/> Message customer
+          </button>
           <button onClick={del} className="btn btn-danger text-sm" data-testid="customer-delete-btn">
             <Trash2 size={13}/> Delete
           </button>
@@ -99,7 +110,7 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="card p-4"><div className="text-[11px] text-slate-500 uppercase tracking-wider font-mono">Total spend</div><div className="text-xl font-display font-bold text-indigo-600 mt-1">{moneyCents(totalSpend)}</div></div>
         <div className="card p-4"><div className="text-[11px] text-slate-500 uppercase tracking-wider font-mono">Orders</div><div className="text-xl font-display font-bold mt-1">{ordersCount}</div></div>
-        <div className="card p-4"><div className="text-[11px] text-slate-500 uppercase tracking-wider font-mono">Joined</div><div className="text-xs mt-1 text-slate-600">{fmtDate(c.created_at)}</div></div>
+        <div className="card p-4 col-span-2"><div className="text-[11px] text-slate-500 uppercase tracking-wider font-mono">Joined</div><div className="text-sm mt-1 text-slate-800 font-medium" data-testid="customer-joined-long">{fmtLongDateTime(c.created_at)}</div></div>
         <div className="card p-4"><div className="text-[11px] text-slate-500 uppercase tracking-wider font-mono">Location</div><div className="text-xs mt-1 text-slate-600 truncate">{[c.city, c.state, c.country].filter(Boolean).join(", ") || "—"}</div></div>
       </div>
 
@@ -158,6 +169,12 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
           {saving ? <Loader2 className="animate-spin" size={13}/> : <BadgeCheck size={13}/>} Save changes
         </button>
       </div>
+
+      <MessageCustomerDialog
+        open={msgOpen}
+        customer={c}
+        onClose={() => setMsgOpen(false)}
+      />
     </div>
   );
 }

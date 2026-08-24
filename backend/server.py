@@ -835,31 +835,40 @@ async def customers_summary():
 
 @api_router.get("/customers/unread-count")
 async def customers_unread_count():
-    """How many customers are currently waiting for an admin reply?
+    """How many distinct customers have sent an inbound message the admin has
+    not yet seen?
 
-    Groups messages by (email, direction), keeps the latest ts per side, then
-    counts emails whose newest inbound is newer than their newest outbound
-    (or that have no outbound at all). Powers the sidebar badge.
+    A single watermark ``messages_last_seen_at`` is stored in ``db.admin_meta``.
+    Every inbound message with ``created_at > watermark`` counts, grouped by
+    email so ten messages from the same customer still show as one badge unit.
+    Visiting the Messages inbox (or clicking the sidebar badge) POSTs to
+    ``/customers/messages/mark-seen`` which advances the watermark to now,
+    zeroing the badge until a truly new message arrives.
     """
+    meta = await db.admin_meta.find_one({"_id": "main"}, {"_id": 0}) or {}
+    watermark = meta.get("messages_last_seen_at") or ""
     pipeline = [
-        {"$group": {
-            "_id": {"email": "$customer_email", "direction": "$direction"},
-            "last_ts": {"$max": "$created_at"},
-        }},
+        {"$match": {"direction": "inbound", "created_at": {"$gt": watermark}}},
+        {"$group": {"_id": "$customer_email"}},
     ]
     rows = await db.messages.aggregate(pipeline).to_list(length=None)
-    per_email: dict[str, dict[str, str]] = {}
-    for r in rows:
-        key = (r["_id"].get("email") or "").strip().lower()
-        if not key:
-            continue
-        direction = r["_id"].get("direction") or "inbound"
-        per_email.setdefault(key, {})[direction] = r.get("last_ts") or ""
-    count = sum(
-        1 for v in per_email.values()
-        if (v.get("inbound") or "") > (v.get("outbound") or "")
-    )
+    count = sum(1 for r in rows if (r.get("_id") or "").strip())
     return {"count": count}
+
+
+@api_router.post("/customers/messages/mark-seen")
+async def customers_messages_mark_seen():
+    """Advance the admin's "last seen" watermark on the customer messages
+    inbox to *now*. Called when the admin opens the Messages section or
+    clicks the sidebar unread badge — clears the badge until a new inbound
+    message arrives afterwards."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.admin_meta.update_one(
+        {"_id": "main"},
+        {"$set": {"messages_last_seen_at": now_iso}},
+        upsert=True,
+    )
+    return {"ok": True, "messages_last_seen_at": now_iso}
 
 
 @api_router.get("/customers/{cid}")

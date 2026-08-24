@@ -508,3 +508,18 @@ Notification Bell deep-links) — zero regressions detected.
   page 2 shows 51–100, page-size switches correctly, URL query passes
   `limit`/`skip`.
 
+
+## Feb 24, 2026 — Sidebar unread badge is "seen"-based
+- Backend: `GET /api/customers/unread-count` now counts distinct inbound
+  customer emails whose `created_at > messages_last_seen_at` watermark
+  (stored in `db.admin_meta._id = "main"`). New endpoint
+  `POST /api/customers/messages/mark-seen` advances that watermark to now.
+- Frontend: `App.js` calls `mark-seen` (a) when the admin opens the
+  Customer Messages section, and (b) when the admin clicks the sidebar
+  Customers unread badge. The client also zeroes the count optimistically
+  so the badge disappears the instant it is clicked, then re-appears only
+  when a genuinely new inbound message arrives.
+- Verified end-to-end with curl (7→8→0→1 across post/seen/post cycle) and
+  a Playwright screenshot confirming the sidebar badge is gone after the
+  admin lands on the Messages inbox.
+

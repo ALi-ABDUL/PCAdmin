@@ -50,6 +50,13 @@ export default function App() {
       setUnreadCustomerCount(data?.count || 0);
     } catch { /* silent — sidebar just won't update this cycle */ }
   }, []);
+  // Advance the admin's "last seen" watermark on the messages inbox — clears
+  // the sidebar badge until a genuinely new inbound message arrives. Called
+  // when the admin opens the Messages section or clicks the sidebar badge.
+  const markMessagesSeen = useCallback(async () => {
+    setUnreadCustomerCount(0); // optimistic: badge disappears immediately
+    try { await axios.post(`${API}/customers/messages/mark-seen`); } catch { /* silent */ }
+  }, []);
   useEffect(() => {
     refreshUnread();
     const iv = setInterval(refreshUnread, 20000);
@@ -58,6 +65,10 @@ export default function App() {
   // Refresh immediately when the user navigates in/out of Customers so a
   // just-sent reply clears the badge without waiting for the next poll tick.
   useEffect(() => { if (tab === "customers") refreshUnread(); }, [tab, customerDetailId, refreshUnread]);
+  // Landing on the Messages inbox counts as "seen" — advance the watermark.
+  useEffect(() => {
+    if (tab === "customers" && customerSection === "messages") markMessagesSeen();
+  }, [tab, customerSection, markMessagesSeen]);
 
   // Poll for new sold events every 60s and fire toasts
   useEffect(() => {
@@ -145,7 +156,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <Sidebar tab={tab} setTab={changeTab} mobileOpen={mobileNavOpen} setMobileOpen={setMobileNavOpen} unreadCustomerCount={unreadCustomerCount} onCustomersBadgeClick={() => navigateTo({ tab: "customers", section: "messages" })}/>
+      <Sidebar tab={tab} setTab={changeTab} mobileOpen={mobileNavOpen} setMobileOpen={setMobileNavOpen} unreadCustomerCount={unreadCustomerCount} onCustomersBadgeClick={() => { markMessagesSeen(); navigateTo({ tab: "customers", section: "messages" }); }}/>
 
       <AnimatePresence>
         {inStore && (

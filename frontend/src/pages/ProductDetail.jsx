@@ -7,14 +7,14 @@ import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
 import { API, proxyImg, imgThumb, imgFull } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
-import { computeDeliveryEstimate } from "../lib/delivery";
+import { computeDeliveryEstimate, formatCutoffLabel } from "../lib/delivery";
 
 export function ProductDetailPage({ productId, onBack }) {
   const [p, setP] = useState(null);
   const [f, setF] = useState({});
   const [cats, setCats] = useState([]);
   const [presets, setPresets] = useState([]);
-  const [deliveryDefaults, setDeliveryDefaults] = useState({ default_min_days: 3, default_max_days: 7 });
+  const [deliveryDefaults, setDeliveryDefaults] = useState({ default_min_days: 3, default_max_days: 7, cutoff_enabled: true, cutoff_hhmm: "14:00" });
   const [reviews, setReviews] = useState([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -539,7 +539,8 @@ export function DeliveryWindowField({ f, setF, setDirty, defaults }) {
   const min = useCustom ? (Number(f.delivery_min_days) || 0) : Number(defaults.default_min_days) || 0;
   const max = useCustom ? (Number(f.delivery_max_days) || 0) : Number(defaults.default_max_days) || 0;
   const invalid = useCustom && max < min;
-  const est = computeDeliveryEstimate(min, max);
+  const cutoff = { enabled: !!defaults.cutoff_enabled, hhmm: defaults.cutoff_hhmm || "14:00" };
+  const est = computeDeliveryEstimate(min, max, new Date(), cutoff);
 
   const toggle = (v) => {
     setF(prev => ({
@@ -605,14 +606,23 @@ export function DeliveryWindowField({ f, setF, setDirty, defaults }) {
           className="p-3 rounded-lg border border-emerald-200 bg-emerald-50/60"
           data-testid="product-delivery-estimate-preview"
         >
-          <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-700 flex items-center gap-1">
-            <Calendar size={11}/> Live delivery estimate
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-700 flex items-center gap-1">
+              <Calendar size={11}/> Live delivery estimate
+            </div>
+            {est.shifted && (
+              <span className="chip chip-warning font-mono text-[10px]" data-testid="product-delivery-shift-chip">
+                {est.shiftReason === "cutoff"
+                  ? `After ${formatCutoffLabel(cutoff.hhmm)} cutoff · shipping next business day`
+                  : "Weekend order · shipping Monday"}
+              </span>
+            )}
           </div>
           <div className="text-sm text-slate-800 mt-0.5 font-medium" data-testid="product-delivery-estimate-label">
             {est.label}
           </div>
           <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-            {min}–{max} business days from today · weekends skipped · {useCustom ? "custom override" : "store default"}
+            {min}–{max} business days · weekends skipped · {useCustom ? "custom override" : "store default"}
           </div>
         </div>
       )}

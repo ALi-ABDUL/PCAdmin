@@ -5,7 +5,7 @@ import { AlertTriangle, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as Cl
 import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
-import { computeDeliveryEstimate } from "../lib/delivery";
+import { computeDeliveryEstimate, formatCutoffLabel } from "../lib/delivery";
 import { STORE_NAV } from "../lib/nav";
 import { calcPricingWithRules, usePricingRules, _refreshPricingRules } from "../lib/pricing";
 import { Analytics } from "./Analytics";
@@ -334,13 +334,18 @@ export function PostagePresetsEditor() {
 
 export function DeliverySettingsEditor() {
   const [settings, setSettings] = useState(null);
-  const [draft, setDraft] = useState({ default_min_days: "", default_max_days: "" });
+  const [draft, setDraft] = useState({ default_min_days: "", default_max_days: "", cutoff_enabled: true, cutoff_hhmm: "14:00" });
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/delivery-settings`);
     setSettings(data);
-    setDraft({ default_min_days: data.default_min_days, default_max_days: data.default_max_days });
+    setDraft({
+      default_min_days: data.default_min_days,
+      default_max_days: data.default_max_days,
+      cutoff_enabled: !!data.cutoff_enabled,
+      cutoff_hhmm: data.cutoff_hhmm || "14:00",
+    });
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -349,18 +354,26 @@ export function DeliverySettingsEditor() {
   const min = Number(draft.default_min_days) || 0;
   const max = Number(draft.default_max_days) || 0;
   const invalid = max < min;
-  const dirty = min !== settings.default_min_days || max !== settings.default_max_days;
-  const preview = computeDeliveryEstimate(min, max);
+  const dirty = min !== settings.default_min_days
+    || max !== settings.default_max_days
+    || !!draft.cutoff_enabled !== !!settings.cutoff_enabled
+    || (draft.cutoff_hhmm || "") !== (settings.cutoff_hhmm || "");
+  const preview = computeDeliveryEstimate(min, max, new Date(), {
+    enabled: draft.cutoff_enabled, hhmm: draft.cutoff_hhmm,
+  });
 
   const save = async () => {
     if (invalid) return toast.error("Max days must be greater than or equal to min days");
     setBusy(true);
     try {
       const { data } = await axios.patch(`${API}/delivery-settings`, {
-        default_min_days: min, default_max_days: max,
+        default_min_days: min,
+        default_max_days: max,
+        cutoff_enabled: !!draft.cutoff_enabled,
+        cutoff_hhmm: draft.cutoff_hhmm,
       });
       setSettings(data);
-      toast.success("Default delivery window saved");
+      toast.success("Delivery settings saved");
     } catch (e) {
       toast.error("Save failed", { description: e?.response?.data?.detail?.slice(0, 200) || e.message });
     } finally { setBusy(false); }
@@ -398,21 +411,74 @@ export function DeliverySettingsEditor() {
           </Field>
         </div>
 
+        {/* Same-day cutoff — orders placed before this time still ship today. */}
+        <div className="mt-4 pt-4 border-t hairline">
+          <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer" data-testid="delivery-cutoff-toggle">
+            <input
+              type="checkbox"
+              checked={!!draft.cutoff_enabled}
+              onChange={(e) => setDraft(d => ({ ...d, cutoff_enabled: e.target.checked }))}
+              className="accent-indigo-600 mt-1 w-4 h-4"
+            />
+            <div className="flex-1">
+              <div className="text-sm font-medium flex items-center gap-2"><ClockIcon size={14} className="text-slate-500"/> Same-day ship cutoff</div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                Orders placed before the cutoff still ship today. Anything later shifts the estimate to start counting from the next business day.
+              </div>
+            </div>
+            <span className={`chip ${draft.cutoff_enabled ? "chip-success" : "chip-neutral"} font-mono text-[10px] shrink-0`}>{draft.cutoff_enabled ? "ON" : "OFF"}</span>
+          </label>
+
+          {draft.cutoff_enabled && (
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <Field label="Cutoff time (24h, store-local)">
+                <input
+                  type="time" step="60"
+                  className="input w-full px-3 py-2 font-mono text-lg"
+                  value={draft.cutoff_hhmm}
+                  onChange={(e) => setDraft(d => ({ ...d, cutoff_hhmm: e.target.value }))}
+                  data-testid="delivery-cutoff-input"
+                />
+              </Field>
+              <div className="md:col-span-2 rounded-lg border hairline bg-slate-50/60 p-3 flex flex-col justify-center">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Currently</div>
+                <div className="text-sm text-slate-800 mt-0.5 font-medium">
+                  Ships same-day until <span className="font-mono">{formatCutoffLabel(draft.cutoff_hhmm)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {invalid ? (
           <div className="mt-3 p-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800 flex items-center gap-2">
             <AlertTriangle size={13}/> Maximum days must be greater than or equal to minimum days.
           </div>
         ) : (
           <div className="mt-3 p-3 rounded-lg border border-emerald-200 bg-emerald-50/60" data-testid="delivery-default-preview">
-            <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-700">Live preview · updates every day</div>
-            <div className="text-sm text-slate-800 mt-0.5 font-medium">{preview.label}</div>
-            <div className="text-[11px] text-slate-500 font-mono mt-0.5">{min}–{max} business days from today · weekends skipped</div>
+            <div className="flex items-center gap-2">
+              <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-700">Live preview · updates every day</div>
+              {preview.shifted && (
+                <span className="chip chip-warning font-mono text-[10px]" data-testid="delivery-shift-chip">
+                  {preview.shiftReason === "cutoff"
+                    ? `After ${formatCutoffLabel(draft.cutoff_hhmm)} cutoff · shipping next business day`
+                    : "Weekend order · shipping Monday"}
+                </span>
+              )}
+            </div>
+            <div className="text-sm text-slate-800 mt-0.5 font-medium" data-testid="delivery-default-preview-label">{preview.label}</div>
+            <div className="text-[11px] text-slate-500 font-mono mt-0.5">{min}–{max} business days · weekends skipped</div>
           </div>
         )}
 
         <div className="mt-4 flex items-center justify-end gap-2 flex-wrap">
           {dirty && !invalid && <span className="text-xs text-amber-600 font-mono">Unsaved changes</span>}
-          <button onClick={() => setDraft({ default_min_days: settings.default_min_days, default_max_days: settings.default_max_days })} disabled={!dirty || busy} className="btn btn-ghost text-sm" data-testid="delivery-default-cancel">Discard</button>
+          <button onClick={() => setDraft({
+            default_min_days: settings.default_min_days,
+            default_max_days: settings.default_max_days,
+            cutoff_enabled: !!settings.cutoff_enabled,
+            cutoff_hhmm: settings.cutoff_hhmm || "14:00",
+          })} disabled={!dirty || busy} className="btn btn-ghost text-sm" data-testid="delivery-default-cancel">Discard</button>
           <button onClick={save} disabled={busy || !dirty || invalid} className="btn btn-primary text-sm" data-testid="delivery-default-save">
             {busy ? <Loader2 className="animate-spin" size={14}/> : <BadgeCheck size={14}/>} Save default
           </button>
@@ -421,7 +487,7 @@ export function DeliverySettingsEditor() {
 
       <div className="card p-4 border-dashed border-2 text-xs text-slate-500 leading-relaxed">
         <div className="font-display font-bold text-slate-700 text-sm mb-1 flex items-center gap-2"><HelpCircle size={14}/> How it works</div>
-        Every product page shows an <span className="font-mono">"Estimated delivery between [date] and [date]"</span> line computed live in the browser using today's date + this window. Weekends are always skipped. To override for a specific product (e.g. large items), open the product and switch on <span className="font-mono">Custom delivery window</span>.
+        Every product page shows an <span className="font-mono">"Estimated delivery between [date] and [date]"</span> line computed live in the browser using today's date + this window. Weekends are always skipped. Orders placed after the cutoff (or on a weekend) start counting from the next business day. To override the window for a specific product (e.g. large items), open the product and switch on <span className="font-mono">Custom delivery window</span>.
       </div>
     </div>
   );

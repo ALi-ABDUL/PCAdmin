@@ -1761,6 +1761,13 @@ def _validate_delivery_window(min_days: int, max_days: int) -> None:
         raise HTTPException(status_code=400, detail="Max days must be greater than or equal to min days")
 
 
+def _validate_cutoff_hhmm(hhmm: str) -> None:
+    """Accepts "HH:MM" (24-hour). Empty / None allowed only when disabling."""
+    import re as _re
+    if not _re.match(r"^([01]?\d|2[0-3]):[0-5]\d$", hhmm or ""):
+        raise HTTPException(status_code=400, detail="cutoff_hhmm must be 24-hour HH:MM (e.g. 14:00)")
+
+
 @api_router.get("/delivery-settings")
 async def get_delivery_settings():
     return await _get_delivery_settings()
@@ -1774,6 +1781,8 @@ async def update_delivery_settings(body: DeliverySettingsUpdate):
     existing = await _get_delivery_settings()
     merged = {**existing, **fields}
     _validate_delivery_window(int(merged["default_min_days"]), int(merged["default_max_days"]))
+    if "cutoff_hhmm" in fields:
+        _validate_cutoff_hhmm(fields["cutoff_hhmm"])
     fields["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.delivery_settings.update_one({"id": "singleton"}, {"$set": fields}, upsert=True)
     return await _get_delivery_settings()

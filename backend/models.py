@@ -671,10 +671,14 @@ DELIVERY_SETTINGS_DEFAULTS: dict = {
     "id": "singleton",
     "default_min_days": 3,   # business days
     "default_max_days": 7,   # business days
+    "cutoff_enabled": True,  # if False, always count from today (weekend still skipped)
+    "cutoff_hhmm": "14:00",  # store-local (AU) time — orders after this ship next business day
 }
 
 
 class DeliverySettingsUpdate(BaseModel):
     default_min_days: Optional[int] = None
     default_max_days: Optional[int] = None
+    cutoff_enabled: Optional[bool] = None
+    cutoff_hhmm: Optional[str] = None
 

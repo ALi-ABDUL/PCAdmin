@@ -901,3 +901,16 @@ Notification Bell deep-links) — zero regressions detected.
   * Product Detail → new **Custom delivery window** toggle. OFF (default) shows the store-wide preview line. ON reveals two min/max inputs pre-filled from the current defaults and swaps the preview to the custom window. Toggle chip reads "Default" / "Custom".
   * Both previews use the friendly AU date format ("Mon, 3 Mar") and clearly label weekends as skipped.
 - **Tests**: `/app/backend/tests/test_delivery_settings.py` — 8 cases covering seeding, validation, per-product save/read, and toggle-off. All 19 delivery+postage tests green.
+
+
+## Feb 24, 2026 — Same-day ship Cutoff
+- Extended `delivery_settings` singleton with `cutoff_enabled: bool` (default True) and `cutoff_hhmm: str` (default "14:00"). PATCH validates HH:MM (24-hour) format.
+- **Frontend helper** `lib/delivery.js` — new `resolveShipDate(now, cutoff)` that returns `{shipDate, shifted, reason}`:
+  * `shifted=true, reason='cutoff'` when the current time is past the store cutoff.
+  * `shifted=true, reason='weekend'` when today is Sat/Sun (regardless of cutoff).
+  * `shifted=false` when we're within the same-day window.
+  `computeDeliveryEstimate` uses the resolved ship date as the base for both bounds, so an order after 2 PM automatically counts from tomorrow.
+- **UI**
+  * Store Management → Delivery Estimate: added toggle + 24-hour time input for the cutoff. The live preview now surfaces an amber "After 2:00 PM cutoff · shipping next business day" chip whenever the shift is active.
+  * Product Detail: the delivery-window field's preview shows the same chip so admins see instantly why the estimate has moved a day.
+- Backend tests: added 5 cutoff cases (defaults, patch persist, disable, malformed HH:MM rejection, edge times). 24 delivery + postage tests green.

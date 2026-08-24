@@ -62,6 +62,52 @@ class TestDeliverySettings:
         assert r.status_code == 400
 
 
+class TestSameDayCutoff:
+    def test_defaults_include_cutoff(self):
+        s = requests.get(f"{API}/delivery-settings", timeout=15).json()
+        assert "cutoff_enabled" in s
+        assert "cutoff_hhmm" in s
+
+    def test_patch_cutoff_persists(self):
+        try:
+            r = requests.patch(f"{API}/delivery-settings",
+                               json={"cutoff_enabled": True, "cutoff_hhmm": "15:30"},
+                               timeout=15)
+            assert r.status_code == 200
+            got = r.json()
+            assert got["cutoff_enabled"] is True
+            assert got["cutoff_hhmm"] == "15:30"
+        finally:
+            requests.patch(f"{API}/delivery-settings",
+                           json={"cutoff_enabled": True, "cutoff_hhmm": "14:00"}, timeout=15)
+
+    def test_patch_disables_cutoff(self):
+        try:
+            r = requests.patch(f"{API}/delivery-settings",
+                               json={"cutoff_enabled": False}, timeout=15)
+            assert r.status_code == 200
+            assert r.json()["cutoff_enabled"] is False
+        finally:
+            requests.patch(f"{API}/delivery-settings",
+                           json={"cutoff_enabled": True, "cutoff_hhmm": "14:00"}, timeout=15)
+
+    def test_patch_rejects_malformed_time(self):
+        for bad in ["", "25:00", "14:60", "2 pm", "1400"]:
+            r = requests.patch(f"{API}/delivery-settings",
+                               json={"cutoff_hhmm": bad}, timeout=15)
+            assert r.status_code == 400, f"expected 400 for {bad!r} got {r.status_code}"
+
+    def test_patch_accepts_edge_times(self):
+        try:
+            for ok in ["00:00", "23:59", "9:00", "09:00"]:
+                r = requests.patch(f"{API}/delivery-settings",
+                                   json={"cutoff_hhmm": ok}, timeout=15)
+                assert r.status_code == 200, f"expected 200 for {ok!r} got {r.status_code}"
+        finally:
+            requests.patch(f"{API}/delivery-settings",
+                           json={"cutoff_enabled": True, "cutoff_hhmm": "14:00"}, timeout=15)
+
+
 class TestProductDeliveryWindow:
     def test_saves_and_reads(self):
         p = _create_product()

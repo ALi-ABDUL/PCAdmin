@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Award, BadgeCheck, History, Loader2, MessageCircle, Plus, Search, Star as StarIcon, Tags, Ticket, Trash2, Upload } from "lucide-react";
+import { Award, BadgeCheck, History, Loader2, MessageCircle, Plus, Reply, Search, Star as StarIcon, Tags, Ticket, Trash2, Upload } from "lucide-react";
 import { Field, StatusChip, SubHero } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, fmtLongDateTime, moneyCents } from "../lib/format";
 import { CUSTOMER_NAV } from "../lib/nav";
 import { CustomerPortal } from "./CustomerPortal";
 import { CustomerDetailPage } from "./CustomerDetail";
+import { MessageCustomerDialog } from "../components/MessageCustomerDialog";
 import { Orders } from "./Orders";
 import { Products } from "./ProductsList";
 
@@ -292,7 +293,28 @@ export function TopCustomers({ list }) {
 
 export function CustomerMessages({ messages, reload }) {
   const [f, setF] = useState({ customer_name:"", customer_email:"", subject:"", body:"" });
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyCustomer, setReplyCustomer] = useState(null);
+  const [replyMessage, setReplyMessage] = useState(null);
+  const [replyLoadingId, setReplyLoadingId] = useState(null);
   const send = async () => { if(!f.customer_name || !f.body) return toast.error("Name & message required"); await axios.post(`${API}/messages`, f); setF({ customer_name:"", customer_email:"", subject:"", body:"" }); toast.success("Message added"); reload(); };
+  // Look the customer up by email so we can hit /customers/:id/message which
+  // handles Resend delivery + outbound message logging. If none is found we
+  // fall through with a toast so the admin knows to create a profile first.
+  const openReply = async (m) => {
+    const email = (m.customer_email || "").trim();
+    if (!email) { toast.error("This message has no email on file"); return; }
+    setReplyLoadingId(m.id);
+    try {
+      const { data } = await axios.get(`${API}/customers`, { params: { q: email, limit: 5 } });
+      const cust = (data.customers || []).find(c => (c.email || "").toLowerCase() === email.toLowerCase()) || (data.customers || [])[0];
+      if (!cust) { toast.error("No customer profile found", { description: "Create a customer with this email first, then reply." }); return; }
+      setReplyCustomer(cust);
+      setReplyMessage(m);
+      setReplyOpen(true);
+    } catch { toast.error("Could not load customer profile"); }
+    finally { setReplyLoadingId(null); }
+  };
   return (
     <div className="grid gap-4">
       <div className="card p-5">
@@ -307,10 +329,46 @@ export function CustomerMessages({ messages, reload }) {
       </div>
       <div className="card overflow-hidden">
         {messages.length === 0 && <div className="p-10 text-center text-slate-500">No messages yet</div>}
-        {messages.map(m => (
-          <div key={m.id} className="p-4 border-b hairline last:border-0"><div className="flex items-center justify-between"><div className="font-medium text-sm">{m.customer_name} <span className="text-slate-400 text-xs font-mono">· {m.customer_email}</span></div><span className={`chip chip-${m.status==='new'?'primary':'neutral'}`}>{m.status}</span></div><div className="text-sm font-medium mt-1">{m.subject}</div><div className="text-sm text-slate-600 mt-1">{m.body}</div><div className="text-[11px] text-slate-400 mt-1 font-mono">{fmtDate(m.created_at)}</div></div>
-        ))}
+        {messages.map(m => {
+          const direction = m.direction || "inbound";
+          const isInbound = direction === "inbound";
+          const canReply = isInbound && !!(m.customer_email || "").trim();
+          return (
+            <div key={m.id} className="p-4 border-b hairline last:border-0" data-testid={`inbox-msg-${m.id}`}>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`chip !text-[10px] ${isInbound ? "chip-primary" : "chip-neutral"}`}>{isInbound ? "In" : "Out"}</span>
+                  <div className="font-medium text-sm truncate">{m.customer_name} <span className="text-slate-400 text-xs font-mono">· {m.customer_email || "no email"}</span></div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`chip chip-${m.status==='new'?'primary':'neutral'}`}>{m.status}</span>
+                  {canReply && (
+                    <button
+                      onClick={() => openReply(m)}
+                      disabled={replyLoadingId === m.id}
+                      className="btn btn-primary text-xs !py-1.5 !px-3"
+                      data-testid={`inbox-reply-${m.id}`}
+                      title="Reply to this message"
+                    >
+                      {replyLoadingId === m.id ? <Loader2 className="animate-spin" size={11}/> : <Reply size={11}/>} Reply
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="text-sm font-medium mt-1">{m.subject}</div>
+              <div className="text-sm text-slate-600 mt-1 whitespace-pre-wrap">{m.body}</div>
+              <div className="text-[11px] text-slate-400 mt-1 font-mono">{fmtDate(m.created_at)}</div>
+            </div>
+          );
+        })}
       </div>
+      <MessageCustomerDialog
+        open={replyOpen}
+        customer={replyCustomer}
+        replyTo={replyMessage}
+        onClose={() => setReplyOpen(false)}
+        onSent={() => { setReplyOpen(false); reload(); }}
+      />
     </div>
   );
 }

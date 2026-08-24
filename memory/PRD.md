@@ -523,3 +523,16 @@ Notification Bell deep-links) — zero regressions detected.
   a Playwright screenshot confirming the sidebar badge is gone after the
   admin lands on the Messages inbox.
 
+
+## Feb 24, 2026 — Inline Reply from Inbox
+- `CustomerMessages` (Customer messages inbox) now renders a Reply button
+  on every inbound message that has an email on file. Clicking it looks
+  the customer up via `GET /customers?q=<email>` and opens the existing
+  `MessageCustomerDialog` prefilled with `Re: <subject>` and a quoted
+  original — same Resend send-path used from the customer profile.
+- Also added an "In/Out" direction chip on each message card so the admin
+  can tell inbound messages from logged outbound ones at a glance.
+- Verified end-to-end via Playwright: reply button visible on inbound msg,
+  dialog opens with correct customer, prefilled subject "Re: …" and quoted
+  body.
+

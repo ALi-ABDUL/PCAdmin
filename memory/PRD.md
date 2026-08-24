@@ -809,3 +809,29 @@ Notification Bell deep-links) — zero regressions detected.
   extract-from-text-only, formatting decimals, larger fee, both none,
   empty string, junk text). Combined scraper suite → **51 passing**.
 
+
+## Feb 24, 2026 — Editable Specifications
+- `ProductUpdate` model gained `specifics: Optional[dict]` so the
+  existing `PATCH /products/{pid}` route accepts spec changes with
+  zero new endpoints.
+- `ProductSpecsCard` rewritten to be editable in place:
+  * Read-only mode renders the same grouped DIMENSIONS / MATERIALS /
+    COLOURS / WEIGHT / OTHER layout as before, with an "Edit" button
+    top-right.
+  * Empty state prompts "Add specs" so products with no scraped
+    specifics still get the UI (previously the section was hidden).
+  * Edit mode shows a flat two-column table of `<input>` label /
+    `<input>` value pairs plus a red Trash button on every row, an
+    "Add spec" button under the list, and Save / Cancel buttons top-
+    right. Blank labels or values are dropped on save; duplicate
+    labels merge (last write wins).
+  * Optimistic UI: save PATCHes the backend, toasts on success, and
+    calls `onUpdated(fresh)` so the display mode reflects the exact
+    server state (no client-vs-server drift).
+- Verified end-to-end via Playwright: seeded a product with
+  `{Colour: Blue, Weight: 1 kg}`, entered edit mode, changed
+  Colour → Red, deleted the Weight row, added `Length: 30 cm`, saved
+  → toast fired, backend `GET /products/{pid}` returned
+  `{Colour: Red, Length: 30 cm}` and the card re-grouped rows into
+  DIMENSIONS (Length) and COLOURS (Colour) sections.
+

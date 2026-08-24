@@ -147,6 +147,8 @@ class ProductUpdate(BaseModel):
     sku: Optional[str] = None
     stock_status: Optional[str] = None
     archived: Optional[bool] = None
+    specifics: Optional[dict] = None
+    postage: Optional[str] = None
 
 
 # AU address generator used by the demo seed + backfill for existing orders without addresses.

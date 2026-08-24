@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Plus, RefreshCw, Star as StarIcon, Trash2 } from "lucide-react";
+import { BadgeCheck, Ban, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Pencil, Plus, RefreshCw, Save, Star as StarIcon, Trash2, X } from "lucide-react";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
@@ -311,7 +311,7 @@ export function ProductDetailPage({ productId, onBack }) {
 
       {/* Product specifications — grouped labelled fields scraped from eBay item specifics.
           Displayed as its own section so the description above stays a clean overview. */}
-      <ProductSpecsCard specifics={p.specifics}/>
+      <ProductSpecsCard product={p} onUpdated={(fresh) => setP(fresh)}/>
 
       {/* Reviews */}
       {reviews.length > 0 && (
@@ -480,26 +480,139 @@ function SpecRow({ label, value }) {
   );
 }
 
-export function ProductSpecsCard({ specifics }) {
+// Turn the specifics dict into a stable ordered array of `{id, label, value}`
+// tuples so React can key on `id` while the admin edits, adds, or deletes.
+function specsToRows(specifics) {
+  return Object.entries(specifics || {}).map(([label, value], i) => ({
+    id: `spec-${i}-${label}`,
+    label,
+    value: String(value ?? ""),
+  }));
+}
+
+export function ProductSpecsCard({ product, onUpdated }) {
+  const specifics = product?.specifics || {};
+  const [editing, setEditing] = useState(false);
+  const [rows, setRows] = useState(() => specsToRows(specifics));
+  const [saving, setSaving] = useState(false);
+
+  // Reset local rows whenever the parent product refreshes.
+  useEffect(() => { if (!editing) setRows(specsToRows(specifics)); }, [product?.id, JSON.stringify(specifics), editing]);
+
   const { groups, other } = bucketSpecs(specifics);
-  if (groups.length === 0 && other.length === 0) return null;
+  const hasAny = groups.length > 0 || other.length > 0;
+
+  const patchRow = (id, patch) => setRows((rs) => rs.map((r) => r.id === id ? { ...r, ...patch } : r));
+  const addRow = () => setRows((rs) => [...rs, { id: `spec-new-${Date.now()}-${rs.length}`, label: "", value: "" }]);
+  const removeRow = (id) => setRows((rs) => rs.filter((r) => r.id !== id));
+
+  const save = async () => {
+    // Build the specifics dict from the edited rows, dropping blank labels and
+    // silently merging duplicate labels (last write wins) to keep the shape sane.
+    const out = {};
+    for (const r of rows) {
+      const label = (r.label || "").trim();
+      const value = (r.value || "").trim();
+      if (!label || !value) continue;
+      out[label] = value;
+    }
+    setSaving(true);
+    try {
+      const { data } = await axios.patch(`${API}/products/${product.id}`, { specifics: out });
+      toast.success("Specifications saved");
+      onUpdated?.(data);
+      setEditing(false);
+    } catch (e) {
+      toast.error("Could not save specifications", { description: e?.response?.data?.detail || e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Empty state — show a lightweight prompt so admins can start from scratch.
+  if (!editing && !hasAny) {
+    return (
+      <div className="card p-5" data-testid="product-specs">
+        <div className="flex items-center justify-between mb-3">
+          <div className="font-display font-bold">Specifications</div>
+          <button onClick={() => { setRows([]); addRow(); setEditing(true); }} className="btn btn-primary text-xs" data-testid="specs-add-first"><Plus size={12}/> Add specs</button>
+        </div>
+        <div className="text-sm text-slate-500 italic">No specifications yet — add dimensions, materials, colours, weight, or anything else worth showing.</div>
+      </div>
+    );
+  }
+
   return (
     <div className="card p-5" data-testid="product-specs">
-      <div className="font-display font-bold mb-3">Specifications</div>
-      <div className="grid gap-5">
-        {groups.map((g) => (
-          <div key={g.id}>
-            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-1">{g.title}</div>
-            <div>{g.entries.map((e, i) => <SpecRow key={i} label={e.label} value={e.value}/>)}</div>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="font-display font-bold">Specifications</div>
+        {editing ? (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setEditing(false); setRows(specsToRows(specifics)); }}
+              className="btn btn-ghost text-xs"
+              disabled={saving}
+              data-testid="specs-cancel"
+            ><X size={12}/> Cancel</button>
+            <button
+              onClick={save}
+              className="btn btn-primary text-xs"
+              disabled={saving}
+              data-testid="specs-save"
+            >{saving ? <Loader2 className="animate-spin" size={12}/> : <Save size={12}/>} Save</button>
           </div>
-        ))}
-        {other.length > 0 && (
-          <div>
-            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-1">Other specifications</div>
-            <div>{other.map((e, i) => <SpecRow key={i} label={e.label} value={e.value}/>)}</div>
-          </div>
+        ) : (
+          <button onClick={() => setEditing(true)} className="btn btn-ghost text-xs" data-testid="specs-edit"><Pencil size={12}/> Edit</button>
         )}
       </div>
+
+      {editing ? (
+        <div>
+          {rows.length === 0 && <div className="text-sm text-slate-500 italic mb-3">No rows. Add one to get started.</div>}
+          <div className="grid gap-2">
+            {rows.map((r, idx) => (
+              <div key={r.id} className="grid grid-cols-[minmax(120px,180px)_1fr_auto] gap-2 items-center" data-testid={`spec-edit-row-${idx}`}>
+                <input
+                  value={r.label}
+                  onChange={(e) => patchRow(r.id, { label: e.target.value })}
+                  placeholder="Label (e.g. Length)"
+                  className="input px-3 py-1.5 text-sm"
+                  data-testid={`spec-edit-label-${idx}`}
+                />
+                <input
+                  value={r.value}
+                  onChange={(e) => patchRow(r.id, { value: e.target.value })}
+                  placeholder="Value (e.g. 180 cm)"
+                  className="input px-3 py-1.5 text-sm"
+                  data-testid={`spec-edit-value-${idx}`}
+                />
+                <button
+                  onClick={() => removeRow(r.id)}
+                  className="btn btn-danger !p-2"
+                  title="Delete spec"
+                  data-testid={`spec-edit-delete-${idx}`}
+                ><Trash2 size={12}/></button>
+              </div>
+            ))}
+          </div>
+          <button onClick={addRow} className="btn btn-ghost text-xs mt-3" data-testid="specs-add-row"><Plus size={12}/> Add spec</button>
+        </div>
+      ) : (
+        <div className="grid gap-5">
+          {groups.map((g) => (
+            <div key={g.id}>
+              <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-1">{g.title}</div>
+              <div>{g.entries.map((e, i) => <SpecRow key={i} label={e.label} value={e.value}/>)}</div>
+            </div>
+          ))}
+          {other.length > 0 && (
+            <div>
+              <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-1">Other specifications</div>
+              <div>{other.map((e, i) => <SpecRow key={i} label={e.label} value={e.value}/>)}</div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

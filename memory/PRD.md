@@ -744,3 +744,25 @@ Notification Bell deep-links) — zero regressions detected.
   non-http, preserves order). All green. Combined scraper test suite
   (title cleaner + description cleaner + image filters) — 35 passing.
 
+
+## Feb 24, 2026 — Thumbnails + full-size lightbox
+- New helpers in `frontend/src/lib/api.js`:
+  * `imgAtSize(url, n)` — rewrites the `/s-l<digits>.` token in any eBay
+    CDN URL to `/s-l<n>.`. Non-eBay URLs are returned untouched so we
+    don't accidentally break seller-hosted images.
+  * `imgThumb(url)` and `imgFull(url)` — 300px and 1600px shortcuts.
+- `ProductDetail`'s image strip now renders each thumbnail with
+  `proxyImg(imgThumb(src))` so the browser only fetches ~15KB per tile
+  instead of pulling the ~300KB `s-l1600` variants.
+- New `ProductImageLightbox` (bottom of `ProductDetail.jsx`) opens on
+  thumbnail click, renders `proxyImg(imgFull(src))` for the full-size
+  view, supports ←/→ nav, keyboard shortcuts (Arrow keys and Escape),
+  and a bottom "N / M" counter. The Replace / Delete buttons on each
+  thumbnail keep working via `stopPropagation` so hovering doesn't
+  fight with the click-to-zoom.
+- Database stays lean — only the `s-l1600` URLs are persisted; the
+  thumbnail size is derived dynamically at render time.
+- Verified via Playwright: 3 eBay thumbnails all requesting `s-l300`,
+  clicking one opens the lightbox with a `s-l1600` URL, ArrowRight
+  advances (image src changes), Close button and Escape both dismiss.
+

@@ -5,7 +5,7 @@ import { BadgeCheck, Ban, CheckCircle2, ChevronLeft, ExternalLink, GripVertical,
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
-import { API, proxyImg } from "../lib/api";
+import { API, proxyImg, imgThumb, imgFull } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 
 export function ProductDetailPage({ productId, onBack }) {
@@ -18,6 +18,7 @@ export function ProductDetailPage({ productId, onBack }) {
   const [refreshing, setRefreshing] = useState(false);
   const [showCatPopover, setShowCatPopover] = useState(false);
   const [imgDialog, setImgDialog] = useState({ open: false, mode: "add", idx: null, current: "" });
+  const [lightboxIdx, setLightboxIdx] = useState(null);   // opens full-size viewer at index
   // Drag-reorder state: the index currently being dragged + which slot is
   // being hovered. Persist to server on drop.
   const [dragFrom, setDragFrom] = useState(null);
@@ -214,17 +215,28 @@ export function ProductDetailPage({ productId, onBack }) {
                   await reorderImages(from, i);
                 }}
                 onDragEnd={() => { setDragFrom(null); setDragOver(null); }}
-                className={`relative shrink-0 w-40 h-40 rounded-xl overflow-hidden bg-slate-100 border hairline group cursor-grab active:cursor-grabbing transition ${isDragging ? "opacity-40 scale-95" : ""} ${isOver ? "ring-2 ring-indigo-500 scale-[1.02]" : ""}`}
+                onClick={() => setLightboxIdx(i)}
+                role="button"
+                aria-label="Open full-size image"
+                className={`relative shrink-0 w-40 h-40 rounded-xl overflow-hidden bg-slate-100 border hairline group cursor-pointer active:cursor-grabbing transition ${isDragging ? "opacity-40 scale-95" : ""} ${isOver ? "ring-2 ring-indigo-500 scale-[1.02]" : ""}`}
                 data-testid={`product-image-${i}`}
                 data-image-idx={i}
               >
-                <img src={proxyImg(src)} alt="" className="w-full h-full object-cover pointer-events-none"/>
+                <img src={proxyImg(imgThumb(src))} alt="" loading="lazy" className="w-full h-full object-cover pointer-events-none"/>
                 {i === 0 && (
-                  <span className="absolute top-2 left-2 chip chip-primary !text-[10px] !py-0.5 shadow-sm">Hero</span>
+                  <span className="absolute top-2 left-2 chip chip-primary !text-[10px] !py-0.5 shadow-sm pointer-events-none">Hero</span>
                 )}
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                  <button onClick={() => openReplace(i)} className="btn btn-ghost !bg-white text-xs !py-1" data-testid={`product-image-replace-${i}`}><RefreshCw size={11}/> Replace</button>
-                  <button onClick={() => removeImage(i)} className="btn btn-danger text-xs !py-1" data-testid={`product-image-delete-${i}`}><Trash2 size={11}/></button>
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 pointer-events-none">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openReplace(i); }}
+                    className="btn btn-ghost !bg-white text-xs !py-1 pointer-events-auto"
+                    data-testid={`product-image-replace-${i}`}
+                  ><RefreshCw size={11}/> Replace</button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeImage(i); }}
+                    className="btn btn-danger text-xs !py-1 pointer-events-auto"
+                    data-testid={`product-image-delete-${i}`}
+                  ><Trash2 size={11}/></button>
                 </div>
               </div>
             );
@@ -333,6 +345,81 @@ export function ProductDetailPage({ productId, onBack }) {
         onClose={closeImgDialog}
         onSubmit={submitImage}
       />
+      <ProductImageLightbox
+        images={p.images || []}
+        idx={lightboxIdx}
+        onClose={() => setLightboxIdx(null)}
+        onNav={(next) => setLightboxIdx(next)}
+      />
+    </div>
+  );
+}
+
+
+/* ------------------------ Full-size image lightbox --------------------------
+ *
+ * We only store `s-l1600` URLs; this viewer renders the full-size version
+ * using `imgFull(src)`. Left/right arrows and the ← → keys step through the
+ * gallery, Escape closes.
+ * ------------------------------------------------------------------------- */
+
+function ProductImageLightbox({ images, idx, onClose, onNav }) {
+  const open = idx !== null && images[idx];
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowRight" && idx < images.length - 1) onNav(idx + 1);
+      else if (e.key === "ArrowLeft"  && idx > 0)                 onNav(idx - 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, idx, images.length, onClose, onNav]);
+  if (!open) return null;
+  const src = images[idx];
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 md:p-10"
+      onClick={onClose}
+      data-testid="product-image-lightbox"
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute top-4 right-4 text-white/80 hover:text-white text-3xl leading-none w-10 h-10 grid place-items-center rounded-full bg-black/40 hover:bg-black/60 transition-colors"
+        aria-label="Close"
+        data-testid="lightbox-close"
+      >
+        ×
+      </button>
+      {idx > 0 && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onNav(idx - 1); }}
+          className="absolute left-4 md:left-8 text-white/80 hover:text-white text-4xl leading-none w-12 h-12 grid place-items-center rounded-full bg-black/40 hover:bg-black/60 transition-colors"
+          aria-label="Previous image"
+          data-testid="lightbox-prev"
+        >‹</button>
+      )}
+      {idx < images.length - 1 && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onNav(idx + 1); }}
+          className="absolute right-4 md:right-8 text-white/80 hover:text-white text-4xl leading-none w-12 h-12 grid place-items-center rounded-full bg-black/40 hover:bg-black/60 transition-colors"
+          aria-label="Next image"
+          data-testid="lightbox-next"
+        >›</button>
+      )}
+      <img
+        src={proxyImg(imgFull(src))}
+        alt=""
+        className="max-w-[95vw] max-h-[92vh] object-contain rounded-lg shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        data-testid="lightbox-image"
+      />
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-xs font-mono bg-black/50 px-3 py-1 rounded-full">
+        {idx + 1} / {images.length}
+      </div>
     </div>
   );
 }

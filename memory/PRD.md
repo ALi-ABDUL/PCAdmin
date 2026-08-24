@@ -590,3 +590,22 @@ Notification Bell deep-links) — zero regressions detected.
   the Total column re-rendered with descending arrow, first row still
   $7,312.47 (aria-sort="descending").
 
+
+## Feb 24, 2026 — Price Alerts clickable + 5-day TTL
+- `GET /items` now attaches `linked_product_id` per row via a single
+  `products.find({source_item_id: {$in: […]}})` lookup, so the UI can
+  deep-link straight to a product's detail page without an extra fetch.
+- `PriceAlertsView` filters out any alert whose most recent
+  `price_history` entry is older than 5 days and shows a small
+  "N alerts auto-cleared after 5 days" chip next to the sold/OOS excluded
+  chip so the admin knows nothing was silently swallowed.
+- Each alert `<tr>` is now clickable — clicking anywhere except the
+  eBay "View" button (which `stopPropagation`s) navigates to the linked
+  product's detail page via `openProductDetail(linked_product_id)`. Rows
+  without a linked product stay non-clickable with a tooltip explaining
+  why.
+- Verified via Playwright: 5 fresh alerts rendered, banner read "2 alerts
+  auto-cleared after 5 days", clicking the row for eBay item 284291994972
+  opened the "Scanpan Classic Steel 8 Piece Eclipse Knife Block Set 18382"
+  product detail page with its Save button visible.
+

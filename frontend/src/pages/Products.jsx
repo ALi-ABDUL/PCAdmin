@@ -44,15 +44,21 @@ export function ProductsModule({ section, setSection, deepLink, clearDeepLink, o
       {section === "low-stock"     && <Products openProductDetail={openProductDetail} stock="low" sectionKey="products-low"/>}
       {section === "out-of-stock"  && <Products openProductDetail={openProductDetail} stock="out" sectionKey="products-out"/>}
       {section === "archived"      && <ArchivedProducts openProductDetail={openProductDetail}/>}
-      {section === "price-alerts"  && <PriceAlertsView items={priceAlertItems} highlightItemId={deepLink?.itemId} clearDeepLink={clearDeepLink}/>}
+      {section === "price-alerts"  && <PriceAlertsView items={priceAlertItems} highlightItemId={deepLink?.itemId} clearDeepLink={clearDeepLink} openProductDetail={openProductDetail}/>}
       <BackToTopButton />
     </div>
   );
 }
 
-export function PriceAlertsView({ items, highlightItemId, clearDeepLink }) {
+export function PriceAlertsView({ items, highlightItemId, clearDeepLink, openProductDetail }) {
   // Exclude items that are sold / ended / out of stock — no point pricing what you can't sell.
   const live = items.filter(it => !it.is_sold && (it.stock_status || "live") === "live");
+  // Price alerts auto-expire 5 days after the most recent detected change.
+  // We use the timestamp of the last `price_history` entry (that's when the
+  // alert was effectively "created") to decide whether the alert is still
+  // fresh enough to display.
+  const ALERT_TTL_MS = 5 * 24 * 60 * 60 * 1000;
+  const nowMs = Date.now();
   const alerts = live
     .map(it => {
       const h = (it.price_history || []).filter(p => p.value != null);
@@ -61,7 +67,10 @@ export function PriceAlertsView({ items, highlightItemId, clearDeepLink }) {
       const delta = last - first;
       if (Math.abs(delta) < 0.01) return null;
       const pct = first ? (delta / first) * 100 : 0;
-      return { it, first, last, delta, pct, changes: h.length - 1 };
+      const alertAt = h[h.length - 1].at;
+      const alertMs = alertAt ? new Date(alertAt).getTime() : 0;
+      if (!alertMs || (nowMs - alertMs) > ALERT_TTL_MS) return null;
+      return { it, first, last, delta, pct, changes: h.length - 1, alertAt };
     })
     .filter(Boolean)
     .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
@@ -69,6 +78,15 @@ export function PriceAlertsView({ items, highlightItemId, clearDeepLink }) {
   const drops = alerts.filter(a => a.delta < 0).length;
   const rises = alerts.filter(a => a.delta > 0).length;
   const excluded = items.length - live.length;
+  // Alerts that were suppressed only because they aged past the 5-day TTL.
+  const staleAlerts = live.filter(it => {
+    const h = (it.price_history || []).filter(p => p.value != null);
+    if (h.length < 2) return false;
+    const first = h[0].value, last = h[h.length - 1].value;
+    if (Math.abs(last - first) < 0.01) return false;
+    const alertMs = h[h.length - 1].at ? new Date(h[h.length - 1].at).getTime() : 0;
+    return alertMs && (nowMs - alertMs) > ALERT_TTL_MS;
+  }).length;
 
   // Scroll to & flash-highlight the row for the item passed via deepLink from the
   // notification bell. Runs once per highlight target, then clears the deepLink so
@@ -101,42 +119,57 @@ export function PriceAlertsView({ items, highlightItemId, clearDeepLink }) {
         <StatBox label="Price rises" value={rises}/>
         <StatBox label="Items tracked" value={live.length}/>
       </div>
-      {excluded > 0 && (
-        <div className="text-[11px] text-slate-500 font-mono flex items-center gap-1" data-testid="price-alerts-excluded">
-          <Ban size={11}/> {excluded} sold / ended / out-of-stock listing{excluded===1?"":"s"} excluded
+      {(excluded > 0 || staleAlerts > 0) && (
+        <div className="text-[11px] text-slate-500 font-mono flex items-center gap-3 flex-wrap" data-testid="price-alerts-excluded">
+          {excluded > 0 && (
+            <span className="flex items-center gap-1"><Ban size={11}/> {excluded} sold / ended / out-of-stock listing{excluded===1?"":"s"} excluded</span>
+          )}
+          {staleAlerts > 0 && (
+            <span className="flex items-center gap-1" data-testid="price-alerts-expired">
+              <Ban size={11}/> {staleAlerts} alert{staleAlerts===1?"":"s"} auto-cleared after 5 days
+            </span>
+          )}
         </div>
       )}
       <div className="card overflow-hidden">
-        {alerts.length === 0 && <div className="p-10 text-center text-slate-500">No price changes yet. Once the nightly refresh detects a change, alerts will appear here.</div>}
+        {alerts.length === 0 && <div className="p-10 text-center text-slate-500">No price changes in the last 5 days. Older alerts are auto-cleared.</div>}
         <div className="overflow-x-auto"><table className="tbl">
           <thead><tr><th>eBay AU item</th><th>Seller</th><th>First price</th><th>Latest</th><th>Change</th><th>Data points</th><th></th></tr></thead>
           <tbody>
-            {alerts.slice(0, 100).map(({ it, first, last, delta, pct, changes }) => (
-              <tr
-                key={it.id}
-                ref={(el) => { if (el) rowRefs.current[it.item_id] = el; }}
-                data-testid="price-alert-row"
-                data-item-id={it.item_id}
-                className={`transition-colors duration-500 ${pulseId === it.item_id ? "bg-amber-100 ring-2 ring-amber-400" : ""}`}
-              >
-                <td>
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border hairline shrink-0">
-                      {it.images?.[0] ? <img src={proxyImg(it.images[0])} alt="" className="w-full h-full object-contain p-1"/> : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={14}/></div>}
+            {alerts.slice(0, 100).map(({ it, first, last, delta, pct, changes }) => {
+              const linkedId = it.linked_product_id;
+              const openProduct = () => { if (linkedId) openProductDetail?.(linkedId); };
+              return (
+                <tr
+                  key={it.id}
+                  ref={(el) => { if (el) rowRefs.current[it.item_id] = el; }}
+                  data-testid="price-alert-row"
+                  data-item-id={it.item_id}
+                  onClick={openProduct}
+                  title={linkedId ? "Open product detail" : "This scraped item hasn't been added to products yet"}
+                  className={`transition-colors duration-500 ${linkedId ? "cursor-pointer hover:bg-slate-50" : "cursor-default"} ${pulseId === it.item_id ? "bg-amber-100 ring-2 ring-amber-400" : ""}`}
+                >
+                  <td>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-11 h-11 rounded-lg overflow-hidden bg-slate-100 border hairline shrink-0">
+                        {it.images?.[0] ? <img src={proxyImg(it.images[0])} alt="" className="w-full h-full object-contain p-1"/> : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={14}/></div>}
+                      </div>
+                      <div className="min-w-0"><div className="text-sm font-medium truncate max-w-[280px]" title={it.title}>{it.title}</div><div className="text-[11px] text-slate-400 font-mono truncate">#{it.item_id}</div></div>
                     </div>
-                    <div className="min-w-0"><div className="text-sm font-medium truncate max-w-[280px]" title={it.title}>{it.title}</div><div className="text-[11px] text-slate-400 font-mono truncate">#{it.item_id}</div></div>
-                  </div>
-                </td>
-                <td className="text-sm text-slate-600 truncate max-w-[160px]">{it.seller || "—"}</td>
-                <td className="font-mono text-slate-500">AU ${first.toFixed(2)}</td>
-                <td className="font-mono font-bold text-indigo-600">AU ${last.toFixed(2)}</td>
-                <td className={`font-mono font-bold ${delta > 0 ? "text-amber-600" : "text-emerald-600"}`}>
-                  {delta > 0 ? "▲" : "▼"} AU ${Math.abs(delta).toFixed(2)} <span className="text-xs">({pct.toFixed(1)}%)</span>
-                </td>
-                <td className="text-xs text-slate-500">{changes} change{changes===1?"":"s"}</td>
-                <td><a href={it.url} target="_blank" rel="noreferrer" className="btn btn-ghost text-xs !py-1 !px-2"><ExternalLink size={12}/> View</a></td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="text-sm text-slate-600 truncate max-w-[160px]">{it.seller || "—"}</td>
+                  <td className="font-mono text-slate-500">AU ${first.toFixed(2)}</td>
+                  <td className="font-mono font-bold text-indigo-600">AU ${last.toFixed(2)}</td>
+                  <td className={`font-mono font-bold ${delta > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+                    {delta > 0 ? "▲" : "▼"} AU ${Math.abs(delta).toFixed(2)} <span className="text-xs">({pct.toFixed(1)}%)</span>
+                  </td>
+                  <td className="text-xs text-slate-500">{changes} change{changes===1?"":"s"}</td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <a href={it.url} target="_blank" rel="noreferrer" className="btn btn-ghost text-xs !py-1 !px-2" data-testid={`price-alert-view-${it.item_id}`}><ExternalLink size={12}/> View</a>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table></div>
       </div>

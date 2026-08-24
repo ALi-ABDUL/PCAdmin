@@ -303,6 +303,17 @@ async def list_items(
     else:
         cursor = db.items.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).skip(skip).limit(limit)
         items = await cursor.to_list(length=limit)
+    # Attach `linked_product_id` (if this scraped item was Added-To-Products
+    # earlier) so the UI can deep-link straight to that product's detail page.
+    ebay_ids = [it.get("item_id") for it in items if it.get("item_id")]
+    if ebay_ids:
+        linked = await db.products.find(
+            {"source_item_id": {"$in": ebay_ids}, "archived": {"$ne": True}},
+            {"_id": 0, "id": 1, "source_item_id": 1},
+        ).to_list(length=len(ebay_ids))
+        by_src = {p["source_item_id"]: p["id"] for p in linked if p.get("source_item_id")}
+        for it in items:
+            it["linked_product_id"] = by_src.get(it.get("item_id"))
     return {"items": items, "total": total}
 
 

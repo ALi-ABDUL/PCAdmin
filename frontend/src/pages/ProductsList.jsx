@@ -2,18 +2,30 @@ import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { CheckCircle2, Loader2, Search, Trash2, Warehouse } from "lucide-react";
+import { Pagination, usePagePref } from "../components/Pagination";
 import { ProductGrid } from "../components/ProductGrid";
 import { API } from "../lib/api";
 
-export function Products({ deepLink, clearDeepLink, openProductDetail }) {
+export function Products({ deepLink, clearDeepLink, openProductDetail, stock, sectionKey = "products-all" }) {
   const [list, setList] = useState([]); const [total, setTotal] = useState(0);
   const [q, setQ] = useState(""); const [cat, setCat] = useState(""); const [sort, setSort] = useState("created_at_desc");
   const [cats, setCats] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = usePagePref(sectionKey, 50);
 
   const load = useCallback(async () => {
-    const { data } = await axios.get(`${API}/products`, { params: { q: q || undefined, category: cat || undefined, sort } });
+    const { data } = await axios.get(`${API}/products`, {
+      params: {
+        q: q || undefined,
+        category: cat || undefined,
+        sort,
+        stock: stock || undefined,
+        limit: pageSize,
+        skip: (page - 1) * pageSize,
+      },
+    });
     setList(data.products); setTotal(data.total);
     setSelected(prev => {
       const ids = new Set(data.products.map(p => p.id));
@@ -21,9 +33,12 @@ export function Products({ deepLink, clearDeepLink, openProductDetail }) {
       prev.forEach(id => { if (ids.has(id)) next.add(id); });
       return next;
     });
-  }, [q, cat, sort]);
+  }, [q, cat, sort, stock, page, pageSize]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { axios.get(`${API}/categories`, { params: { active: true }}).then(r => setCats(r.data.categories)); }, []);
+  // Reset to page 1 whenever a filter changes so pagination doesn't strand
+  // the admin on an empty page.
+  useEffect(() => { setPage(1); }, [q, cat, sort, stock, pageSize]);
 
   useEffect(() => {
     if (!deepLink?.productId) return;
@@ -112,6 +127,14 @@ export function Products({ deepLink, clearDeepLink, openProductDetail }) {
         onToggleSelect={toggleOne}
         extraActions={extraActions}
         testId="products-grid"
+      />
+      <Pagination
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        testPrefix="products"
       />
     </div>
   );

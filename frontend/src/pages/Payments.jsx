@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { Store } from "lucide-react";
 import { StatBox, SubHero } from "../components/atoms";
+import { Pagination, usePagePref } from "../components/Pagination";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 import { PAYMENTS_NAV, TRANSACTION_STATUS_TABS } from "../lib/nav";
@@ -26,12 +27,22 @@ export function AllTransactionsView() {
   const [status, setStatus] = useState("");
   const [tx, setTx] = useState([]); const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState({});
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = usePagePref("payments-transactions", 50);
 
   const load = useCallback(async () => {
-    const { data } = await axios.get(`${API}/transactions`, { params: { status: status || undefined, kind: "charge" }});
+    const { data } = await axios.get(`${API}/transactions`, {
+      params: {
+        status: status || undefined,
+        kind: "charge",
+        limit: pageSize,
+        skip: (page - 1) * pageSize,
+      },
+    });
     setTx(data.transactions); setTotal(data.total); setCounts(data.counts || {});
-  }, [status]);
+  }, [status, page, pageSize]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setPage(1); }, [status, pageSize]);
 
   return (
     <div className="grid gap-4">
@@ -72,6 +83,14 @@ export function AllTransactionsView() {
           </tbody>
         </table></div>
       </div>
+      <Pagination
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        testPrefix="tx"
+      />
     </div>
   );
 }

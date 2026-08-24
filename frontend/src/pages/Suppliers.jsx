@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { BadgeCheck, Ban, History, Search } from "lucide-react";
 import { StatBox } from "../components/atoms";
+import { Pagination, usePagePref } from "../components/Pagination";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 import { SUPPLIER_NAV } from "../lib/nav";
@@ -15,18 +16,29 @@ export function Suppliers({ section, setSection }) {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("revenue_desc");
   const [status, setStatus] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = usePagePref("suppliers", 50);
 
   const load = useCallback(async () => {
-    const { data } = await axios.get(`${API}/suppliers`, { params: { q: q || undefined, status: status || undefined, sort } });
+    const { data } = await axios.get(`${API}/suppliers`, {
+      params: {
+        q: q || undefined,
+        status: status || undefined,
+        sort,
+        limit: pageSize,
+        skip: (page - 1) * pageSize,
+      },
+    });
     setList(data.suppliers);
     setTotal(data.total);
-  }, [q, status, sort]);
+  }, [q, status, sort, page, pageSize]);
   const loadSummary = useCallback(async () => {
     const { data } = await axios.get(`${API}/suppliers/summary`);
     setSummary(data);
   }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadSummary(); }, [loadSummary, list.length]);
+  useEffect(() => { setPage(1); }, [q, status, sort, pageSize]);
 
   const meta = SUPPLIER_NAV.find((s) => s.id === section) || SUPPLIER_NAV[0];
   const Icon = meta.icon;
@@ -49,7 +61,7 @@ export function Suppliers({ section, setSection }) {
         </div>
       </div>
 
-      {section === "all"      && <AllSuppliers list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} status={status} setStatus={setStatus}/>}
+      {section === "all"      && <AllSuppliers list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} status={status} setStatus={setStatus} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}/>}
       {section === "top"      && <TopSuppliers list={summary?.top_suppliers || []} agg={summary?.aggregate}/>}
       {section === "products" && <SupplierProducts list={list}/>}
       {section === "orders"   && <SupplierOrders list={list}/>}
@@ -68,7 +80,7 @@ export function SellerStatusChip({ status }) {
   return <span className={`chip ${active ? "chip-success" : "chip-neutral"}`} data-testid="sup-status">{active ? <BadgeCheck size={11}/> : <Ban size={11}/>} {active ? "Active" : "Inactive"}</span>;
 }
 
-export function AllSuppliers({ list, total, q, setQ, sort, setSort, status, setStatus }) {
+export function AllSuppliers({ list, total, q, setQ, sort, setSort, status, setStatus, page = 1, setPage, pageSize = 50, setPageSize }) {
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -124,6 +136,14 @@ export function AllSuppliers({ list, total, q, setQ, sort, setSort, status, setS
           </table>
         </div>
       </div>
+      <Pagination
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        testPrefix="suppliers"
+      />
     </div>
   );
 }

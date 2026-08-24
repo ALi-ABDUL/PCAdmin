@@ -3,6 +3,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import { Eye, Filter } from "lucide-react";
 import { StatBox, StatusChip, SubHero } from "../components/atoms";
+import { Pagination, usePagePref } from "../components/Pagination";
 import { API } from "../lib/api";
 import { fmtDate, humaniseStatus, moneyCents } from "../lib/format";
 import { ORDERS_NAV, ORDER_STATUSES, ORDER_STATUS_TABS } from "../lib/nav";
@@ -35,13 +36,22 @@ export function AllOrdersView({ deepLink, clearDeepLink, openOrderDetail }) {
   const [orders, setOrders] = useState([]);
   const [counts, setCounts] = useState({});
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = usePagePref("orders", 50);
 
   const load = useCallback(async () => {
-    const { data } = await axios.get(`${API}/orders`, { params: { status: status || undefined, limit: 300 }});
+    const { data } = await axios.get(`${API}/orders`, {
+      params: {
+        status: status || undefined,
+        limit: pageSize,
+        skip: (page - 1) * pageSize,
+      },
+    });
     setOrders(data.orders); setTotal(data.total);
-  }, [status]);
+  }, [status, page, pageSize]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { axios.get(`${API}/orders/status-counts`).then(r => setCounts(r.data.counts || {})); }, [orders.length]);
+  useEffect(() => { setPage(1); }, [status, pageSize]);
 
   useEffect(() => {
     if (!deepLink?.orderId) return;
@@ -70,7 +80,7 @@ export function AllOrdersView({ deepLink, clearDeepLink, openOrderDetail }) {
           );
         })}
       </div>
-      <div className="text-xs text-slate-500 font-mono">{total} order{total===1?"":"s"} shown</div>
+      <div className="text-xs text-slate-500 font-mono">{total} order{total===1?"":"s"} · page {page}</div>
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tbl">
@@ -97,6 +107,14 @@ export function AllOrdersView({ deepLink, clearDeepLink, openOrderDetail }) {
           </table>
         </div>
       </div>
+      <Pagination
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        testPrefix="orders"
+      />
     </div>
   );
 }

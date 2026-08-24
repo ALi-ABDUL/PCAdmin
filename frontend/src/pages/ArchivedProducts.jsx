@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { CheckSquare, PackageX, Square, Trash2, Undo2 } from "lucide-react";
+import { Pagination, usePagePref } from "../components/Pagination";
 import { ProductGrid } from "../components/ProductGrid";
 import { API } from "../lib/api";
 
@@ -12,11 +13,20 @@ export function ArchivedProducts({ openProductDetail }) {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(() => new Set());
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = usePagePref("products-archived", 50);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await axios.get(`${API}/products`, { params: { archived: true, sort: "created_at_desc" } });
+      const { data } = await axios.get(`${API}/products`, {
+        params: {
+          archived: true,
+          sort: "created_at_desc",
+          limit: pageSize,
+          skip: (page - 1) * pageSize,
+        },
+      });
       setList(data.products);
       setTotal(data.total);
       // Prune selection to only ids that still exist in the fresh list.
@@ -28,12 +38,13 @@ export function ArchivedProducts({ openProductDetail }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     axios.get(`${API}/categories`, { params: { active: true } }).then(r => setCats(r.data.categories));
   }, []);
+  useEffect(() => { setPage(1); }, [pageSize]);
 
   const toggle = useCallback((id) => {
     setSelected((prev) => {
@@ -167,6 +178,14 @@ export function ArchivedProducts({ openProductDetail }) {
         selected={selected}
         onToggleSelect={toggle}
         testId="archived-grid"
+      />
+      <Pagination
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        testPrefix="archived"
       />
     </div>
   );

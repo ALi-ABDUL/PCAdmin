@@ -14,10 +14,8 @@ import { ProductDetailPage } from "./ProductDetail";
 import { Products } from "./ProductsList";
 
 export function ProductsModule({ section, setSection, deepLink, clearDeepLink, openProductDetail, productDetailId }) {
-  const [products, setProducts] = useState([]);
   const [priceAlertItems, setPriceAlertItems] = useState([]);
 
-  useEffect(() => { axios.get(`${API}/products`).then(r => setProducts(r.data.products)); }, [section]);
   useEffect(() => {
     if (section === "price-alerts") {
       axios.get(`${API}/items`, { params: { limit: 300 }}).then(r => setPriceAlertItems(r.data.items));
@@ -38,16 +36,13 @@ export function ProductsModule({ section, setSection, deepLink, clearDeepLink, o
     archived: "Archived products are hidden from the main list. Restore them anytime.",
     "price-alerts": "Scraped eBay AU items whose seller changed the price. Sold or out-of-stock listings are excluded automatically.",
   };
-  const filtered = section === "low-stock" ? products.filter(p => (p.stock ?? 0) > 0 && (p.stock ?? 0) <= 3)
-    : section === "out-of-stock" ? products.filter(p => (p.stock ?? 0) <= 0)
-    : products;
 
   return (
     <div className="grid gap-6">
       <SubHero icon={Icon} group={meta.group} label={meta.label} hint={hints[section]}/>
-      {section === "all"           && <Products deepLink={deepLink} clearDeepLink={clearDeepLink} openProductDetail={openProductDetail}/>}
-      {section === "low-stock"     && <StockList list={filtered} tone="warning" openProductDetail={openProductDetail}/>}
-      {section === "out-of-stock"  && <StockList list={filtered} tone="danger" openProductDetail={openProductDetail}/>}
+      {section === "all"           && <Products deepLink={deepLink} clearDeepLink={clearDeepLink} openProductDetail={openProductDetail} sectionKey="products-all"/>}
+      {section === "low-stock"     && <Products openProductDetail={openProductDetail} stock="low" sectionKey="products-low"/>}
+      {section === "out-of-stock"  && <Products openProductDetail={openProductDetail} stock="out" sectionKey="products-out"/>}
       {section === "archived"      && <ArchivedProducts openProductDetail={openProductDetail}/>}
       {section === "price-alerts"  && <PriceAlertsView items={priceAlertItems} highlightItemId={deepLink?.itemId} clearDeepLink={clearDeepLink}/>}
       <BackToTopButton />

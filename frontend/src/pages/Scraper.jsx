@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { AlertTriangle, BadgeCheck, Boxes, ClipboardPaste, Filter, ImageIcon, Loader2, MapPin, PackageX, Plus, RefreshCw, Search, Tags, Trash2, TrendingUp, X, Zap } from "lucide-react";
 import { API, KEYS, loadKeys, proxyImg } from "../lib/api";
 import { BackToTopButton } from "../components/BackToTopButton";
+import { Pagination, usePagePref } from "../components/Pagination";
 import { fmtDate, moneyCents } from "../lib/format";
 import { calcPricing, usePricingRules } from "../lib/pricing";
 import { Orders } from "./Orders";
@@ -28,6 +29,8 @@ export function ScraperPage({ onView }) {
   // Cache of every item id/url/item_id so we can flag duplicates while typing.
   const [existingUrls, setExistingUrls] = useState(new Map()); // Map<item_id, item>
   const [dupItem, setDupItem] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = usePagePref("scraper-items", 50);
 
   // Debounce the search input so typing feels instant but doesn't hammer the API.
   useEffect(() => {
@@ -73,15 +76,18 @@ export function ScraperPage({ onView }) {
       category: categoryFilter || undefined,
       min_price: minPrice !== "" ? Number(minPrice) : undefined,
       max_price: maxPrice !== "" ? Number(maxPrice) : undefined,
-      limit: 200,
+      limit: pageSize,
+      skip: (page - 1) * pageSize,
     };
     const { data } = await axios.get(`${API}/items`, { params });
     setItems(data.items);
     setTotal(data.total);
     // Drop selection entries that are no longer visible.
     setSelected((old) => new Set([...old].filter((id) => data.items.some((it) => it.id === id))));
-  }, [debouncedQ, sortBy, statusFilter, categoryFilter, minPrice, maxPrice]);
+  }, [debouncedQ, sortBy, statusFilter, categoryFilter, minPrice, maxPrice, page, pageSize]);
   useEffect(() => { load(); }, [load]);
+  // Reset to page 1 whenever a filter changes so we don't strand on an empty page.
+  useEffect(() => { setPage(1); }, [debouncedQ, sortBy, statusFilter, categoryFilter, minPrice, maxPrice, pageSize]);
 
   const submit = async () => {
     if (!url.trim()) return toast.error("Paste an eBay Australia URL");
@@ -237,7 +243,7 @@ export function ScraperPage({ onView }) {
           <div>
             <div className="font-display font-bold text-lg">Scraped items</div>
             <div className="text-xs text-slate-500">
-              {items.length} of {total} shown{activeFilterCount > 0 && <> · {activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"} active</>}
+              {items.length} of {total} shown · page {page}{activeFilterCount > 0 && <> · {activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"} active</>}
             </div>
           </div>
         </div>
@@ -374,6 +380,16 @@ export function ScraperPage({ onView }) {
                   </div>
                 </div>
               ))}
+            </div>
+            <div className="mt-4">
+              <Pagination
+                total={total}
+                page={page}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                onPageSizeChange={setPageSize}
+                testPrefix="scraper"
+              />
             </div>
           </>
         )}

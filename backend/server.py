@@ -242,6 +242,7 @@ async def list_items(
     max_price: Optional[float] = None,
     sort: str = "created_at_desc",
     limit: int = Query(200, le=500),
+    skip: int = Query(0, ge=0),
 ):
     query: dict[str, Any] = {}
     if watchlisted is not None:
@@ -285,10 +286,11 @@ async def list_items(
         "price_asc":       [("price_value", 1)],
         "title_asc":       [("title", 1)],
     }
+    total = await db.items.count_documents(query)
     # "margin_desc" is computed server-side using active pricing rules.
     if sort == "margin_desc":
-        cursor = db.items.find(query, {"_id": 0}).limit(limit)
-        items = await cursor.to_list(length=limit)
+        # Full-set sort in Python — margin needs pricing-rule evaluation per row.
+        all_items = await db.items.find(query, {"_id": 0}).to_list(length=None)
         rules = await _load_pricing_rules()
         def margin(it: dict) -> float:
             ebay = float(it.get("price_value") or 0)
@@ -296,11 +298,11 @@ async def list_items(
             c = calc_pricing(ebay, rules=rules)
             sell = c["sell_price"]
             return ((sell - ebay) / sell) if sell > 0 else -1.0
-        items.sort(key=margin, reverse=True)
+        all_items.sort(key=margin, reverse=True)
+        items = all_items[skip: skip + limit]
     else:
-        cursor = db.items.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).limit(limit)
+        cursor = db.items.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).skip(skip).limit(limit)
         items = await cursor.to_list(length=limit)
-    total = await db.items.count_documents(query)
     return {"items": items, "total": total}
 
 
@@ -729,13 +731,20 @@ async def update_abandoned_cart(cid: str, body: dict):
 
 
 @api_router.get("/transactions")
-async def list_transactions(status: Optional[str] = None, kind: Optional[str] = None):
+async def list_transactions(
+    status: Optional[str] = None,
+    kind: Optional[str] = None,
+    limit: int = Query(500, le=2000),
+    skip: int = Query(0, ge=0),
+):
     q: dict[str, Any] = {}
     if status: q["status"] = status
     if kind:   q["kind"] = kind
-    items = await db.transactions.find(q, {"_id": 0}).sort("created_at", -1).limit(500).to_list(500)
+    items = await db.transactions.find(q, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.transactions.count_documents(q)
-    counts_pipeline = [{"$group": {"_id": "$status", "count": {"$sum": 1}, "amount": {"$sum": "$amount"}}}]
+    # Counts aggregate is calculated over the WHOLE filtered set (not just the
+    # current page) so the summary chips stay accurate regardless of pagination.
+    counts_pipeline = [{"$match": q}, {"$group": {"_id": "$status", "count": {"$sum": 1}, "amount": {"$sum": "$amount"}}}] if q else [{"$group": {"_id": "$status", "count": {"$sum": 1}, "amount": {"$sum": "$amount"}}}]
     counts_rows = await db.transactions.aggregate(counts_pipeline).to_list(20)
     counts = {r["_id"]: {"count": r["count"], "amount": round(r["amount"], 2)} for r in counts_rows}
     return {"transactions": items, "total": total, "counts": counts}
@@ -1359,6 +1368,7 @@ async def list_suppliers(
     status: Optional[str] = None,
     sort: str = "revenue_desc",
     limit: int = Query(500, le=1000),
+    skip: int = Query(0, ge=0),
 ):
     sellers = await _build_sellers()
     if q:
@@ -1378,7 +1388,7 @@ async def list_suppliers(
     sellers.sort(key=sort_key, reverse=reverse_sort)
 
     total = len(sellers)
-    sellers = sellers[:limit]
+    sellers = sellers[skip: skip + limit]
     return {"suppliers": sellers, "total": total, "tags": []}
 
 
@@ -1618,8 +1628,10 @@ async def list_products(
     category: Optional[str] = None,
     active: Optional[bool] = None,
     archived: Optional[bool] = None,     # None → exclude archived; True → only archived; False → only unarchived
+    stock: Optional[str] = None,         # None → any; "low" → 1..3; "out" → <=0
     sort: str = "created_at_desc",
     limit: int = Query(200, le=1000),
+    skip: int = Query(0, ge=0),
 ):
     query: dict[str, Any] = {}
     if q:
@@ -1637,6 +1649,10 @@ async def list_products(
     else:
         # Default (None) or False → hide archived from the main list
         query["archived"] = {"$ne": True}
+    if stock == "low":
+        query["stock"] = {"$gt": 0, "$lte": 3}
+    elif stock == "out":
+        query["stock"] = {"$lte": 0}
     sort_map = {
         "created_at_desc": [("created_at", -1)],
         "created_at_asc": [("created_at", 1)],
@@ -1645,7 +1661,7 @@ async def list_products(
         "stock_asc": [("stock", 1)],
         "sold_desc": [("sold_count", -1)],
     }
-    cursor = db.products.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).limit(limit)
+    cursor = db.products.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).skip(skip).limit(limit)
     products = await cursor.to_list(length=limit)
     total = await db.products.count_documents(query)
     # Attach reviews aggregate (one aggregation, then join in Python — cheap for O(200) products).
@@ -1881,11 +1897,11 @@ async def create_order(body: OrderCreate):
 
 
 @api_router.get("/orders")
-async def list_orders(limit: int = Query(200, le=1000), status: Optional[str] = None):
+async def list_orders(limit: int = Query(200, le=1000), skip: int = Query(0, ge=0), status: Optional[str] = None):
     q: dict[str, Any] = {}
     if status:
         q["status"] = status
-    cursor = db.orders.find(q, {"_id": 0}).sort("created_at", -1).limit(limit)
+    cursor = db.orders.find(q, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit)
     orders = await cursor.to_list(length=limit)
     total = await db.orders.count_documents(q)
     return {"orders": orders, "total": total}

@@ -536,3 +536,31 @@ Notification Bell deep-links) — zero regressions detected.
   dialog opens with correct customer, prefilled subject "Re: …" and quoted
   body.
 
+
+## Feb 24, 2026 — Global list pagination
+- New shared `Pagination` component + `usePagePref(key, default)` hook in
+  `frontend/src/components/Pagination.jsx`. Persists the chosen page size in
+  `localStorage` under `pref.pageSize.<section>` (per-list keys) and renders
+  "Showing X–Y of TOTAL", a page-size dropdown (50/100/150/200, default 50),
+  Prev / Next, and windowed numeric page buttons with ellipses.
+- Backend: added `skip` (with `ge=0`) to `/orders`, `/products` (also new
+  `stock=low|out` filter), `/suppliers`, `/transactions` (also new `limit`),
+  and `/items` (paginates both the standard sort and the Python-side
+  `margin_desc` sort branch).
+- Frontend wired up:
+  - Orders → All Orders (`pref.pageSize.orders`)
+  - Products list — All (`products-all`), Low Stock (`products-low`),
+    Out of Stock (`products-out`), Archived (`products-archived`).
+    Low/Out sections were refactored to reuse the paginated `Products`
+    component with a `stock` prop instead of a client-side filter, so
+    every page fetches the correct slice from the server.
+  - Suppliers list (`suppliers`)
+  - Payments transactions (`payments-transactions`)
+  - Product Sourcing / Scraper items (`scraper-items`)
+- Verified end-to-end via Playwright: changing to 100/page loaded 100 rows,
+  page-2 loaded the next 100, and after a reload the orders selector still
+  showed 100 (localStorage key `pref.pageSize.orders` persisted). Backend
+  smoke-tested with curl on all endpoints (`orders`, `products`, `suppliers`,
+  `transactions`, `items`) — totals stayed constant while `skip` returned
+  fresh rows.
+

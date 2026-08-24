@@ -914,3 +914,24 @@ Notification Bell deep-links) — zero regressions detected.
   * Store Management → Delivery Estimate: added toggle + 24-hour time input for the cutoff. The live preview now surfaces an amber "After 2:00 PM cutoff · shipping next business day" chip whenever the shift is active.
   * Product Detail: the delivery-window field's preview shows the same chip so admins see instantly why the estimate has moved a day.
 - Backend tests: added 5 cutoff cases (defaults, patch persist, disable, malformed HH:MM rejection, edge times). 24 delivery + postage tests green.
+
+
+## Feb 24, 2026 — Auto-delete Empty Categories
+- New helper `helpers._delete_categories_if_empty(slugs)` — for each unique
+  slug in the input, deletes the matching `categories` row iff no products
+  still carry that `category` value. Returns the list of slugs removed so
+  callers can log / echo.
+- Wired into both product-delete paths:
+  * `DELETE /api/products/{pid}` — captures `existing.category` before the
+    delete, then calls the helper. Response now includes
+    `removed_categories: [slug]`.
+  * `POST /api/products/bulk-delete` — collects the affected slugs
+    up-front so a bulk delete that empties multiple categories cleans
+    them all in one hop. Response includes `deleted` + `removed_categories`.
+- Behaviour intentionally applies to seeded categories too — empty rows
+  clutter the sidebar and `_ensure_ebay_category` will re-create the record
+  the next time a scrape hits that slug.
+- Tests: `/app/backend/tests/test_category_auto_delete.py` — 5 cases
+  covering single-delete, partial-delete (category kept), bulk-delete
+  emptying, bulk-delete partial, and bulk-delete emptying multiple
+  categories in one call.

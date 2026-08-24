@@ -48,7 +48,7 @@ from helpers import (
     _get_credential, _push_channel_status, _notif_is_critical, _send_email, _send_telegram, 
     _format_notification_html, _push_notification, _emit_notification, 
     _emit_price_change_notifications, _auto_archive_if_out_of_stock, calc_pricing, _ensure_pricing_rules_seeded, 
-    _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings,
+    _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings, _delete_categories_if_empty,
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
     _customer_email_html,
@@ -1993,9 +1993,17 @@ async def bulk_archive_products(body: BulkProductIds):
 @api_router.post("/products/bulk-delete")
 async def bulk_delete_products(body: BulkProductIds):
     if not body.product_ids:
-        return {"deleted": 0}
+        return {"deleted": 0, "removed_categories": []}
+    # Capture the set of affected categories BEFORE the delete so we can
+    # prune the ones that end up empty.
+    affected = await db.products.find(
+        {"id": {"$in": body.product_ids}},
+        {"_id": 0, "category": 1},
+    ).to_list(len(body.product_ids))
+    slugs = list({(p or {}).get("category") for p in affected if (p or {}).get("category")})
     r = await db.products.delete_many({"id": {"$in": body.product_ids}})
-    return {"deleted": r.deleted_count}
+    removed_categories = await _delete_categories_if_empty(slugs)
+    return {"deleted": r.deleted_count, "removed_categories": removed_categories}
 
 
 @api_router.post("/products/bulk-restore")
@@ -2052,10 +2060,14 @@ async def update_product(pid: str, body: ProductUpdate):
 
 @api_router.delete("/products/{pid}")
 async def delete_product(pid: str):
+    # Capture the category slug before deletion so we can prune the
+    # category record when this was the last product in it.
+    existing = await db.products.find_one({"id": pid}, {"_id": 0, "category": 1})
     r = await db.products.delete_one({"id": pid})
     if r.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Product not found")
-    return {"deleted": True}
+    removed_categories = await _delete_categories_if_empty([(existing or {}).get("category")])
+    return {"deleted": True, "removed_categories": removed_categories}
 
 
 # ---------------------------------------------------------------------------

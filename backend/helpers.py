@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_ensure_postage_presets_seeded', '_get_delivery_settings']
+__all__ = ['_rand_au_address', '_slug', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty']
 
 
 import bcrypt
@@ -1139,6 +1139,37 @@ async def _auto_archive_if_out_of_stock(pid: str) -> bool:
         data={"stock": p.get("stock") or 0, "auto_archived": True},
     )
     return True
+
+
+async def _delete_categories_if_empty(slugs) -> list:
+    """Auto-delete any category in `slugs` that has zero remaining products.
+
+    Called from every product delete path (single + bulk) so admins never
+    have to hand-prune empty categories after clearing out a range. Returns
+    the list of slugs that were actually deleted so callers can log / return
+    them.
+
+    Notes:
+      * Comparison is by `slug` — that's what `products.category` stores.
+      * Empty/null slugs are ignored (some legacy products carry no category).
+      * We don't guard against seeded categories here — if the admin has
+        deleted every product in a seed category (e.g. "Phones & Tablets"),
+        removing the empty row keeps the sidebar tidy. New scrapes that
+        would hit that slug via `_ensure_ebay_category` will just re-create
+        the record.
+    """
+    deleted: list = []
+    for slug in {s for s in (slugs or []) if s}:
+        remaining = await db.products.count_documents({"category": slug})
+        if remaining > 0:
+            continue
+        r = await db.categories.delete_one({"slug": slug})
+        if r.deleted_count:
+            deleted.append(slug)
+    if deleted:
+        logger.info(f"auto-deleted empty categories: {deleted}")
+    return deleted
+
 
 
 def calc_pricing(ebay_price: float, rules: Optional[list[dict]] = None,

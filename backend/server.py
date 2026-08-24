@@ -363,6 +363,7 @@ async def items_bulk_action(body: ItemBulkAction):
                     source_url=it.get("url"),
                     source_item_id=it.get("item_id") or it.get("id"),
                     variants=it.get("variants") or [],
+                    specifics=it.get("specifics") or {},
                 )
                 prod.product_code = await _generate_unique_product_code(prod.title)
                 await db.products.insert_one(prod.model_dump())
@@ -1690,6 +1691,7 @@ async def create_product_from_item(item_id: str):
         source_item_id=it.get("item_id"),
         sku=f"SKU-{(it.get('item_id') or uuid.uuid4().hex[:8])[-6:]}",
         variants=it.get("variants") or [],
+        specifics=it.get("specifics") or {},
     )
     prod.product_code = await _generate_unique_product_code(prod.title)
     await db.products.insert_one(prod.model_dump())

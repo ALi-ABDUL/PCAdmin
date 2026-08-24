@@ -287,6 +287,10 @@ export function ProductDetailPage({ productId, onBack }) {
         <Field label="Description" className="mt-3"><textarea className="input w-full px-3 py-2 min-h-[160px] leading-relaxed" value={f.description} onChange={(e) => setField("description", e.target.value)} data-testid="product-description-input"/></Field>
       </div>
 
+      {/* Product specifications — grouped labelled fields scraped from eBay item specifics.
+          Displayed as its own section so the description above stays a clean overview. */}
+      <ProductSpecsCard specifics={p.specifics}/>
+
       {/* Reviews */}
       {reviews.length > 0 && (
         <div className="card p-5" data-testid="product-detail-reviews">
@@ -335,3 +339,70 @@ export function ProductDetailPage({ productId, onBack }) {
 
 
 /* -------------------------- Full order detail page -------------------------- */
+
+
+/* --------------------- Product Specifications section ----------------------
+ *
+ * Groups scraped eBay item-specifics into buckets the admin actually cares
+ * about (Dimensions, Materials, Colours, Weight, then everything else in
+ * "Other specifications"). Each row is a `LABEL: value` line so the section
+ * stays scannable even for listings with 30+ specifics.
+ * ------------------------------------------------------------------------- */
+
+// Keyword rules for grouping specifics. Case-insensitive substring match on
+// the spec label. Priority = order in the array; first match wins.
+const SPEC_GROUPS = [
+  { id: "dimensions", title: "Dimensions", keywords: ["dimension", "size", "length", "width", "height", "depth", "diameter"] },
+  { id: "materials",  title: "Materials",  keywords: ["material", "fabric", "composition"] },
+  { id: "colours",    title: "Colours",    keywords: ["colour", "color", "finish"] },
+  { id: "weight",     title: "Weight",     keywords: ["weight", "gross weight", "net weight"] },
+];
+
+function bucketSpecs(specifics) {
+  const groups = SPEC_GROUPS.map((g) => ({ ...g, entries: [] }));
+  const other = [];
+  const entries = Object.entries(specifics || {});
+  for (const [rawLabel, rawValue] of entries) {
+    const label = String(rawLabel || "").trim();
+    const value = String(rawValue || "").trim();
+    if (!label || !value) continue;
+    const key = label.toLowerCase();
+    const grp = groups.find((g) => g.keywords.some((k) => key.includes(k)));
+    (grp ? grp.entries : other).push({ label, value });
+  }
+  const filled = groups.filter((g) => g.entries.length > 0);
+  return { groups: filled, other };
+}
+
+function SpecRow({ label, value }) {
+  return (
+    <div className="grid grid-cols-[minmax(120px,180px)_1fr] gap-3 py-1.5 text-sm border-b hairline last:border-0" data-testid="product-spec-row">
+      <div className="text-slate-500 font-medium">{label}</div>
+      <div className="text-slate-800 whitespace-pre-wrap break-words">{value}</div>
+    </div>
+  );
+}
+
+export function ProductSpecsCard({ specifics }) {
+  const { groups, other } = bucketSpecs(specifics);
+  if (groups.length === 0 && other.length === 0) return null;
+  return (
+    <div className="card p-5" data-testid="product-specs">
+      <div className="font-display font-bold mb-3">Specifications</div>
+      <div className="grid gap-5">
+        {groups.map((g) => (
+          <div key={g.id}>
+            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-1">{g.title}</div>
+            <div>{g.entries.map((e, i) => <SpecRow key={i} label={e.label} value={e.value}/>)}</div>
+          </div>
+        ))}
+        {other.length > 0 && (
+          <div>
+            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-1">Other specifications</div>
+            <div>{other.map((e, i) => <SpecRow key={i} label={e.label} value={e.value}/>)}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

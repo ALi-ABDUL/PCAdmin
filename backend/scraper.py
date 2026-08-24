@@ -777,7 +777,91 @@ async def fetch_description_iframe(iframe_url: str) -> str:
         tag.decompose()
     body = soup.body or soup
     text = re.sub(r"\n{3,}", "\n\n", body.get_text("\n", strip=True))
-    return text.strip()
+    return clean_description(text.strip())
+
+
+# Section headers that indicate the seller's product overview is done and
+# store-boilerplate begins. We cut the description at the first hit.
+_DESC_CUT_HEADERS = [
+    r"payment\s*(?:info|information|details|terms|methods?)?",
+    r"shipping\s*(?:info|information|details|policy|terms)?",
+    r"postage\s*(?:info|information|details|policy|terms)?",
+    r"delivery\s*(?:info|information|details|policy|terms|times?)?",
+    r"returns?\s*(?:info|information|details|policy|terms)?",
+    r"warranty(?:\s*(?:info|information|details|policy|terms))?",
+    r"feedback",
+    r"about\s+us",
+    r"about\s+(?:the\s+)?seller",
+    r"contact\s+us",
+    r"terms\s*(?:and|&)\s*conditions",
+    r"customer\s+service",
+    r"store\s+policies",
+    r"visit\s+(?:our|my)\s+store",
+    r"add\s+(?:me\s+)?to\s+(?:your\s+)?favou?rites?",
+    r"check\s+(?:out\s+)?(?:our|my)\s+other\s+(?:listings|items|products)",
+]
+_DESC_CUT_RE = re.compile(
+    r"(?im)^\s*(?:[\W_]{0,4})?(?:" + "|".join(_DESC_CUT_HEADERS) + r")\s*[:\-–—]?\s*$"
+)
+
+# One-off promo/boilerplate lines that appear anywhere and should be stripped.
+_DESC_PROMO_LINES = re.compile(
+    r"(?im)^\s*(?:"
+    r"(?:please\s+)?(?:read|see|check)\s+(?:our\s+)?(?:full\s+)?(?:store\s+)?(?:policy|policies|description|listing)\.?|"
+    r"buy\s+it\s+now\.?|"
+    r"free\s+shipping.*|"
+    r"fast\s+(?:and\s+)?free\s+shipping.*|"
+    r"we\s+offer\s+.*?(?:shipping|delivery|returns).*|"
+    r"100%\s+(?:positive\s+)?feedback.*|"
+    r"5\s+star\s+seller.*|"
+    r"top(?:\-|\s)rated\s+seller.*|"
+    r"powered\s+by\s+ink[\w\s]*|"
+    r"listing\s+(?:powered|created)\s+by.*|"
+    r"thank\s+you\s+for\s+(?:your\s+)?(?:business|shopping|purchase)\.?|"
+    r"happy\s+bidding[\.!]?|"
+    r"good\s+luck[\.!]?"
+    r")\s*$"
+)
+
+
+def clean_description(raw: str) -> str:
+    """Reduce an eBay seller description down to the product overview only.
+
+    - Cuts everything from the first "Payment / Shipping / Returns / About
+      us / …" header downwards (case-insensitive, whole-line match).
+    - Strips one-off promo lines (buy-it-now, free shipping shout-outs,
+      feedback bragging, "powered by inkFrog" footers, etc).
+    - Deduplicates consecutive identical lines and collapses runs of blank
+      lines.
+    - Trims to a sensible ~1200-char cap so the description stays a short
+      overview even for verbose sellers.
+    """
+    if not raw:
+        return ""
+    text = raw.replace("\r\n", "\n").replace("\r", "\n")
+    # Cut at first promo/policy section header.
+    m = _DESC_CUT_RE.search(text)
+    if m:
+        text = text[: m.start()]
+    # Drop promo lines.
+    lines = [ln for ln in text.split("\n") if not _DESC_PROMO_LINES.match(ln)]
+    # Deduplicate consecutive identical lines (common in listing templates).
+    dedup: list[str] = []
+    for ln in lines:
+        stripped = ln.strip()
+        if dedup and stripped == dedup[-1].strip():
+            continue
+        dedup.append(ln)
+    text = "\n".join(dedup)
+    # Collapse blank runs, trim.
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    if len(text) > 1200:
+        # Truncate at last sentence boundary within budget so we don't
+        # cut mid-word.
+        head = text[:1200]
+        cut = max(head.rfind(". "), head.rfind("\n"), head.rfind("! "), head.rfind("? "))
+        text = head[: cut + 1].rstrip() if cut > 400 else head.rstrip() + "…"
+    return text
 
 
 async def parse_and_enrich(html: str, url: str, fetch_desc: bool = True) -> dict[str, Any]:

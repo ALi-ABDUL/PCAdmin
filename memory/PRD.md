@@ -684,3 +684,38 @@ Notification Bell deep-links) — zero regressions detected.
   partial-decrement stays active, list endpoint excludes auto-archived).
   Runs green.
 
+
+## Feb 24, 2026 — Structured specifications + cleaned descriptions
+- Backend `scraper.py`: new `clean_description(raw)` cuts eBay
+  descriptions at the first Payment / Shipping / Postage / Delivery /
+  Returns / Warranty / Feedback / About Us / Contact Us / Terms /
+  Store Policies / etc header (whole-line, case-insensitive), strips
+  one-off promo lines (buy-it-now, free-shipping shout-outs, feedback
+  bragging, "powered by inkFrog" footers, thank-you-for-shopping,
+  happy-bidding), deduplicates consecutive identical lines, collapses
+  blank runs, and truncates to ≤1200 chars at the nearest sentence
+  boundary. Called from `fetch_description_iframe` so every scrape
+  (initial or refresh) applies the cleanup.
+- `Product` model now stores `specifics: dict = {}`. The two paths that
+  create a Product from a scraped item (`bulk add_to_products` and
+  `POST /items/{iid}/add-to-products`) pass `specifics=it.get(...)`.
+- Frontend: new `ProductSpecsCard` in `pages/ProductDetail.jsx` rendered
+  below the Description textarea. Groups scraped specifics into
+  DIMENSIONS (length, width, height, depth, diameter, size),
+  MATERIALS (material, fabric, composition), COLOURS (colour/color,
+  finish), WEIGHT (weight, gross/net weight), and everything else under
+  OTHER SPECIFICATIONS. Each row is a `label : value` grid line with
+  its own `data-testid="product-spec-row"`. Section is hidden entirely
+  when the product has no specifics.
+- Regression suite: `backend/tests/test_clean_description.py` — 8
+  pytest cases (cuts at shipping / payment / about-us, strips promo
+  lines, dedupes repeated lines, truncates verbose descriptions, empty
+  string safe, preserves bullet points). All green.
+- Verified end-to-end via Playwright: seeded a "TEST Ceramic Dining
+  Table" product with 11 specifics → Product detail page rendered
+  DIMENSIONS (Length 180 cm, Width 90 cm, Height 75 cm), MATERIALS
+  (Table Material: Ceramic, Frame Material: Powder-coated steel),
+  COLOURS (Colour: Matte Black), WEIGHT (52 kg), and OTHER
+  SPECIFICATIONS (Brand IKEA, MPN IKEA-DT-180, Warranty 2 Years,
+  Assembly Required Yes).
+

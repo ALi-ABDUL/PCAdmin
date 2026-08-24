@@ -3,6 +3,7 @@ import axios from "axios";
 import { Store } from "lucide-react";
 import { StatBox, SubHero } from "../components/atoms";
 import { Pagination, usePagePref } from "../components/Pagination";
+import { SortableTh, useSortPref } from "../components/SortableTh";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 import { PAYMENTS_NAV, TRANSACTION_STATUS_TABS } from "../lib/nav";
@@ -29,6 +30,7 @@ export function AllTransactionsView() {
   const [counts, setCounts] = useState({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = usePagePref("payments-transactions", 50);
+  const { field: sortField, dir: sortDir, sortParam, toggle: toggleSort } = useSortPref("payments-transactions", "created_at", "desc");
 
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/transactions`, {
@@ -37,12 +39,13 @@ export function AllTransactionsView() {
         kind: "charge",
         limit: pageSize,
         skip: (page - 1) * pageSize,
+        sort: sortParam,
       },
     });
     setTx(data.transactions); setTotal(data.total); setCounts(data.counts || {});
-  }, [status, page, pageSize]);
+  }, [status, page, pageSize, sortParam]);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setPage(1); }, [status, pageSize]);
+  useEffect(() => { setPage(1); }, [status, pageSize, sortParam]);
 
   return (
     <div className="grid gap-4">
@@ -67,7 +70,14 @@ export function AllTransactionsView() {
       </div>
       <div className="card overflow-hidden">
         <div className="overflow-x-auto"><table className="tbl">
-          <thead><tr><th>Reference</th><th>Customer</th><th>Method</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+          <thead><tr>
+            <SortableTh label="Reference" field="reference" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="tx"/>
+            <SortableTh label="Customer" field="customer_name" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="tx"/>
+            <SortableTh label="Method" field="method" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="tx"/>
+            <SortableTh label="Amount" field="amount" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="tx"/>
+            <SortableTh label="Status" field="status" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="tx"/>
+            <SortableTh label="Date" field="created_at" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="tx"/>
+          </tr></thead>
           <tbody>
             {tx.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-500">No transactions</td></tr>}
             {tx.map(t => (

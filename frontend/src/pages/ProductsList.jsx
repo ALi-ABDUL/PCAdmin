@@ -3,12 +3,14 @@ import axios from "axios";
 import { toast } from "sonner";
 import { CheckCircle2, Loader2, Search, Trash2, Warehouse } from "lucide-react";
 import { Pagination, usePagePref } from "../components/Pagination";
+import { useSortPref } from "../components/SortableTh";
 import { ProductGrid } from "../components/ProductGrid";
 import { API } from "../lib/api";
 
 export function Products({ deepLink, clearDeepLink, openProductDetail, stock, sectionKey = "products-all" }) {
   const [list, setList] = useState([]); const [total, setTotal] = useState(0);
-  const [q, setQ] = useState(""); const [cat, setCat] = useState(""); const [sort, setSort] = useState("created_at_desc");
+  const [q, setQ] = useState(""); const [cat, setCat] = useState("");
+  const { sortParam, field: sortField, dir: sortDir, setSort } = useSortPref(`${sectionKey}-sort`, "created_at", "desc");
   const [cats, setCats] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -20,7 +22,7 @@ export function Products({ deepLink, clearDeepLink, openProductDetail, stock, se
       params: {
         q: q || undefined,
         category: cat || undefined,
-        sort,
+        sort: sortParam,
         stock: stock || undefined,
         limit: pageSize,
         skip: (page - 1) * pageSize,
@@ -33,12 +35,12 @@ export function Products({ deepLink, clearDeepLink, openProductDetail, stock, se
       prev.forEach(id => { if (ids.has(id)) next.add(id); });
       return next;
     });
-  }, [q, cat, sort, stock, page, pageSize]);
+  }, [q, cat, sortParam, stock, page, pageSize]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { axios.get(`${API}/categories`, { params: { active: true }}).then(r => setCats(r.data.categories)); }, []);
   // Reset to page 1 whenever a filter changes so pagination doesn't strand
   // the admin on an empty page.
-  useEffect(() => { setPage(1); }, [q, cat, sort, stock, pageSize]);
+  useEffect(() => { setPage(1); }, [q, cat, sortParam, stock, pageSize]);
 
   useEffect(() => {
     if (!deepLink?.productId) return;
@@ -88,8 +90,9 @@ export function Products({ deepLink, clearDeepLink, openProductDetail, stock, se
             <option value="">All categories</option>
             {cats.map(c=><option key={c.slug} value={c.slug}>{c.name}</option>)}
           </select>
-          <select value={sort} onChange={(e)=>setSort(e.target.value)} className="input px-3 py-2 text-sm">
+          <select value={sortParam} onChange={(e)=>{ const v = e.target.value; const i = v.lastIndexOf("_"); setSort(v.slice(0, i), v.slice(i + 1)); }} className="input px-3 py-2 text-sm" data-testid="product-sort">
             <option value="created_at_desc">Newest</option>
+            <option value="created_at_asc">Oldest</option>
             <option value="price_desc">Price ↓</option>
             <option value="price_asc">Price ↑</option>
             <option value="stock_asc">Stock ↑</option>

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Eye, Filter } from "lucide-react";
 import { StatBox, StatusChip, SubHero } from "../components/atoms";
 import { Pagination, usePagePref } from "../components/Pagination";
+import { SortableTh, useSortPref } from "../components/SortableTh";
 import { API } from "../lib/api";
 import { fmtDate, humaniseStatus, moneyCents } from "../lib/format";
 import { ORDERS_NAV, ORDER_STATUSES, ORDER_STATUS_TABS } from "../lib/nav";
@@ -38,6 +39,7 @@ export function AllOrdersView({ deepLink, clearDeepLink, openOrderDetail }) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = usePagePref("orders", 50);
+  const { field: sortField, dir: sortDir, sortParam, toggle: toggleSort } = useSortPref("orders", "created_at", "desc");
 
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/orders`, {
@@ -45,13 +47,14 @@ export function AllOrdersView({ deepLink, clearDeepLink, openOrderDetail }) {
         status: status || undefined,
         limit: pageSize,
         skip: (page - 1) * pageSize,
+        sort: sortParam,
       },
     });
     setOrders(data.orders); setTotal(data.total);
-  }, [status, page, pageSize]);
+  }, [status, page, pageSize, sortParam]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { axios.get(`${API}/orders/status-counts`).then(r => setCounts(r.data.counts || {})); }, [orders.length]);
-  useEffect(() => { setPage(1); }, [status, pageSize]);
+  useEffect(() => { setPage(1); }, [status, pageSize, sortParam]);
 
   useEffect(() => {
     if (!deepLink?.orderId) return;
@@ -84,7 +87,16 @@ export function AllOrdersView({ deepLink, clearDeepLink, openOrderDetail }) {
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tbl">
-            <thead><tr><th>Reference</th><th>Product</th><th>Customer</th><th>Qty</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead>
+            <thead><tr>
+              <SortableTh label="Reference" field="reference" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="ord"/>
+              <SortableTh label="Product" field="product_title" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="ord"/>
+              <SortableTh label="Customer" field="customer_name" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="ord"/>
+              <SortableTh label="Qty" field="quantity" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="ord"/>
+              <SortableTh label="Total" field="total" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="ord"/>
+              <SortableTh label="Status" field="status" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="ord"/>
+              <SortableTh label="Date" field="created_at" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="ord"/>
+              <th></th>
+            </tr></thead>
             <tbody>
               {orders.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-slate-500">No orders in this bucket</td></tr>}
               {orders.map(o => (

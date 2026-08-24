@@ -736,11 +736,18 @@ async def list_transactions(
     kind: Optional[str] = None,
     limit: int = Query(500, le=2000),
     skip: int = Query(0, ge=0),
+    sort: str = "created_at_desc",
 ):
     q: dict[str, Any] = {}
     if status: q["status"] = status
     if kind:   q["kind"] = kind
-    items = await db.transactions.find(q, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    _TX_SORT_FIELDS = {"reference", "customer_name", "method", "amount", "status", "created_at"}
+    field, _, dir_ = sort.rpartition("_")
+    if field in _TX_SORT_FIELDS and dir_ in ("asc", "desc"):
+        sort_spec = [(field, 1 if dir_ == "asc" else -1)]
+    else:
+        sort_spec = [("created_at", -1)]
+    items = await db.transactions.find(q, {"_id": 0}).sort(sort_spec).skip(skip).limit(limit).to_list(limit)
     total = await db.transactions.count_documents(q)
     # Counts aggregate is calculated over the WHOLE filtered set (not just the
     # current page) so the summary chips stay accurate regardless of pagination.
@@ -794,9 +801,23 @@ async def list_customers(
         ]
     sort_map = {
         "created_at_desc": [("created_at", -1)],
-        "name_asc": [("name", 1)],
-        "spend_desc": [("total_spend", -1)],
-        "orders_desc": [("orders_count", -1)],
+        "created_at_asc":  [("created_at", 1)],
+        "name_asc":        [("name", 1)],
+        "name_desc":       [("name", -1)],
+        "code_asc":        [("code", 1)],
+        "code_desc":       [("code", -1)],
+        "type_asc":        [("type", 1)],
+        "type_desc":       [("type", -1)],
+        "status_asc":      [("status", 1)],
+        "status_desc":     [("status", -1)],
+        "spend_desc":      [("total_spend", -1)],
+        "spend_asc":       [("total_spend", 1)],
+        "total_spend_desc": [("total_spend", -1)],
+        "total_spend_asc":  [("total_spend", 1)],
+        "orders_desc":      [("orders_count", -1)],
+        "orders_asc":       [("orders_count", 1)],
+        "orders_count_desc": [("orders_count", -1)],
+        "orders_count_asc":  [("orders_count", 1)],
     }
     cursor = db.customers.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).skip(skip).limit(limit)
     customers = await cursor.to_list(length=limit)
@@ -1377,15 +1398,29 @@ async def list_suppliers(
     if status in {"active", "inactive"}:
         sellers = [s for s in sellers if s["status"] == status]
 
-    reverse_sort = sort in {"last_active_desc"}
-    sort_key = {
-        "revenue_desc":     lambda s: -s["revenue_generated"],
-        "orders_desc":      lambda s: -s["total_orders"],
-        "products_desc":    lambda s: -s["total_products"],
-        "name_asc":         lambda s: s["name"].lower(),
-        "last_active_desc": lambda s: s["last_active"] or "",
-    }.get(sort, lambda s: -s["revenue_generated"])
-    sellers.sort(key=sort_key, reverse=reverse_sort)
+    _SUP_SORT_FIELDS = {
+        "name":              lambda s: (s.get("name") or "").lower(),
+        "total_products":    lambda s: s.get("total_products") or 0,
+        "total_orders":      lambda s: s.get("total_orders") or 0,
+        "revenue_generated": lambda s: s.get("revenue_generated") or 0,
+        "last_active":       lambda s: s.get("last_active") or "",
+        "status":            lambda s: s.get("status") or "",
+    }
+    # Legacy compact keys used by the old dropdown still work.
+    _LEGACY_SORT = {
+        "revenue_desc":     ("revenue_generated", "desc"),
+        "orders_desc":      ("total_orders", "desc"),
+        "products_desc":    ("total_products", "desc"),
+        "name_asc":         ("name", "asc"),
+        "last_active_desc": ("last_active", "desc"),
+    }
+    if sort in _LEGACY_SORT:
+        field, dir_ = _LEGACY_SORT[sort]
+    else:
+        field, _, dir_ = sort.rpartition("_")
+        if field not in _SUP_SORT_FIELDS or dir_ not in ("asc", "desc"):
+            field, dir_ = "revenue_generated", "desc"
+    sellers.sort(key=_SUP_SORT_FIELDS[field], reverse=(dir_ == "desc"))
 
     total = len(sellers)
     sellers = sellers[skip: skip + limit]
@@ -1897,11 +1932,24 @@ async def create_order(body: OrderCreate):
 
 
 @api_router.get("/orders")
-async def list_orders(limit: int = Query(200, le=1000), skip: int = Query(0, ge=0), status: Optional[str] = None):
+async def list_orders(
+    limit: int = Query(200, le=1000),
+    skip: int = Query(0, ge=0),
+    status: Optional[str] = None,
+    sort: str = "created_at_desc",
+):
     q: dict[str, Any] = {}
     if status:
         q["status"] = status
-    cursor = db.orders.find(q, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit)
+    # Column-header sort keys: <field>_asc|<field>_desc. Whitelisted fields
+    # match the visible Orders table columns.
+    _ORDER_SORT_FIELDS = {"reference", "product_title", "customer_name", "quantity", "total", "status", "created_at"}
+    field, _, dir_ = sort.rpartition("_")
+    if field in _ORDER_SORT_FIELDS and dir_ in ("asc", "desc"):
+        sort_spec = [(field, 1 if dir_ == "asc" else -1)]
+    else:
+        sort_spec = [("created_at", -1)]
+    cursor = db.orders.find(q, {"_id": 0}).sort(sort_spec).skip(skip).limit(limit)
     orders = await cursor.to_list(length=limit)
     total = await db.orders.count_documents(q)
     return {"orders": orders, "total": total}

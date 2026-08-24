@@ -3,6 +3,7 @@ import axios from "axios";
 import { BadgeCheck, Ban, History, Search } from "lucide-react";
 import { StatBox } from "../components/atoms";
 import { Pagination, usePagePref } from "../components/Pagination";
+import { SortableTh, useSortPref } from "../components/SortableTh";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 import { SUPPLIER_NAV } from "../lib/nav";
@@ -14,8 +15,8 @@ export function Suppliers({ section, setSection }) {
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
   const [q, setQ] = useState("");
-  const [sort, setSort] = useState("revenue_desc");
   const [status, setStatus] = useState("");
+  const { field: sortField, dir: sortDir, sortParam, toggle: toggleSort } = useSortPref("suppliers", "revenue_generated", "desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = usePagePref("suppliers", 50);
 
@@ -24,21 +25,21 @@ export function Suppliers({ section, setSection }) {
       params: {
         q: q || undefined,
         status: status || undefined,
-        sort,
+        sort: sortParam,
         limit: pageSize,
         skip: (page - 1) * pageSize,
       },
     });
     setList(data.suppliers);
     setTotal(data.total);
-  }, [q, status, sort, page, pageSize]);
+  }, [q, status, sortParam, page, pageSize]);
   const loadSummary = useCallback(async () => {
     const { data } = await axios.get(`${API}/suppliers/summary`);
     setSummary(data);
   }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadSummary(); }, [loadSummary, list.length]);
-  useEffect(() => { setPage(1); }, [q, status, sort, pageSize]);
+  useEffect(() => { setPage(1); }, [q, status, sortParam, pageSize]);
 
   const meta = SUPPLIER_NAV.find((s) => s.id === section) || SUPPLIER_NAV[0];
   const Icon = meta.icon;
@@ -61,7 +62,7 @@ export function Suppliers({ section, setSection }) {
         </div>
       </div>
 
-      {section === "all"      && <AllSuppliers list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} status={status} setStatus={setStatus} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}/>}
+      {section === "all"      && <AllSuppliers list={list} total={total} q={q} setQ={setQ} sortField={sortField} sortDir={sortDir} toggleSort={toggleSort} status={status} setStatus={setStatus} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}/>}
       {section === "top"      && <TopSuppliers list={summary?.top_suppliers || []} agg={summary?.aggregate}/>}
       {section === "products" && <SupplierProducts list={list}/>}
       {section === "orders"   && <SupplierOrders list={list}/>}
@@ -80,7 +81,7 @@ export function SellerStatusChip({ status }) {
   return <span className={`chip ${active ? "chip-success" : "chip-neutral"}`} data-testid="sup-status">{active ? <BadgeCheck size={11}/> : <Ban size={11}/>} {active ? "Active" : "Inactive"}</span>;
 }
 
-export function AllSuppliers({ list, total, q, setQ, sort, setSort, status, setStatus, page = 1, setPage, pageSize = 50, setPageSize }) {
+export function AllSuppliers({ list, total, q, setQ, sortField, sortDir, toggleSort, status, setStatus, page = 1, setPage, pageSize = 50, setPageSize }) {
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -92,25 +93,18 @@ export function AllSuppliers({ list, total, q, setQ, sort, setSort, status, setS
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
-          <select value={sort} onChange={(e)=>setSort(e.target.value)} className="input px-3 py-2 text-sm" data-testid="sup-sort">
-            <option value="revenue_desc">Revenue ↓</option>
-            <option value="orders_desc">Total orders ↓</option>
-            <option value="products_desc">Total products ↓</option>
-            <option value="last_active_desc">Last active ↓</option>
-            <option value="name_asc">Seller A→Z</option>
-          </select>
         </div>
       </div>
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tbl">
             <thead><tr>
-              <th>Seller Name</th>
-              <th className="text-right">Total Products</th>
-              <th className="text-right">Total Orders</th>
-              <th className="text-right">Revenue Generated</th>
-              <th>Last Active</th>
-              <th>Status</th>
+              <SortableTh label="Seller Name" field="name" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="sup"/>
+              <SortableTh label="Total Products" field="total_products" active={sortField} dir={sortDir} onSort={toggleSort} align="right" testPrefix="sup"/>
+              <SortableTh label="Total Orders" field="total_orders" active={sortField} dir={sortDir} onSort={toggleSort} align="right" testPrefix="sup"/>
+              <SortableTh label="Revenue Generated" field="revenue_generated" active={sortField} dir={sortDir} onSort={toggleSort} align="right" testPrefix="sup"/>
+              <SortableTh label="Last Active" field="last_active" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="sup"/>
+              <SortableTh label="Status" field="status" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="sup"/>
             </tr></thead>
             <tbody>
               {list.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-500">No eBay sellers yet — import a listing on the Product Sourcing page.</td></tr>}

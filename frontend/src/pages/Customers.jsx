@@ -6,6 +6,8 @@ import { Field, StatusChip, SubHero } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, fmtLongDateTime, moneyCents } from "../lib/format";
 import { CUSTOMER_NAV } from "../lib/nav";
+import { Pagination, usePagePref } from "../components/Pagination";
+import { SortableTh, useSortPref } from "../components/SortableTh";
 import { CustomerPortal } from "./CustomerPortal";
 import { CustomerDetailPage } from "./CustomerDetail";
 import { MessageCustomerDialog } from "../components/MessageCustomerDialog";
@@ -15,8 +17,9 @@ import { Products } from "./ProductsList";
 export function CustomersModule({ section, setSection, customerDetailId, openCustomerDetail, onMessageSent, navigateTo }) {
   const [list, setList] = useState([]); const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
-  const [q, setQ] = useState(""); const [sort, setSort] = useState("created_at_desc");
-  const [page, setPage] = useState(1); const [pageSize, setPageSize] = useState(50);
+  const [q, setQ] = useState("");
+  const { field: sortField, dir: sortDir, sortParam, toggle: toggleSort } = useSortPref("customers", "created_at", "desc");
+  const [page, setPage] = useState(1); const [pageSize, setPageSize] = usePagePref("customers", 50);
   const [messages, setMessages] = useState([]);
   const [coupons, setCoupons] = useState([]);
   const [reviews, setReviews] = useState([]);
@@ -28,7 +31,7 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
   if (section === "guest") params.type = "guest";
   if (section === "registered") params.type = "registered";
   if (q) params.q = q;
-  params.sort = sort;
+  params.sort = sortParam;
   if (isPaginated) {
     params.limit = pageSize;
     params.skip = (page - 1) * pageSize;
@@ -44,7 +47,7 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
   useEffect(() => { if (section === "coupons") axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons)); }, [section]);
   useEffect(() => { if (section === "reviews") axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews)); }, [section]);
   // Reset to page 1 when filters, section, or page size change.
-  useEffect(() => { setPage(1); }, [section, q, sort, pageSize]);
+  useEffect(() => { setPage(1); }, [section, q, sortParam, pageSize]);
 
   // Customer detail takes over the module UI when a specific customer is open.
   if (customerDetailId) {
@@ -77,7 +80,7 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
       {section === "portal"     && <CustomerPortal/>}
       {section === "create"     && <CreateCustomer onCreated={() => { load(); setSection("all"); }}/>}
       {section === "import"     && <ImportCustomers onImported={() => { load(); setSection("all"); }}/>}
-      {(["all","pending","active","guest","registered","blocked"].includes(section)) && <CustomerTable list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} onChanged={load} onOpen={openCustomerDetail}/>}
+      {(["all","pending","active","guest","registered","blocked"].includes(section)) && <CustomerTable list={list} total={total} q={q} setQ={setQ} sortField={sortField} sortDir={sortDir} toggleSort={toggleSort} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} onChanged={load} onOpen={openCustomerDetail}/>}
       {section === "top"        && <TopCustomers list={summary?.top || []}/>}
       {section === "messages"   && <CustomerMessages messages={messages} reload={() => axios.get(`${API}/messages`).then(r => setMessages(r.data.messages))}/>}
       {section === "coupons"    && <CouponsView coupons={coupons} reload={() => axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons))}/>}
@@ -156,7 +159,7 @@ export function ImportCustomers({ onImported }) {
   );
 }
 
-export function CustomerTable({ list, total, q, setQ, sort, setSort, page = 1, setPage, pageSize = 50, setPageSize, onChanged, onOpen }) {
+export function CustomerTable({ list, total, q, setQ, sortField, sortDir, toggleSort, page = 1, setPage, pageSize = 50, setPageSize, onChanged, onOpen }) {
   const setStatus = async (c, status) => { await axios.patch(`${API}/customers/${c.id}`, { status }); onChanged(); };
   const del = async (c) => { if (!window.confirm(`Delete ${c.name}?`)) return; await axios.delete(`${API}/customers/${c.id}`); toast.success("Deleted"); onChanged(); };
   const stop = (e) => e.stopPropagation();
@@ -175,9 +178,6 @@ export function CustomerTable({ list, total, q, setQ, sort, setSort, page = 1, s
         <div className="text-sm text-slate-500 font-mono">{total} customer{total===1?"":"s"}</div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search name / email" className="input pl-9 pr-3 py-2 text-sm w-64"/></div>
-          <select value={sort} onChange={(e)=>setSort(e.target.value)} className="input px-3 py-2 text-sm">
-            <option value="created_at_desc">Newest</option><option value="name_asc">Name A→Z</option><option value="spend_desc">Spend ↓</option><option value="orders_desc">Orders ↓</option>
-          </select>
           <select
             value={pageSize}
             onChange={(e) => setPageSize?.(Number(e.target.value))}
@@ -190,7 +190,16 @@ export function CustomerTable({ list, total, q, setQ, sort, setSort, page = 1, s
         </div>
       </div>
       <div className="card overflow-hidden"><div className="overflow-x-auto"><table className="tbl">
-        <thead><tr><th>Customer</th><th>Code</th><th>Type</th><th>Status</th><th>Orders</th><th>Spend</th><th>Joined</th><th></th></tr></thead>
+        <thead><tr>
+          <SortableTh label="Customer" field="name" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="cus"/>
+          <SortableTh label="Code" field="code" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="cus"/>
+          <SortableTh label="Type" field="type" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="cus"/>
+          <SortableTh label="Status" field="status" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="cus"/>
+          <SortableTh label="Orders" field="orders_count" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="cus"/>
+          <SortableTh label="Spend" field="total_spend" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="cus"/>
+          <SortableTh label="Joined" field="created_at" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="cus"/>
+          <th></th>
+        </tr></thead>
         <tbody>
           {list.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-slate-500">No customers</td></tr>}
           {list.map(c => (

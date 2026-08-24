@@ -564,3 +564,29 @@ Notification Bell deep-links) — zero regressions detected.
   `transactions`, `items`) — totals stayed constant while `skip` returned
   fresh rows.
 
+
+## Feb 24, 2026 — Sortable column headers
+- New shared `SortableTh` component + `useSortPref(key, defaultField,
+  defaultDir)` hook in `frontend/src/components/SortableTh.jsx`. Persists
+  the active sort per section in localStorage under `pref.sort.<key>` in
+  the form `"field:asc|desc"`. First click on a new column → ascending,
+  second click → descending; a small arrow indicator (`ChevronsUpDown`
+  when inactive, `ArrowUp`/`ArrowDown` when active) shows the direction.
+- Backend: extended `/orders`, `/transactions`, `/suppliers`, and
+  `/customers` to accept `<field>_asc` / `<field>_desc` sort keys with
+  per-endpoint whitelists (`reference`, `product_title`, `customer_name`,
+  `quantity`, `total`, `status`, `created_at` etc.). Legacy compact keys
+  (`revenue_desc`, `name_asc`, …) still work for backwards compatibility.
+- Frontend wired: **Orders**, **Customers**, **Payments transactions**,
+  **Suppliers** tables now render `SortableTh` in every header. The old
+  standalone sort `<select>` was removed on Customers and Suppliers.
+  **Products** stays a card grid but its existing sort dropdown now uses
+  `useSortPref` so the chosen sort persists per section
+  (`products-all-sort`, `products-low-sort`, `products-out-sort`,
+  `products-archived-sort`).
+- Verified end-to-end with Playwright: clicking Total on Orders sorted
+  asc ($2.92 first) → clicking again sorted desc ($7,312.47 first). Full
+  page reload retained `pref.sort.orders=total:desc` in localStorage and
+  the Total column re-rendered with descending arrow, first row still
+  $7,312.47 (aria-sort="descending").
+

@@ -45,7 +45,7 @@ from helpers import (
     _seller_id, _build_sellers, _match_rules, _guess_category, _get_push_settings, _mask, 
     _get_credential, _push_channel_status, _notif_is_critical, _send_email, _send_telegram, 
     _format_notification_html, _push_notification, _emit_notification, 
-    _emit_price_change_notifications, calc_pricing, _ensure_pricing_rules_seeded, 
+    _emit_price_change_notifications, _auto_archive_if_out_of_stock, calc_pricing, _ensure_pricing_rules_seeded, 
     _load_pricing_rules,
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
@@ -156,7 +156,7 @@ async def scrape(req: ScrapeRequest) -> dict:
                 # Mirror to product if linked (also stamp stock_status so the UI can show the right badge)
                 await db.products.update_many(
                     {"source_item_id": data.get("item_id")},
-                    {"$set": {"active": False, "is_sold": True, "stock_status": new_status, "updated_at": now_iso}},
+                    {"$set": {"active": False, "is_sold": True, "archived": True, "stock_status": new_status, "updated_at": now_iso}},
                 )
                 # Human-readable notification per status
                 status_titles = {"sold": "Sold on eBay", "ended": "Listing ended on eBay", "out_of_stock": "Out of stock on eBay"}
@@ -1370,6 +1370,8 @@ async def create_stock_move(body: StockMove):
     move["stock_after"] = p.get("stock", 0) + body.delta
     await db.stock_moves.insert_one(move)
     await db.products.update_one({"id": body.product_id}, {"$inc": {"stock": body.delta}, "$set": {"updated_at": move["created_at"]}})
+    # If this adjustment brought stock to zero, quietly move the product to Archived.
+    await _auto_archive_if_out_of_stock(body.product_id)
     move.pop("_id", None)
     return move
 
@@ -1905,6 +1907,9 @@ async def update_product(pid: str, body: ProductUpdate):
     r = await db.products.update_one({"id": pid}, {"$set": fields})
     if r.matched_count == 0:
         raise HTTPException(status_code=404, detail="Product not found")
+    # Admin may have just edited stock directly — auto-archive if it hit 0.
+    if "stock" in fields:
+        await _auto_archive_if_out_of_stock(pid)
     return await db.products.find_one({"id": pid}, {"_id": 0})
 
 
@@ -1972,6 +1977,8 @@ async def create_order(body: OrderCreate):
             image=(updated.get("images") or [None])[0],
             data={"stock": updated.get("stock")},
         )
+    # Auto-archive if this purchase pushed the product to zero stock.
+    await _auto_archive_if_out_of_stock(p["id"])
     order.pop("_id", None)
     # Customer email: order confirmation (gated by customer_order_confirmation toggle)
     await send_customer_order_confirmation(order)

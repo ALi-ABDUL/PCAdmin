@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html']
+__all__ = ['_rand_au_address', '_slug', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html']
 
 
 import bcrypt
@@ -1102,6 +1102,43 @@ async def _emit_price_change_notifications(item: dict, new_image: Optional[str],
             at=now_iso,
         )
         await db.notifications.insert_one(n.model_dump())
+
+
+async def _auto_archive_if_out_of_stock(pid: str) -> bool:
+    """Auto-archive a product when its stock has just dropped to (or below) 0.
+
+    Called from every write-path that mutates stock (order placement, manual
+    stock adjust, PATCH /products, scraper "sold" sweep). Idempotent: skips
+    products that are already archived so it can be called freely without
+    worrying about repeat notifications. Returns True if it archived.
+    """
+    if not pid:
+        return False
+    p = await db.products.find_one(
+        {"id": pid},
+        {"_id": 0, "id": 1, "stock": 1, "archived": 1, "active": 1, "title": 1, "images": 1},
+    )
+    if not p or p.get("archived") is True:
+        return False
+    if (p.get("stock") or 0) > 0:
+        return False
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.products.update_one(
+        {"id": pid},
+        {"$set": {"archived": True, "active": False, "updated_at": now_iso}},
+    )
+    # Surface it in the notification bell so admins notice the auto-move.
+    await _emit_notification(
+        type="out_of_stock",
+        title="Product auto-archived (out of stock)",
+        body=f"{p.get('title')} · moved to Archived",
+        product_id=pid,
+        product_title=p.get("title"),
+        image=(p.get("images") or [None])[0],
+        data={"stock": p.get("stock") or 0, "auto_archived": True},
+    )
+    return True
+
 
 def calc_pricing(ebay_price: float, rules: Optional[list[dict]] = None,
                  margin_pct: float = 20.0, min_profit: float = 20.0) -> dict:

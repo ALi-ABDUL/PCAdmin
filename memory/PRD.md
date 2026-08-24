@@ -661,3 +661,26 @@ Notification Bell deep-links) — zero regressions detected.
     item." toast, and the supplier disappeared from the list on next
     fetch.
 
+
+## Feb 24, 2026 — Auto-archive on zero stock
+- New helper `_auto_archive_if_out_of_stock(pid)` in `helpers.py`. When
+  a product's `stock <= 0` and it isn't already archived, it flips
+  `archived: True` and `active: False`, stamps `updated_at`, and fires an
+  `out_of_stock` notification tagged `auto_archived: True` so the admin
+  sees the change in the bell.
+- Called from every stock-mutation path:
+  * Order placement (`POST /orders`, after the `$inc` decrement)
+  * Manual stock adjust (`POST /stock/moves`)
+  * Admin edit (`PATCH /products/{pid}`, only when `stock` is in the
+    body)
+  * Scraper "sold / ended / OOS on eBay" sweep — the linked-product
+    `update_many` now also sets `archived: True`
+- Since `GET /products` already filters `archived: {$ne: True}` by
+  default, auto-archived items drop off the active list immediately and
+  show up on the Archived tab where the admin can restore them if the
+  stock decision was accidental.
+- Regression suite: new `backend/tests/test_auto_archive_on_zero_stock.py`
+  with 5 tests (order-to-zero, PATCH-to-zero, stock-move-to-zero,
+  partial-decrement stays active, list endpoint excludes auto-archived).
+  Runs green.
+

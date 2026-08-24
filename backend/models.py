@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 
 
-__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS']
+__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate']
 
 
 CATEGORIES = ["electronics", "home", "tools", "apparel", "other"]
@@ -137,6 +137,12 @@ class ProductCreate(BaseModel):
     postage_preset_id: Optional[str] = None
     postage_amount: Optional[float] = None
     postage_insurance_amount: Optional[float] = None
+    # Per-product delivery window override. When `custom_delivery_window` is
+    # False (default) the storefront falls back to `delivery_settings`
+    # (Store Management → Delivery Estimate).
+    custom_delivery_window: bool = False
+    delivery_min_days: Optional[int] = None   # business days
+    delivery_max_days: Optional[int] = None   # business days
 
 
 class Product(ProductCreate):
@@ -165,6 +171,9 @@ class ProductUpdate(BaseModel):
     postage_preset_id: Optional[str] = None
     postage_amount: Optional[float] = None
     postage_insurance_amount: Optional[float] = None
+    custom_delivery_window: Optional[bool] = None
+    delivery_min_days: Optional[int] = None
+    delivery_max_days: Optional[int] = None
 
 
 # AU address generator used by the demo seed + backfill for existing orders without addresses.
@@ -651,3 +660,21 @@ _DEFAULT_POSTAGE_PRESETS = [
     {"name": "Standard Postage", "kind": "standard",   "postage_amount": 9.95,  "insurance_amount": 0.0,  "sort_order": 20},
     {"name": "Large Item",       "kind": "large_item", "postage_amount": 29.95, "insurance_amount": 12.00, "sort_order": 30},
 ]
+
+# ---------------------------------------------------------------------------
+# Delivery Settings (store-wide default estimate)
+# The estimate is intentionally computed at read-time on the client so it
+# auto-updates every day without any cron/background task. Both values are
+# in *business days* (Mon-Fri) — weekends are always skipped.
+# ---------------------------------------------------------------------------
+DELIVERY_SETTINGS_DEFAULTS: dict = {
+    "id": "singleton",
+    "default_min_days": 3,   # business days
+    "default_max_days": 7,   # business days
+}
+
+
+class DeliverySettingsUpdate(BaseModel):
+    default_min_days: Optional[int] = None
+    default_max_days: Optional[int] = None
+

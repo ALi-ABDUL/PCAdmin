@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, BadgeCheck, Ban, Bell, Calculator, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Loader2, Plus, RefreshCw, Store, Trash2, X, XCircle, Zap } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Loader2, Plus, RefreshCw, Store, Trash2, X, XCircle, Zap } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
+import { computeDeliveryEstimate } from "../lib/delivery";
 import { STORE_NAV } from "../lib/nav";
 import { calcPricingWithRules, usePricingRules, _refreshPricingRules } from "../lib/pricing";
 import { Analytics } from "./Analytics";
@@ -326,6 +327,102 @@ export function PostagePresetsEditor() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+export function DeliverySettingsEditor() {
+  const [settings, setSettings] = useState(null);
+  const [draft, setDraft] = useState({ default_min_days: "", default_max_days: "" });
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/delivery-settings`);
+    setSettings(data);
+    setDraft({ default_min_days: data.default_min_days, default_max_days: data.default_max_days });
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  if (!settings) return <div className="text-slate-500 py-24 text-center">loading…</div>;
+
+  const min = Number(draft.default_min_days) || 0;
+  const max = Number(draft.default_max_days) || 0;
+  const invalid = max < min;
+  const dirty = min !== settings.default_min_days || max !== settings.default_max_days;
+  const preview = computeDeliveryEstimate(min, max);
+
+  const save = async () => {
+    if (invalid) return toast.error("Max days must be greater than or equal to min days");
+    setBusy(true);
+    try {
+      const { data } = await axios.patch(`${API}/delivery-settings`, {
+        default_min_days: min, default_max_days: max,
+      });
+      setSettings(data);
+      toast.success("Default delivery window saved");
+    } catch (e) {
+      toast.error("Save failed", { description: e?.response?.data?.detail?.slice(0, 200) || e.message });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="grid gap-4" data-testid="delivery-settings-editor">
+      <div className="card p-5">
+        <div className="flex items-center gap-3 mb-1">
+          <div className="w-9 h-9 grid place-items-center rounded-lg text-white shrink-0" style={{ background: "linear-gradient(135deg,#4F46E5,#0891B2)" }}><Calendar size={16}/></div>
+          <div>
+            <div className="font-display font-bold text-base">Store-wide default</div>
+            <div className="text-xs text-slate-500">Applied to every product that doesn't set its own delivery window.</div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+          <Field label="Minimum business days">
+            <input
+              type="number" min="0" max="365" step="1"
+              className="input w-full px-3 py-2 font-mono text-lg"
+              value={draft.default_min_days}
+              onChange={(e) => setDraft(d => ({ ...d, default_min_days: e.target.value }))}
+              data-testid="delivery-default-min-input"
+            />
+          </Field>
+          <Field label="Maximum business days">
+            <input
+              type="number" min="0" max="365" step="1"
+              className="input w-full px-3 py-2 font-mono text-lg"
+              value={draft.default_max_days}
+              onChange={(e) => setDraft(d => ({ ...d, default_max_days: e.target.value }))}
+              data-testid="delivery-default-max-input"
+            />
+          </Field>
+        </div>
+
+        {invalid ? (
+          <div className="mt-3 p-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800 flex items-center gap-2">
+            <AlertTriangle size={13}/> Maximum days must be greater than or equal to minimum days.
+          </div>
+        ) : (
+          <div className="mt-3 p-3 rounded-lg border border-emerald-200 bg-emerald-50/60" data-testid="delivery-default-preview">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-700">Live preview · updates every day</div>
+            <div className="text-sm text-slate-800 mt-0.5 font-medium">{preview.label}</div>
+            <div className="text-[11px] text-slate-500 font-mono mt-0.5">{min}–{max} business days from today · weekends skipped</div>
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center justify-end gap-2 flex-wrap">
+          {dirty && !invalid && <span className="text-xs text-amber-600 font-mono">Unsaved changes</span>}
+          <button onClick={() => setDraft({ default_min_days: settings.default_min_days, default_max_days: settings.default_max_days })} disabled={!dirty || busy} className="btn btn-ghost text-sm" data-testid="delivery-default-cancel">Discard</button>
+          <button onClick={save} disabled={busy || !dirty || invalid} className="btn btn-primary text-sm" data-testid="delivery-default-save">
+            {busy ? <Loader2 className="animate-spin" size={14}/> : <BadgeCheck size={14}/>} Save default
+          </button>
+        </div>
+      </div>
+
+      <div className="card p-4 border-dashed border-2 text-xs text-slate-500 leading-relaxed">
+        <div className="font-display font-bold text-slate-700 text-sm mb-1 flex items-center gap-2"><HelpCircle size={14}/> How it works</div>
+        Every product page shows an <span className="font-mono">"Estimated delivery between [date] and [date]"</span> line computed live in the browser using today's date + this window. Weekends are always skipped. To override for a specific product (e.g. large items), open the product and switch on <span className="font-mono">Custom delivery window</span>.
+      </div>
     </div>
   );
 }
@@ -902,6 +999,7 @@ export function StoreManagement({ section, setSection }) {
     "store-settings":      { hint: "Store name, brand, contact details, business hours and legal info.", fields: ["Store name","Legal business name","ABN","Contact email","Support phone","Business hours"] },
     "pricing-rules":       { hint: "Tiered profit rules the scraper uses when calculating sell prices for imported items.", fields: [], custom: <PricingRulesEditor/> },
     "postage-presets":     { hint: "Reusable postage options shown as a dropdown on every product. Free, Standard, or Large Item (postage + insurance).", fields: [], custom: <PostagePresetsEditor/> },
+    "delivery-estimate":   { hint: "Store-wide default delivery window (in business days, weekends skipped). Every product page shows a live 'Estimated delivery between [date] and [date]' that rolls forward each day automatically.", fields: [], custom: <DeliverySettingsEditor/> },
     "scraper-schedule":    { hint: "Automate the eBay re-fetch: set a start time, frequency, optional stop date, or run one right now.", fields: [], custom: <ScraperScheduleEditor/> },
     "payment-gateway":     { hint: "Enable/disable payment providers and configure their credentials.", fields: ["Stripe","PayPal","Apple Pay","Google Pay","Afterpay","Zip Pay","Bank transfer","Cash on delivery"] },
     "shipping-methods":    { hint: "Zones, carriers, rates and free-shipping thresholds.", fields: ["Australia Post — Parcel Post","Australia Post — Express","Sendle","Aramex","Local delivery","Click & collect","Free shipping threshold"] },

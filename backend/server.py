@@ -35,6 +35,7 @@ from models import (
     PUSH_CRITICAL_TYPES, PushSettingsUpdate, PricingRuleBase, PricingRule, PricingRuleUpdate, 
     _DEFAULT_PRICING_RULES, BulkProductIds,
     PostagePresetBase, PostagePreset, PostagePresetUpdate, POSTAGE_PRESET_KINDS,
+    DeliverySettingsUpdate,
 )
 from helpers import (
     _rand_au_address, _slug, _product_code_base, _generate_unique_product_code, 
@@ -47,7 +48,7 @@ from helpers import (
     _get_credential, _push_channel_status, _notif_is_critical, _send_email, _send_telegram, 
     _format_notification_html, _push_notification, _emit_notification, 
     _emit_price_change_notifications, _auto_archive_if_out_of_stock, calc_pricing, _ensure_pricing_rules_seeded, 
-    _load_pricing_rules, _ensure_postage_presets_seeded,
+    _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings,
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
     _customer_email_html,
@@ -1743,6 +1744,41 @@ async def delete_postage_preset(pid: str):
     return {"deleted": True}
 
 
+# ---------------------------------------------------------------------------
+# Delivery Settings (store-wide default estimate window)
+# The frontend computes the actual estimated date range each render so it
+# auto-updates every day without any background job. Both values are in
+# *business days* (weekends skipped).
+# ---------------------------------------------------------------------------
+
+
+def _validate_delivery_window(min_days: int, max_days: int) -> None:
+    if min_days < 0 or max_days < 0:
+        raise HTTPException(status_code=400, detail="Days must be zero or positive")
+    if min_days > 365 or max_days > 365:
+        raise HTTPException(status_code=400, detail="Days must be 365 or fewer")
+    if max_days < min_days:
+        raise HTTPException(status_code=400, detail="Max days must be greater than or equal to min days")
+
+
+@api_router.get("/delivery-settings")
+async def get_delivery_settings():
+    return await _get_delivery_settings()
+
+
+@api_router.patch("/delivery-settings")
+async def update_delivery_settings(body: DeliverySettingsUpdate):
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    existing = await _get_delivery_settings()
+    merged = {**existing, **fields}
+    _validate_delivery_window(int(merged["default_min_days"]), int(merged["default_max_days"]))
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.delivery_settings.update_one({"id": "singleton"}, {"$set": fields}, upsert=True)
+    return await _get_delivery_settings()
+
+
 
 @api_router.post("/products/from-item/{item_id}")
 async def create_product_from_item(item_id: str):
@@ -1986,6 +2022,15 @@ async def update_product(pid: str, body: ProductUpdate):
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
+    # Per-product custom delivery window: only validate when both bounds are
+    # being set (or already set on the product), so partial patches don't
+    # spuriously fail.
+    if fields.get("custom_delivery_window") is True or "delivery_min_days" in fields or "delivery_max_days" in fields:
+        existing = await db.products.find_one({"id": pid}, {"_id": 0, "delivery_min_days": 1, "delivery_max_days": 1}) or {}
+        mn = fields.get("delivery_min_days", existing.get("delivery_min_days"))
+        mx = fields.get("delivery_max_days", existing.get("delivery_max_days"))
+        if mn is not None and mx is not None:
+            _validate_delivery_window(int(mn), int(mx))
     fields["updated_at"] = datetime.now(timezone.utc).isoformat()
     r = await db.products.update_one({"id": pid}, {"$set": fields})
     if r.matched_count == 0:

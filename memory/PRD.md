@@ -889,3 +889,15 @@ Notification Bell deep-links) — zero regressions detected.
     Amounts save alongside `postage_preset_id` on Save changes.
     Scraped delivery-speed / ETA card still shown underneath for reference.
 - **Tests**: `/app/backend/tests/test_postage_presets.py` — 11 cases covering seeding, validation, PATCH auto-zero behaviour, product wiring, and delete-cascade to products. All pass.
+
+
+## Feb 24, 2026 — Dynamic Delivery Estimate (Store default + per-product override)
+- **Backend** — new `delivery_settings` singleton (defaults `{min: 3, max: 7}` business days) with `GET/PATCH /api/delivery-settings` and validation: non-negative, `max >= min`, upper bound 365.
+- Extended `Product`/`ProductUpdate` with `custom_delivery_window: bool`, `delivery_min_days`, `delivery_max_days`. `PATCH /products/{pid}` validates the pair when either bound is touched.
+- **Frontend**
+  * New shared helper `frontend/src/lib/delivery.js` — `addBusinessDays` (skips Sat/Sun) + `computeDeliveryEstimate(min, max, today=new Date())` which returns `{fromDate, toDate, label}`.
+    Estimate is computed at render time in the browser, so the range rolls forward every day with zero server/cron work — the "auto-updates daily" property.
+  * Store Management → new **Delivery Estimate** section (`delivery-estimate` nav id, `Truck` icon) with a two-field editor (min/max business days) plus a live "Estimated delivery between [date] and [date]" preview + inline validation.
+  * Product Detail → new **Custom delivery window** toggle. OFF (default) shows the store-wide preview line. ON reveals two min/max inputs pre-filled from the current defaults and swaps the preview to the custom window. Toggle chip reads "Default" / "Custom".
+  * Both previews use the friendly AU date format ("Mon, 3 Mar") and clearly label weekends as skipped.
+- **Tests**: `/app/backend/tests/test_delivery_settings.py` — 8 cases covering seeding, validation, per-product save/read, and toggle-off. All 19 delivery+postage tests green.

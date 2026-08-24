@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Pencil, Plus, RefreshCw, Save, Star as StarIcon, Trash2, X } from "lucide-react";
+import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Pencil, Plus, RefreshCw, Save, Star as StarIcon, Trash2, Truck, X } from "lucide-react";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
 import { API, proxyImg, imgThumb, imgFull } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
+import { computeDeliveryEstimate } from "../lib/delivery";
 
 export function ProductDetailPage({ productId, onBack }) {
   const [p, setP] = useState(null);
   const [f, setF] = useState({});
   const [cats, setCats] = useState([]);
   const [presets, setPresets] = useState([]);
+  const [deliveryDefaults, setDeliveryDefaults] = useState({ default_min_days: 3, default_max_days: 7 });
   const [reviews, setReviews] = useState([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -43,6 +45,9 @@ export function ProductDetailPage({ productId, onBack }) {
       postage_preset_id: prod.postage_preset_id || "",
       postage_amount: prod.postage_amount ?? "",
       postage_insurance_amount: prod.postage_insurance_amount ?? "",
+      custom_delivery_window: !!prod.custom_delivery_window,
+      delivery_min_days: prod.delivery_min_days ?? "",
+      delivery_max_days: prod.delivery_max_days ?? "",
     });
     setReviews(rev);
     setDirty(false);
@@ -50,6 +55,7 @@ export function ProductDetailPage({ productId, onBack }) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { axios.get(`${API}/categories`, { params: { active: true }}).then(r => setCats(r.data.categories || [])); }, []);
   useEffect(() => { axios.get(`${API}/postage-presets`).then(r => setPresets((r.data.presets || []).filter(x => x.active !== false))); }, []);
+  useEffect(() => { axios.get(`${API}/delivery-settings`).then(r => setDeliveryDefaults(r.data || { default_min_days: 3, default_max_days: 7 })); }, []);
 
   const setField = (k, v) => { setF(prev => ({ ...prev, [k]: v })); setDirty(true); };
   const save = async () => {
@@ -76,6 +82,18 @@ export function ProductDetailPage({ productId, onBack }) {
           // "standard" or unknown → single amount, insurance cleared
           body.postage_amount = Number(f.postage_amount) || 0;
           body.postage_insurance_amount = 0;
+        }
+      }
+      // Custom delivery window: only send min/max when the toggle is ON so
+      // turning it OFF cleanly reverts the product to the store-wide default
+      // (the frontend uses `custom_delivery_window` to pick which to show).
+      body.custom_delivery_window = !!f.custom_delivery_window;
+      if (f.custom_delivery_window) {
+        body.delivery_min_days = Number(f.delivery_min_days) || 0;
+        body.delivery_max_days = Number(f.delivery_max_days) || 0;
+        if (body.delivery_max_days < body.delivery_min_days) {
+          setSaving(false);
+          return toast.error("Max delivery days must be greater than or equal to min days");
         }
       }
       await axios.patch(`${API}/products/${productId}`, body);
@@ -334,6 +352,14 @@ export function ProductDetailPage({ productId, onBack }) {
               setDirty={setDirty}
             />
           </div>
+          <div className="md:col-span-3">
+            <DeliveryWindowField
+              f={f}
+              setF={setF}
+              setDirty={setDirty}
+              defaults={deliveryDefaults}
+            />
+          </div>
         </div>
         <Field label="Description" className="mt-3"><textarea className="input w-full px-3 py-2 min-h-[160px] leading-relaxed" value={f.description} onChange={(e) => setField("description", e.target.value)} data-testid="product-description-input"/></Field>
       </div>
@@ -499,6 +525,101 @@ function bucketSpecs(specifics) {
   const filled = groups.filter((g) => g.entries.length > 0);
   return { groups: filled, other };
 }
+
+/**
+ * Custom delivery window picker. When the toggle is OFF, the store-wide
+ * default is used (shown as a preview line for reference). When ON, admins
+ * can override min/max business days for this specific product — useful for
+ * large items that ship slower. The preview updates live in the browser so
+ * the date range rolls forward automatically each new day without any
+ * background job.
+ */
+export function DeliveryWindowField({ f, setF, setDirty, defaults }) {
+  const useCustom = !!f.custom_delivery_window;
+  const min = useCustom ? (Number(f.delivery_min_days) || 0) : Number(defaults.default_min_days) || 0;
+  const max = useCustom ? (Number(f.delivery_max_days) || 0) : Number(defaults.default_max_days) || 0;
+  const invalid = useCustom && max < min;
+  const est = computeDeliveryEstimate(min, max);
+
+  const toggle = (v) => {
+    setF(prev => ({
+      ...prev,
+      custom_delivery_window: v,
+      // Seed the override with the current defaults so admins have a
+      // reasonable starting point instead of an empty field.
+      delivery_min_days: v && (prev.delivery_min_days === "" || prev.delivery_min_days == null)
+        ? defaults.default_min_days : prev.delivery_min_days,
+      delivery_max_days: v && (prev.delivery_max_days === "" || prev.delivery_max_days == null)
+        ? defaults.default_max_days : prev.delivery_max_days,
+    }));
+    setDirty(true);
+  };
+
+  return (
+    <div className="grid gap-3" data-testid="product-delivery-window-field">
+      <label className="flex items-start gap-3 p-3 rounded-lg border hairline bg-slate-50/40 cursor-pointer" data-testid="product-custom-delivery-toggle">
+        <input
+          type="checkbox"
+          checked={useCustom}
+          onChange={(e) => toggle(e.target.checked)}
+          className="accent-indigo-600 mt-1 w-4 h-4"
+        />
+        <div className="flex-1">
+          <div className="text-sm font-medium flex items-center gap-2"><Truck size={14} className="text-slate-500"/> Custom delivery window</div>
+          <div className="text-xs text-slate-500 mt-0.5">
+            When OFF, this product uses the store-wide default ({defaults.default_min_days}–{defaults.default_max_days} business days). Turn it ON to override for large items or slow-shipping products.
+          </div>
+        </div>
+        <span className={`chip ${useCustom ? "chip-primary" : "chip-neutral"} font-mono text-[10px] shrink-0`}>{useCustom ? "Custom" : "Default"}</span>
+      </label>
+
+      {useCustom && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Field label="Min business days">
+            <input
+              type="number" min="0" max="365" step="1"
+              className="input w-full px-3 py-2 font-mono"
+              value={f.delivery_min_days}
+              onChange={(e) => { setF(v => ({ ...v, delivery_min_days: e.target.value })); setDirty(true); }}
+              data-testid="product-delivery-min-input"
+            />
+          </Field>
+          <Field label="Max business days">
+            <input
+              type="number" min="0" max="365" step="1"
+              className="input w-full px-3 py-2 font-mono"
+              value={f.delivery_max_days}
+              onChange={(e) => { setF(v => ({ ...v, delivery_max_days: e.target.value })); setDirty(true); }}
+              data-testid="product-delivery-max-input"
+            />
+          </Field>
+        </div>
+      )}
+
+      {invalid ? (
+        <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800 flex items-center gap-2">
+          <Calendar size={13}/> Max days must be greater than or equal to min days.
+        </div>
+      ) : (
+        <div
+          className="p-3 rounded-lg border border-emerald-200 bg-emerald-50/60"
+          data-testid="product-delivery-estimate-preview"
+        >
+          <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-700 flex items-center gap-1">
+            <Calendar size={11}/> Live delivery estimate
+          </div>
+          <div className="text-sm text-slate-800 mt-0.5 font-medium" data-testid="product-delivery-estimate-label">
+            {est.label}
+          </div>
+          <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+            {min}–{max} business days from today · weekends skipped · {useCustom ? "custom override" : "store default"}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 /* ------------------------ Postage / Delivery card --------------------------
  *

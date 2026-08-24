@@ -78,6 +78,7 @@ export const STORE_NAV = [
   { id: "payment-gateway",     label: "Payment Gateway",      icon: CreditCard,   group: "Configuration" },
   { id: "shipping-methods",    label: "Shipping Methods",     icon: Truck,        group: "Configuration" },
   { id: "postage-presets",     label: "Postage Presets",      icon: PackageSearch, group: "Configuration" },
+  { id: "delivery-estimate",   label: "Delivery Estimate",    icon: Truck,        group: "Configuration" },
   { id: "tax-rates",           label: "Tax Rates",            icon: Receipt,      group: "Configuration" },
   { id: "checkout-settings",   label: "Checkout Settings",    icon: ShoppingCart, group: "Configuration" },
   { id: "email-notifications", label: "Email & Notifications",icon: Mail,         group: "Content" },

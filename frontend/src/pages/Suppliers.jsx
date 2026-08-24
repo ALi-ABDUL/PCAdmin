@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
-import { BadgeCheck, Ban, ChevronLeft, ExternalLink, History, ImageIcon, Loader2, Search } from "lucide-react";
+import { toast } from "sonner";
+import { BadgeCheck, Ban, ChevronLeft, ExternalLink, History, ImageIcon, Loader2, Search, Trash2 } from "lucide-react";
 import { StatBox } from "../components/atoms";
 import { Pagination, usePagePref } from "../components/Pagination";
 import { SortableTh, useSortPref } from "../components/SortableTh";
@@ -41,9 +42,45 @@ export function Suppliers({ section, setSection, supplierDetailId, openSupplierD
   useEffect(() => { loadSummary(); }, [loadSummary, list.length]);
   useEffect(() => { setPage(1); }, [q, status, sortParam, pageSize]);
 
+  /** Delete a supplier — wipes its scraped items. If it still has store
+   *  products linked to it we confirm loudly so nothing is nuked by mistake. */
+  const deleteSupplier = useCallback(async (s) => {
+    const linked = Number(s.linked_product_count || 0);
+    if (linked > 0) {
+      const ok = window.confirm(
+        `${s.name} has ${linked} product${linked === 1 ? "" : "s"} linked to it in your store.\n\n` +
+        `Deleting this supplier will remove its scraped item history. Linked products will remain in your store but will no longer be tied to a supplier.\n\n` +
+        `Delete anyway?`
+      );
+      if (!ok) return false;
+    }
+    try {
+      const { data } = await axios.delete(`${API}/suppliers/${s.id}`);
+      toast.success(`${s.name} deleted`, {
+        description: data.deleted_items ? `Cleared ${data.deleted_items} scraped item${data.deleted_items === 1 ? "" : "s"}.` : undefined,
+      });
+      load();
+      loadSummary();
+      return true;
+    } catch (err) {
+      toast.error("Could not delete supplier", { description: err?.response?.data?.detail || err.message });
+      return false;
+    }
+  }, [load, loadSummary]);
+
   // Supplier detail takes over the entire Suppliers UI when active.
   if (supplierDetailId) {
-    return <SupplierDetailPage supplierId={supplierDetailId} onBack={() => openSupplierDetail?.(null)} openProductDetail={openProductDetail}/>;
+    return (
+      <SupplierDetailPage
+        supplierId={supplierDetailId}
+        onBack={() => openSupplierDetail?.(null)}
+        openProductDetail={openProductDetail}
+        onDelete={async (s) => {
+          const ok = await deleteSupplier(s);
+          if (ok) openSupplierDetail?.(null);
+        }}
+      />
+    );
   }
 
   const meta = SUPPLIER_NAV.find((s) => s.id === section) || SUPPLIER_NAV[0];
@@ -67,7 +104,7 @@ export function Suppliers({ section, setSection, supplierDetailId, openSupplierD
         </div>
       </div>
 
-      {section === "all"      && <AllSuppliers list={list} total={total} q={q} setQ={setQ} sortField={sortField} sortDir={sortDir} toggleSort={toggleSort} status={status} setStatus={setStatus} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} onOpen={openSupplierDetail}/>}
+      {section === "all"      && <AllSuppliers list={list} total={total} q={q} setQ={setQ} sortField={sortField} sortDir={sortDir} toggleSort={toggleSort} status={status} setStatus={setStatus} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} onOpen={openSupplierDetail} onDelete={deleteSupplier}/>}
       {section === "top"      && <TopSuppliers list={summary?.top_suppliers || []} agg={summary?.aggregate}/>}
       {section === "products" && <SupplierProducts list={list}/>}
       {section === "orders"   && <SupplierOrders list={list}/>}
@@ -86,7 +123,8 @@ export function SellerStatusChip({ status }) {
   return <span className={`chip ${active ? "chip-success" : "chip-neutral"}`} data-testid="sup-status">{active ? <BadgeCheck size={11}/> : <Ban size={11}/>} {active ? "Active" : "Inactive"}</span>;
 }
 
-export function AllSuppliers({ list, total, q, setQ, sortField, sortDir, toggleSort, status, setStatus, page = 1, setPage, pageSize = 50, setPageSize, onOpen }) {
+export function AllSuppliers({ list, total, q, setQ, sortField, sortDir, toggleSort, status, setStatus, page = 1, setPage, pageSize = 50, setPageSize, onOpen, onDelete }) {
+  const stop = (e) => e.stopPropagation();
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -110,9 +148,10 @@ export function AllSuppliers({ list, total, q, setQ, sortField, sortDir, toggleS
               <SortableTh label="Revenue Generated" field="revenue_generated" active={sortField} dir={sortDir} onSort={toggleSort} align="right" testPrefix="sup"/>
               <SortableTh label="Last Active" field="last_active" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="sup"/>
               <SortableTh label="Status" field="status" active={sortField} dir={sortDir} onSort={toggleSort} testPrefix="sup"/>
+              <th></th>
             </tr></thead>
             <tbody>
-              {list.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-500">No eBay sellers yet — import a listing on the Product Sourcing page.</td></tr>}
+              {list.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-slate-500">No eBay sellers yet — import a listing on the Product Sourcing page.</td></tr>}
               {list.map((s) => (
                 <tr
                   key={s.id}
@@ -134,6 +173,16 @@ export function AllSuppliers({ list, total, q, setQ, sortField, sortDir, toggleS
                   <td className="text-right font-mono font-bold text-indigo-600">{moneyCents(s.revenue_generated)}</td>
                   <td className="text-xs text-slate-500 font-mono">{s.last_active ? fmtDate(s.last_active) : "—"}</td>
                   <td><SellerStatusChip status={s.status}/></td>
+                  <td onClick={stop}>
+                    <button
+                      onClick={() => onDelete?.(s)}
+                      className="btn btn-danger !p-2"
+                      title={`Delete ${s.name}`}
+                      data-testid={`sup-delete-${s.id}`}
+                    >
+                      <Trash2 size={12}/>
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -257,7 +306,7 @@ export function SupplierActivity({ list }) {
 
 /* ------------------------------ Supplier Detail ---------------------------- */
 
-export function SupplierDetailPage({ supplierId, onBack, openProductDetail }) {
+export function SupplierDetailPage({ supplierId, onBack, openProductDetail, onDelete }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -291,9 +340,16 @@ export function SupplierDetailPage({ supplierId, onBack, openProductDetail }) {
   const { supplier: s, products, product_count } = data;
   return (
     <div className="grid gap-6" data-testid="supplier-detail">
-      <div>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <button onClick={onBack} className="btn btn-ghost text-sm" data-testid="sup-detail-back">
           <ChevronLeft size={14}/> Back to suppliers
+        </button>
+        <button
+          onClick={() => onDelete?.({ ...s, linked_product_count: product_count })}
+          className="btn btn-danger text-sm"
+          data-testid="sup-detail-delete"
+        >
+          <Trash2 size={14}/> Delete supplier
         </button>
       </div>
       <div className="card p-5 md:p-6 flex items-start gap-4">

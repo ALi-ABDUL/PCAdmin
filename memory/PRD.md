@@ -636,3 +636,28 @@ Notification Bell deep-links) — zero regressions detected.
   2000W Bagged Vacuum Cleaner" card with $149.49 / 10 in stock; clicking
   the card lands on the full product detail page with Save button.
 
+
+## Feb 24, 2026 — Delete supplier
+- Backend: `_build_sellers` now tracks both item uuids and eBay item_ids
+  per bucket and computes a proper `linked_product_count` (matches
+  `products.source_item_id ∈ ebay_ids`). New `DELETE /suppliers/{sid}`
+  wipes `items.delete_many({seller: name})` and returns
+  `{deleted_items, linked_product_count}`. Store products keep their
+  rows so nothing disappears from the storefront without admin consent.
+- Frontend: `Suppliers` owns a shared `deleteSupplier` callback used by
+  both the row-level `Trash2` button (new column on the All Suppliers
+  table with `data-testid="sup-delete-<sid>"`) and the "Delete supplier"
+  button at the top of the Supplier detail page (`sup-detail-delete`).
+  If `linked_product_count > 0` the callback fires a `window.confirm`
+  that spells out how many products are linked and warns that they'll
+  stay in the store but lose their supplier tie; if `linked_product_count
+  === 0` the deletion happens immediately without a prompt.
+- Verified end-to-end via Playwright:
+  * "Elite Electronics Store (84516)" (1 linked product) → clicking
+    Delete showed the confirm dialog reading "Elite Electronics Store
+    (84516) has 1 product linked to it in your store. …";
+  * "CoastalPhones (2022)" (0 linked products) → deletion happened
+    silently with a "CoastalPhones (2022) deleted — Cleared 1 scraped
+    item." toast, and the supplier disappeared from the list on next
+    fetch.
+

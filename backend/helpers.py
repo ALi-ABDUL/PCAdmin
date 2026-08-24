@@ -640,8 +640,10 @@ async def _build_sellers() -> List[dict]:
         name = (it.get("seller") or "").strip()
         if not name:
             continue
-        b = buckets.setdefault(name, {"item_ids": [], "locations": set(), "last": "", "any_live": False})
+        b = buckets.setdefault(name, {"item_ids": [], "ebay_ids": [], "locations": set(), "last": "", "any_live": False})
         b["item_ids"].append(it["id"])
+        if it.get("item_id"):
+            b["ebay_ids"].append(it["item_id"])
         if it.get("location"):
             b["locations"].add(it["location"])
         upd = it.get("updated_at") or it.get("created_at") or ""
@@ -652,10 +654,13 @@ async def _build_sellers() -> List[dict]:
 
     sellers: List[dict] = []
     for name, b in buckets.items():
-        products = await db.products.find(
-            {"source_item_id": {"$in": b["item_ids"]}}, {"_id": 0, "id": 1}
-        ).to_list(1000)
-        product_ids = [p["id"] for p in products]
+        # Products in the store sourced from this seller (join on the eBay
+        # item_id, which is what `products.source_item_id` stores).
+        linked_products = await db.products.find(
+            {"source_item_id": {"$in": b["ebay_ids"]}, "archived": {"$ne": True}},
+            {"_id": 0, "id": 1},
+        ).to_list(1000) if b["ebay_ids"] else []
+        product_ids = [p["id"] for p in linked_products]
 
         orders_count = 0
         revenue = 0.0
@@ -673,6 +678,7 @@ async def _build_sellers() -> List[dict]:
             "name": name,
             "location": ", ".join(sorted(b["locations"])) or "—",
             "total_products": len(b["item_ids"]),
+            "linked_product_count": len(product_ids),
             "total_orders": orders_count,
             "revenue_generated": round(revenue, 2),
             "last_active": b["last"],

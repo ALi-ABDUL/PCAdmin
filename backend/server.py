@@ -1482,6 +1482,27 @@ async def get_supplier(sid: str):
     return {"supplier": seller, "products": products, "product_count": len(products)}
 
 
+@api_router.delete("/suppliers/{sid}")
+async def delete_supplier(sid: str):
+    """Remove a supplier by wiping all scraped items with that seller name.
+
+    Store products keep their rows (with the now-dangling `source_item_id`)
+    so nothing on the storefront disappears without the admin's say-so —
+    the front-end shows a warning with the linked-product count so they can
+    confirm before pulling the trigger.
+    """
+    sellers = await _build_sellers()
+    seller = next((s for s in sellers if s["id"] == sid), None)
+    if not seller:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    res = await db.items.delete_many({"seller": seller["name"]})
+    return {
+        "ok": True,
+        "deleted_items": int(res.deleted_count or 0),
+        "linked_product_count": seller.get("linked_product_count", 0),
+    }
+
+
 
 # ---------------------------------------------------------------------------
 # Notifications (price-change alerts)

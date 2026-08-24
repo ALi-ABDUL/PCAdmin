@@ -609,6 +609,40 @@ def _filter_product_images(urls: list[str], limit: int = 8) -> list[str]:
     return out
 
 
+def _normalize_postage(display: Optional[str], fee: Optional[float]) -> tuple[Optional[str], Optional[float]]:
+    """Normalise the scraped postage into a canonical display + numeric fee.
+
+    Rules the store cares about:
+    - If the seller offers free postage (text contains "Free" or "$0.00", or
+      the numeric fee is 0), return ("Free Postage", 0.0).
+    - Otherwise if we have a numeric fee, format it as "$X.XX" and keep the
+      fee.
+    - If we only have a display string with a dollar amount, extract the
+      amount, format cleanly, and use that.
+    - If nothing was scraped, leave both as None so the UI can render a
+      neutral "not specified" state instead of fabricating a value.
+    """
+    if not display and fee is None:
+        return None, None
+    text = (display or "").strip()
+    lower = text.lower()
+    # "Free" / "$0.00" / numeric 0 → the seller offers free postage.
+    if "free" in lower or "$0.00" in text or text.strip("$ ") in ("0", "0.00") or fee == 0.0:
+        return "Free Postage", 0.0
+    # Extract a fee from the display text if we don't already have one.
+    if fee is None:
+        m = re.search(r"(?:AU\s*\$|A\$|\$)\s*([0-9]+(?:[.,][0-9]{1,2})?)", text)
+        if m:
+            try:
+                fee = float(m.group(1).replace(",", "."))
+            except ValueError:
+                fee = None
+    if fee is not None and fee > 0:
+        return f"${fee:.2f}", fee
+    # Nothing usable — return what we scraped verbatim if it looks like text.
+    return (text or None), fee
+
+
 def _extract_price(soup: BeautifulSoup) -> tuple[Optional[str], Optional[float], Optional[str]]:
     # itemprop=price meta
     meta_price = soup.find("meta", itemprop="price")
@@ -1121,6 +1155,14 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
         elif "free" in shipping.lower() and "post" in shipping.lower():
             postage_display = "Free postage"
             postage_fee = 0.0
+
+    # Normalise whatever we found into the two canonical forms the store
+    # expects: "Free Postage" when the seller offers free shipping (either
+    # via a "Free" / "$0.00" string or an explicit fee of 0), or the exact
+    # dollar amount otherwise (e.g. "$15.00"). If nothing was scraped we
+    # leave both fields None so the UI can show a "not specified" state
+    # rather than fabricating a number.
+    postage_display, postage_fee = _normalize_postage(postage_display, postage_fee)
 
     if shipping and not collection and re.search(r"(local pick[- ]?up|collection)", shipping, re.IGNORECASE):
         m = re.search(r"(Free local pickup[^.]*|[Ll]ocal pick[- ]?up[^.]*)", shipping)

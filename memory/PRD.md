@@ -783,3 +783,29 @@ Notification Bell deep-links) — zero regressions detected.
   `test_non_ebay_urls_bypass_s_l1600_rule`). Combined scraper suite
   (title + description + images) — **38 passing**.
 
+
+## Feb 24, 2026 — Verbatim eBay Postage
+- New `scraper._normalize_postage(display, fee)` returns exactly two
+  canonical forms:
+  * "Free Postage" — when text contains "Free" or "$0.00", or the
+    numeric fee is 0.
+  * "$X.XX" — the exact dollar amount otherwise (parsed from the
+    display string when the seller only provided text).
+  * `(None, None)` when nothing was scraped so the UI never fabricates
+    a value.
+- Called at the tail of the eBay listing parser so both the JSON-LD
+  "shippingDetails" branch and the free-text fallback (e.g. "AU $9.95
+  postage") produce the same canonical output.
+- `Product` model gained `postage: Optional[str]`. Both add-to-product
+  paths (`POST /items/{iid}/add-to-products` bulk + single) now copy
+  `item.postage_display` to `product.postage`.
+- Frontend Product Detail page shows a new read-only **Postage** field
+  next to Margin (with `data-testid="product-postage-display"`). "Free
+  Postage" renders in bold emerald, real dollar amounts in slate, and
+  missing values as italic "Not specified" so admins can spot a
+  listing whose postage failed to scrape.
+- Regression suite: `backend/tests/test_postage_normalize.py` — 13
+  pytest cases (free-word, $0.00, $0, numeric-0, dollar amount + fee,
+  extract-from-text-only, formatting decimals, larger fee, both none,
+  empty string, junk text). Combined scraper suite → **51 passing**.
+

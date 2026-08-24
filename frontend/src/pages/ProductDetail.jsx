@@ -295,6 +295,16 @@ export function ProductDetailPage({ productId, onBack }) {
             </select>
           </Field>
           <Field label="Margin"><div className={`input w-full px-3 py-2 font-mono ${margin>=40?"text-emerald-600":margin>=20?"text-amber-600":"text-red-600"} font-bold`}>{margin.toFixed(1)}%</div></Field>
+          {/* Postage is scraped verbatim from the eBay listing — read-only,
+              so admins never accidentally overwrite it with a made-up value. */}
+          <Field label="Postage">
+            <div
+              className={`input w-full px-3 py-2 font-mono ${(p.postage || "").toLowerCase().includes("free") ? "text-emerald-600 font-bold" : "text-slate-800"}`}
+              data-testid="product-postage-display"
+            >
+              {p.postage || <span className="text-slate-400 italic font-sans">Not specified</span>}
+            </div>
+          </Field>
         </div>
         <Field label="Description" className="mt-3"><textarea className="input w-full px-3 py-2 min-h-[160px] leading-relaxed" value={f.description} onChange={(e) => setField("description", e.target.value)} data-testid="product-description-input"/></Field>
       </div>

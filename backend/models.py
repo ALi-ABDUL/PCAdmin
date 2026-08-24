@@ -125,6 +125,7 @@ class ProductCreate(BaseModel):
     product_code: Optional[str] = None  # public reference — e.g. KF21-PC0826 (auto-generated on create)
     variants: List[dict] = Field(default_factory=list)  # [{type, option, price, currency, stock_status, sku?}]
     specifics: dict = Field(default_factory=dict)   # scraped eBay item specifics (label → value)
+    postage: Optional[str] = None                   # scraped eBay postage — "Free Postage" or "$15.00"
 
 
 class Product(ProductCreate):

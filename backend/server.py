@@ -819,9 +819,24 @@ async def get_customer(cid: str):
         orders_full = await db.orders.find(
             {"customer_email": email}, {"_id": 0},
         ).sort("created_at", -1).limit(25).to_list(25)
+        # Batch-fetch product thumbnails so the timeline & orders table can
+        # show a small image next to each row without N+1 lookups.
+        product_ids = list({o.get("product_id") for o in orders_full if o.get("product_id")})
+        product_images: dict[str, str] = {}
+        if product_ids:
+            prods = await db.products.find(
+                {"id": {"$in": product_ids}}, {"_id": 0, "id": 1, "images": 1},
+            ).to_list(length=None)
+            for p in prods:
+                imgs = p.get("images") or []
+                if imgs:
+                    product_images[p["id"]] = imgs[0]
         # Keep the compact shape for the Recent orders table.
         orders = [
-            {k: o.get(k) for k in ("id", "reference", "status", "total", "created_at", "items", "customer_name")}
+            {
+                **{k: o.get(k) for k in ("id", "reference", "status", "total", "created_at", "items", "customer_name", "product_id", "product_title")},
+                "product_image": product_images.get(o.get("product_id")),
+            }
             for o in orders_full
         ]
         thread = await db.messages.find(
@@ -833,21 +848,26 @@ async def get_customer(cid: str):
         # Build the flat timeline: one "order_created" event per order + one
         # "status_change" event for every entry in status_history.
         for o in orders_full:
-            timeline.append({
-                "type": "order_created",
-                "ts": o.get("created_at"),
+            _img = product_images.get(o.get("product_id"))
+            _base = {
                 "order_id": o.get("id"),
                 "order_reference": o.get("reference"),
+                "product_id": o.get("product_id"),
+                "product_title": o.get("product_title"),
+                "product_image": _img,
+            }
+            timeline.append({
+                **_base,
+                "type": "order_created",
+                "ts": o.get("created_at"),
                 "status": o.get("status"),
                 "total": o.get("total"),
-                "product_title": o.get("product_title"),
             })
             for h in (o.get("status_history") or []):
                 timeline.append({
+                    **_base,
                     "type": "status_change",
                     "ts": h.get("changed_at"),
-                    "order_id": o.get("id"),
-                    "order_reference": o.get("reference"),
                     "from": h.get("from"),
                     "to": h.get("to"),
                 })

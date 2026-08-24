@@ -11,7 +11,7 @@ import { CustomerDetailPage } from "./CustomerDetail";
 import { Orders } from "./Orders";
 import { Products } from "./ProductsList";
 
-export function CustomersModule({ section, setSection, customerDetailId, openCustomerDetail, onMessageSent }) {
+export function CustomersModule({ section, setSection, customerDetailId, openCustomerDetail, onMessageSent, navigateTo }) {
   const [list, setList] = useState([]); const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
   const [q, setQ] = useState(""); const [sort, setSort] = useState("created_at_desc");
@@ -43,6 +43,7 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
       onBack={() => openCustomerDetail?.(null)}
       onDeleted={() => { openCustomerDetail?.(null); load(); }}
       onMessageSent={onMessageSent}
+      navigateTo={navigateTo}
     />;
   }
 

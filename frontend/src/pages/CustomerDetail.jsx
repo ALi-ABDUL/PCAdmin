@@ -5,10 +5,10 @@ import { BadgeCheck, ChevronLeft, Circle, Loader2, Mail, MessageSquare, PackageP
 import { Field, StatusChip } from "../components/atoms";
 import { MessageCustomerDialog } from "../components/MessageCustomerDialog";
 import { CustomerAvatar } from "./Customers";
-import { API } from "../lib/api";
+import { API, proxyImg } from "../lib/api";
 import { fmtDate, fmtLongDateTime, moneyCents } from "../lib/format";
 
-export function CustomerDetailPage({ customerId, onBack, onDeleted, onMessageSent }) {
+export function CustomerDetailPage({ customerId, onBack, onDeleted, onMessageSent, navigateTo }) {
   const [c, setC] = useState(null);
   const [orders, setOrders] = useState([]);
   const [thread, setThread] = useState([]);
@@ -155,8 +155,16 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted, onMessageSen
             <thead><tr><th>Reference</th><th>Status</th><th>Items</th><th>Total</th><th>Date</th></tr></thead>
             <tbody>
               {orders.map((o) => (
-                <tr key={o.id}>
-                  <td className="font-mono text-indigo-600 font-bold">{o.reference}</td>
+                <tr key={o.id} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => navigateTo?.({ tab: "orders", section: "all", filter: { orderId: o.id } })}>
+                  <td>
+                    <button
+                      onClick={(ev) => { ev.stopPropagation(); navigateTo?.({ tab: "orders", section: "all", filter: { orderId: o.id } }); }}
+                      className="font-mono text-indigo-600 font-bold hover:text-indigo-800 hover:underline"
+                      data-testid={`customer-order-ref-${o.id}`}
+                    >
+                      {o.reference}
+                    </button>
+                  </td>
                   <td><StatusChip status={o.status}/></td>
                   <td>{o.items || 1}</td>
                   <td className="font-mono font-bold">{moneyCents(o.total)}</td>
@@ -181,7 +189,11 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted, onMessageSen
             <div className="absolute left-[27px] top-6 bottom-6 w-px bg-slate-200" aria-hidden="true"/>
             <ol className="space-y-4">
               {timeline.map((e, idx) => (
-                <TimelineEvent key={`${e.type}-${e.order_id}-${e.ts}-${idx}`} event={e}/>
+                <TimelineEvent
+                  key={`${e.type}-${e.order_id}-${e.ts}-${idx}`}
+                  event={e}
+                  onOpenOrder={(orderId) => navigateTo?.({ tab: "orders", section: "all", filter: { orderId } })}
+                />
               ))}
             </ol>
           </div>
@@ -289,7 +301,7 @@ const STATUS_TONE = {
 };
 const _tone = (s) => STATUS_TONE[s] || { bg: "bg-slate-400", ring: "ring-slate-100", text: (s || "unknown").replace(/_/g, " ") };
 
-function TimelineEvent({ event: e }) {
+function TimelineEvent({ event: e, onOpenOrder }) {
   const isCreate = e.type === "order_created";
   const tone = isCreate ? _tone(e.status) : _tone(e.to);
   const Icon = isCreate ? PackagePlus : Circle;
@@ -306,6 +318,7 @@ function TimelineEvent({ event: e }) {
     : days >= 3
       ? "!bg-amber-50 !text-amber-700 !border-amber-200"
       : "!bg-slate-100 !text-slate-600 !border-slate-200";
+  const openOrder = (ev) => { ev.stopPropagation(); onOpenOrder?.(e.order_id); };
   return (
     <li className="relative pl-8" data-testid={`timeline-event-${e.type}`}>
       <span
@@ -314,48 +327,79 @@ function TimelineEvent({ event: e }) {
       >
         <Icon size={9} className="text-white"/>
       </span>
-      <div className="text-sm text-slate-800 flex items-center gap-2 flex-wrap">
-        {isCreate ? (
-          <>
-            <span className="font-bold">Order placed</span>
-            {" "}
-            <span className="text-slate-500">·</span>{" "}
-            <span className="font-mono text-indigo-600 font-bold">{e.order_reference}</span>
-            {e.total != null && (
-              <>
-                {" "}
-                <span className="text-slate-400">·</span>{" "}
-                <span className="font-mono font-bold">{moneyCents(e.total)}</span>
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            <span className="font-bold capitalize">{tone.text}</span>
-            <span className="text-slate-500"> · </span>
-            <span className="font-mono text-indigo-600 font-bold">{e.order_reference}</span>
-            {e.from && (
-              <>
-                <span className="text-slate-400"> · </span>
-                <span className="text-slate-500 text-xs">from {(_tone(e.from).text)}</span>
-              </>
-            )}
-          </>
-        )}
-        {showAge && (
-          <span
-            className={`chip ${ageChipTone} !text-[10px] !py-0.5`}
-            data-testid={`timeline-age-${e.order_id}`}
-            title={`In this status for ${ageLabel}`}
+      <div className="flex items-start gap-3">
+        {/* Product thumbnail — clicking navigates straight to the order. */}
+        {e.product_image ? (
+          <button
+            onClick={openOrder}
+            className="shrink-0 w-11 h-11 rounded-lg overflow-hidden border hairline bg-slate-100 hover:ring-2 hover:ring-indigo-300 transition"
+            title="Open order"
+            data-testid={`timeline-thumb-${e.order_id}`}
           >
-            {ageLabel} in status
-          </span>
+            <img src={proxyImg(e.product_image)} alt="" className="w-full h-full object-cover"/>
+          </button>
+        ) : (
+          <div className="shrink-0 w-11 h-11 rounded-lg bg-slate-100 border hairline flex items-center justify-center text-slate-400" aria-hidden="true">
+            <PackagePlus size={14}/>
+          </div>
         )}
+        <div className="min-w-0 flex-1">
+          <div className="text-sm text-slate-800 flex items-center gap-2 flex-wrap">
+            {isCreate ? (
+              <>
+                <span className="font-bold">Order placed</span>
+                <span className="text-slate-500">·</span>
+                <button
+                  onClick={openOrder}
+                  className="font-mono text-indigo-600 font-bold hover:text-indigo-800 hover:underline"
+                  data-testid={`timeline-ref-${e.order_id}`}
+                  title="Open order"
+                >
+                  {e.order_reference}
+                </button>
+                {e.total != null && (
+                  <>
+                    <span className="text-slate-400">·</span>
+                    <span className="font-mono font-bold">{moneyCents(e.total)}</span>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="font-bold capitalize">{tone.text}</span>
+                <span className="text-slate-500">·</span>
+                <button
+                  onClick={openOrder}
+                  className="font-mono text-indigo-600 font-bold hover:text-indigo-800 hover:underline"
+                  data-testid={`timeline-ref-${e.order_id}`}
+                  title="Open order"
+                >
+                  {e.order_reference}
+                </button>
+                {e.from && (
+                  <>
+                    <span className="text-slate-400">·</span>
+                    <span className="text-slate-500 text-xs">from {(_tone(e.from).text)}</span>
+                  </>
+                )}
+              </>
+            )}
+            {showAge && (
+              <span
+                className={`chip ${ageChipTone} !text-[10px] !py-0.5`}
+                data-testid={`timeline-age-${e.order_id}`}
+                title={`In this status for ${ageLabel}`}
+              >
+                {ageLabel} in status
+              </span>
+            )}
+          </div>
+          {e.product_title && (
+            <div className="text-xs text-slate-500 truncate mt-0.5" title={e.product_title}>{e.product_title}</div>
+          )}
+          <div className="text-[11px] text-slate-400 font-mono mt-0.5">{fmtDate(e.ts)}</div>
+        </div>
       </div>
-      {isCreate && e.product_title && (
-        <div className="text-xs text-slate-500 truncate mt-0.5" title={e.product_title}>{e.product_title}</div>
-      )}
-      <div className="text-[11px] text-slate-400 font-mono mt-0.5">{fmtDate(e.ts)}</div>
     </li>
   );
 }

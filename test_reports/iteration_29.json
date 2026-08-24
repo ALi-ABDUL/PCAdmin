@@ -1,0 +1,21 @@
+{
+  "summary": "Verified new Stuck Orders widget backend + frontend. GET /api/orders/stuck returns correct shape {stuck,total,sla}, sorted by days_stuck desc, excludes terminal statuses, filters days>SLA only, and no _id leaked. Fresh 'pending' order created via POST /api/orders correctly stayed OUT of the stuck list (days_stuck=0 <= SLA=2). Frontend Dashboard renders [data-testid=stuck-orders-widget] between the analytics grid (xl:grid-cols-3) and the top-products/recent-orders grid (xl:grid-cols-2). With 750 stuck orders in seed data: count chip [data-testid=stuck-orders-count] shows '750 needs attention', table renders 25 rows (capped) each with [data-testid=stuck-order-row], and [data-testid=stuck-open-{id}] navigates to /orders/... detail page correctly. Empty state DOM is present in code (Dashboard.jsx lines 247-257) but cannot be exercised at runtime because seed data has 700+ stuck orders (expected per iter note). Regression: unread-count endpoint, orders list still work.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_stuck_orders.py",
+    "/app/test_reports/pytest/stuck_orders.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend endpoint uses `(now - since).days` (integer floor). Requirement says 'days-in-current-status > SLA'; an order sitting 1.9 days in 'new' has days=1 which is NOT >1 so it's excluded. Acceptable per current test wording but be aware fractional windows are truncated.",
+    "Front-end silently swallows errors in StuckOrdersWidget (catch sets rows=[]) — an API failure will be indistinguishable from the happy 'All orders on track' empty state.",
+    "Dashboard.jsx is 324 lines — still fine, but StuckOrdersWidget could be extracted to its own file for testability."
+  ],
+  "updated_files": ["/app/backend/tests/test_stuck_orders.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Test creates + deletes one TEST_-prefixed pending order via POST/DELETE /api/orders during the fresh-order-not-stuck test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend endpoint at /api/orders/stuck. Empty-state can only be exercised by mocking or a clean DB; seed has ~750 stuck orders. Regression file test_stuck_orders.py covers shape, sort order, terminal-exclusion, fresh-order behaviour."
+}

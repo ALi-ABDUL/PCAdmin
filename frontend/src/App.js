@@ -191,7 +191,7 @@ export default function App() {
         <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 xl:p-10">
           <AnimatePresence mode="wait">
             <motion.div key={subKey} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
-              {tab === "dashboard" && <Dashboard />}
+              {tab === "dashboard" && <Dashboard navigateTo={navigateTo}/>}
               {tab === "store"     && <StoreManagement section={storeSection} setSection={setStoreSection}/>}
               {tab === "suppliers" && <Suppliers section={supplierSection} setSection={setSupplierSection}/>}
               {tab === "customers" && <CustomersModule section={customerSection} setSection={changeCustomerSection} customerDetailId={customerDetailId} openCustomerDetail={setCustomerDetailId} onMessageSent={refreshUnread} navigateTo={navigateTo}/>}

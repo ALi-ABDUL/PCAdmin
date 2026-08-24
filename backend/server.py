@@ -576,6 +576,65 @@ async def order_status_counts():
     return {"total": total, "counts": counts}
 
 
+@api_router.get("/orders/stuck")
+async def stuck_orders():
+    """Orders whose time in the CURRENT status exceeds the SLA thresholds.
+
+    SLA (days):
+      new/pending → 1 / 2   processing → 3   ready_to_ship → 1   shipped → 7
+
+    An order is "current" in a status either since its most recent status_history
+    entry, or since created_at if history is empty. Terminal statuses
+    (delivered / cancelled / refunded) are always excluded.
+    """
+    SLA_DAYS = {
+        "new": 1,
+        "pending": 2,
+        "processing": 3,
+        "ready_to_ship": 1,
+        "ready to ship": 1,
+        "shipped": 7,
+    }
+    TERMINAL = {"delivered", "cancelled", "refunded"}
+    now = datetime.now(timezone.utc)
+    stuck: list[dict] = []
+    async for o in db.orders.find(
+        {"status": {"$nin": list(TERMINAL)}},
+        {"_id": 0, "id": 1, "reference": 1, "status": 1, "created_at": 1,
+         "total": 1, "product_title": 1, "product_id": 1, "customer_name": 1,
+         "customer_email": 1, "status_history": 1},
+    ):
+        status_key = (o.get("status") or "").lower()
+        sla = SLA_DAYS.get(status_key)
+        if sla is None:
+            continue
+        history = o.get("status_history") or []
+        since_iso = (history[-1].get("changed_at") if history else o.get("created_at")) or ""
+        try:
+            since = datetime.fromisoformat(since_iso.replace("Z", "+00:00"))
+            if since.tzinfo is None:
+                since = since.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError, AttributeError):
+            continue
+        days = (now - since).days
+        if days > sla:
+            stuck.append({
+                "id": o.get("id"),
+                "reference": o.get("reference"),
+                "status": o.get("status"),
+                "product_title": o.get("product_title"),
+                "product_id": o.get("product_id"),
+                "customer_name": o.get("customer_name"),
+                "days_stuck": days,
+                "sla_days": sla,
+                "since": since_iso,
+                "total": o.get("total"),
+            })
+    # Most-stuck first — helps admins triage.
+    stuck.sort(key=lambda r: r["days_stuck"], reverse=True)
+    return {"stuck": stuck, "total": len(stuck), "sla": SLA_DAYS}
+
+
 @api_router.get("/orders/{oid}")
 async def get_order(oid: str):
     o = await db.orders.find_one({"id": oid}, {"_id": 0})

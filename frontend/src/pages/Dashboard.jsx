@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { DollarSign, Loader2, Percent, ShoppingBag, Sparkles, TrendingUp } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, DollarSign, Loader2, Percent, ShoppingBag, Sparkles, TrendingUp } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KpiCard, StatusChip } from "../components/atoms";
 import { API } from "../lib/api";
@@ -9,7 +9,7 @@ import { fmtDate, fmtDay, moneyCents } from "../lib/format";
 import { Products } from "./ProductsList";
 import { ProfitCalculator } from "./Store";
 
-export function Dashboard() {
+export function Dashboard({ navigateTo }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -140,6 +140,8 @@ export function Dashboard() {
         </div>
       </div>
 
+      <StuckOrdersWidget navigateTo={navigateTo}/>
+
       {/* Top products + recent orders */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="card overflow-hidden">
@@ -172,8 +174,7 @@ export function Dashboard() {
               <div className="text-xs text-slate-500">Latest 8 orders</div>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="tbl">
+          <div className="overflow-x-auto">            <table className="tbl">
               <thead><tr><th>Order</th><th>Customer</th><th>Total</th><th>Status</th></tr></thead>
               <tbody>
                 {data.recent_orders.length === 0
@@ -198,3 +199,125 @@ export function Dashboard() {
   );
 }
 
+
+
+/**
+ * Shows every open order that has exceeded its per-status SLA. Refreshes
+ * every 60 s so admins spot stuck orders quickly without a page reload.
+ */
+export function StuckOrdersWidget({ navigateTo }) {
+  const [rows, setRows] = useState(null);
+  const load = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${API}/orders/stuck`);
+      setRows(data.stuck || []);
+    } catch (e) {
+      setRows([]); // keep the widget silent on error
+    }
+  }, []);
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 60000);
+    return () => clearInterval(iv);
+  }, [load]);
+
+  const isEmpty = rows && rows.length === 0;
+
+  return (
+    <div className="card overflow-hidden" data-testid="stuck-orders-widget">
+      <div className="p-5 border-b hairline flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-2">
+          <AlertTriangle size={16} className="text-amber-500"/>
+          <div>
+            <div className="font-display font-bold text-lg">Stuck orders</div>
+            <div className="text-xs text-slate-500">Past SLA for their current status · refreshes every minute</div>
+          </div>
+        </div>
+        {rows && rows.length > 0 && (
+          <span className="chip !bg-red-50 !text-red-700 !border-red-200 font-mono" data-testid="stuck-orders-count">
+            {rows.length} needs attention
+          </span>
+        )}
+      </div>
+
+      {rows === null ? (
+        <div className="p-10 text-center text-sm text-slate-400 flex items-center justify-center gap-2">
+          <Loader2 className="animate-spin" size={14}/> Checking orders…
+        </div>
+      ) : isEmpty ? (
+        <div
+          className="p-8 flex items-center justify-center gap-3 bg-emerald-50 text-emerald-700"
+          data-testid="stuck-orders-empty"
+        >
+          <CheckCircle2 size={20}/>
+          <div>
+            <div className="font-display font-bold">All orders on track</div>
+            <div className="text-xs opacity-80">Every open order is within its SLA window.</div>
+          </div>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Reference</th>
+                <th>Product</th>
+                <th>Status</th>
+                <th>Days stuck</th>
+                <th className="w-0"/>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.slice(0, 25).map((o) => {
+                const over = o.days_stuck - o.sla_days;
+                const tone = over >= 7 ? "!bg-red-50 !text-red-700 !border-red-200"
+                  : over >= 3 ? "!bg-amber-50 !text-amber-700 !border-amber-200"
+                  : "!bg-slate-100 !text-slate-600 !border-slate-200";
+                return (
+                  <tr key={o.id} data-testid="stuck-order-row">
+                    <td>
+                      <button
+                        onClick={() => navigateTo?.({ tab: "orders", section: "all", filter: { orderId: o.id } })}
+                        className="font-mono text-indigo-600 font-bold hover:text-indigo-800 hover:underline"
+                        data-testid={`stuck-ref-${o.id}`}
+                      >
+                        {o.reference || o.id.slice(0, 8)}
+                      </button>
+                    </td>
+                    <td>
+                      <div className="text-sm font-medium truncate max-w-[320px]" title={o.product_title}>{o.product_title || "—"}</div>
+                      {o.customer_name && (
+                        <div className="text-[11px] text-slate-500 truncate">{o.customer_name}</div>
+                      )}
+                    </td>
+                    <td><StatusChip status={o.status}/></td>
+                    <td>
+                      <span className={`chip ${tone} !text-[11px] font-mono`}>
+                        {o.days_stuck} day{o.days_stuck === 1 ? "" : "s"}
+                        <span className="opacity-60 ml-1">(SLA {o.sla_days}d)</span>
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => navigateTo?.({ tab: "orders", section: "all", filter: { orderId: o.id } })}
+                        className="btn btn-ghost text-xs whitespace-nowrap"
+                        data-testid={`stuck-open-${o.id}`}
+                      >
+                        Open <ArrowRight size={11}/>
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {rows.length > 25 && (
+            <div className="p-3 text-center text-xs text-slate-500 border-t hairline">
+              Showing 25 of {rows.length}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

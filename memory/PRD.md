@@ -766,3 +766,20 @@ Notification Bell deep-links) — zero regressions detected.
   clicking one opens the lightbox with a `s-l1600` URL, ArrowRight
   advances (image src changes), Close button and Escape both dismiss.
 
+
+## Feb 24, 2026 — Stricter eBay CDN image scraping
+- `scraper._extract_images` now runs every candidate URL through a
+  `_remember` helper that drops anything containing `/s-l64.` (seller-
+  logo/icon thumbnails) BEFORE the size-token upgrade, so those URLs
+  can never sneak in via a canonicalisation pass.
+- `_filter_product_images` gained two new rules:
+  * Drop any URL still containing `/s-l64.` (defense in depth).
+  * For `i.ebayimg.com` URLs, require `/s-l1600.` in the path. Any other
+    format (`/00/s/…/$_1.JPG`, `s-l800`, `s-l64` variants) is rejected.
+  * Non-eBay URLs (seller-hosted images on external CDNs) still bypass
+    this rule so legitimate product photos aren't lost.
+- Regression suite: `test_image_filters.py` grew 3 new cases
+  (`test_drops_s_l64_seller_logos`, `test_requires_s_l1600_for_ebay_cdn`,
+  `test_non_ebay_urls_bypass_s_l1600_rule`). Combined scraper suite
+  (title + description + images) — **38 passing**.
+

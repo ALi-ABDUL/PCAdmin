@@ -464,16 +464,33 @@ def _text(node) -> str:
 
 
 def _extract_images(soup: BeautifulSoup, html: str) -> list[str]:
+    """Collect every candidate image URL, then hand off to
+    ``_filter_product_images`` which enforces the "clean product photo"
+    rules (drop chrome/logos/size charts, dedupe, require ``s-l1600``,
+    never accept ``s-l64`` icon thumbnails, cap at 8).
+    """
     urls: list[str] = []
     seen: set[str] = set()
+
+    def _remember(u: str) -> None:
+        # Skip 64px seller-logo/icon thumbnails eBay puts inside gallery
+        # containers. These are never real product photos regardless of
+        # any upsize we could do.
+        if not u or not u.startswith("http"):
+            return
+        if "/s-l64." in u.lower():
+            return
+        # Upgrade every recognisable eBay size token to the biggest form
+        # so downstream code sees a canonical URL.
+        u = re.sub(r"/s-l\d+\.", "/s-l1600.", u)
+        if u not in seen:
+            seen.add(u)
+            urls.append(u)
 
     # 1) OG image
     og = soup.find("meta", property="og:image")
     if og and og.get("content"):
-        u = og["content"].strip()
-        if u and u not in seen:
-            seen.add(u)
-            urls.append(u)
+        _remember(og["content"].strip())
 
     # 2) Common eBay galleries
     selectors = [
@@ -488,19 +505,11 @@ def _extract_images(soup: BeautifulSoup, html: str) -> list[str]:
     for sel in selectors:
         for img in soup.select(sel):
             for attr in ("src", "data-src", "data-zoom-src", "data-imgurl"):
-                u = img.get(attr)
-                if u and u.startswith("http") and u not in seen:
-                    seen.add(u)
-                    urls.append(u)
+                _remember(img.get(attr) or "")
 
     # 3) Regex-scan JSON blobs for hi-res image URLs on eBay CDN
     for m in re.finditer(r'https?://i\.ebayimg\.com/[^"\\\'\s]+\.(?:jpg|jpeg|webp|png)', html, re.IGNORECASE):
-        u = m.group(0)
-        # Upgrade thumbnails to larger versions when possible
-        u = re.sub(r"/s-l\d+\.", "/s-l1600.", u)
-        if u not in seen:
-            seen.add(u)
-            urls.append(u)
+        _remember(m.group(0))
 
     return _filter_product_images(urls)
 
@@ -569,17 +578,26 @@ def _filter_product_images(urls: list[str], limit: int = 8) -> list[str]:
     1. Drop empty / non-http URLs.
     2. Drop anything that looks like seller chrome (logos, banners, size
        charts, measurement diagrams — see `_looks_like_chrome`).
-    3. Collapse near-identical URLs (same eBay image at different sizes) via
-       `_image_signature`. Keeps the first occurrence, which — because
-       upstream regex upgrades `s-l` to `s-l1600` — is the biggest version.
-    4. Truncate to `limit` (default 8).
+    3. Drop any URL that still contains ``s-l64`` (seller logos / icons).
+    4. For eBay CDN URLs (``i.ebayimg.com``) require ``s-l1600`` in the
+       path — anything else is an untrusted format / non-photo asset.
+    5. Collapse near-identical URLs (same eBay image at different sizes)
+       via ``_image_signature``. Keeps the first occurrence.
+    6. Truncate to ``limit`` (default 8).
     """
     out: list[str] = []
     sigs: set[str] = set()
     for u in urls:
         if not u or not u.startswith("http"):
             continue
+        low = u.lower()
+        if "/s-l64." in low:
+            continue
         if _looks_like_chrome(u):
+            continue
+        # eBay CDN URLs must be the full-size 1600px variant. Non-eBay URLs
+        # (seller-hosted images on external CDNs) are left alone.
+        if "i.ebayimg.com" in low and "/s-l1600." not in low:
             continue
         sig = _image_signature(u)
         if not sig or sig in sigs:

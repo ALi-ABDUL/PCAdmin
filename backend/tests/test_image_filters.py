@@ -94,3 +94,35 @@ class TestFilterProductImages:
             "https://i.ebayimg.com/images/g/BBB/s-l1600.webp",
             "https://i.ebayimg.com/images/g/CCC/s-l1600.webp",
         ]
+
+    def test_drops_s_l64_seller_logos(self):
+        # s-l64 variants are seller-avatar thumbnails, never product photos.
+        urls = [
+            "https://i.ebayimg.com/images/g/AAA/s-l64.jpg",       # drop
+            "https://i.ebayimg.com/images/g/BBB/s-l64.webp",      # drop
+            "https://i.ebayimg.com/images/g/CCC/s-l1600.webp",    # keep
+        ]
+        out = _filter_product_images(urls)
+        assert out == ["https://i.ebayimg.com/images/g/CCC/s-l1600.webp"]
+
+    def test_requires_s_l1600_for_ebay_cdn(self):
+        # eBay CDN URLs without s-l1600 (e.g. custom "/00/s/…" formats or a
+        # size other than 1600) are excluded.
+        urls = [
+            "https://i.ebayimg.com/00/s/MTYwMFgxMjAw/z/0YkAAeSwjOxpxm1U/$_1.JPG",  # drop
+            "https://i.ebayimg.com/images/g/DEF/s-l800.jpg",                        # drop
+            "https://i.ebayimg.com/images/g/GHI/s-l1600.webp",                      # keep
+        ]
+        out = _filter_product_images(urls)
+        assert out == ["https://i.ebayimg.com/images/g/GHI/s-l1600.webp"]
+
+    def test_non_ebay_urls_bypass_s_l1600_rule(self):
+        # Seller-hosted images on external CDNs don't have eBay's s-l tokens
+        # at all — they should still be accepted.
+        urls = [
+            "https://cdn.seller.com/products/hero.jpg",
+            "https://cdn.seller.com/products/alt-view.png",
+            "https://i.ebayimg.com/images/g/DEF/s-l1600.webp",
+        ]
+        out = _filter_product_images(urls)
+        assert out == urls

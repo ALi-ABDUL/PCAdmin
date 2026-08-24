@@ -824,6 +824,31 @@ async def get_customer(cid: str):
                 })
         # Newest first — most useful for admins scanning "what happened last".
         timeline.sort(key=lambda e: e.get("ts") or "", reverse=True)
+        # Tag the LATEST event per order with `days_in_status` when the order
+        # is still "open" (i.e. not in a terminal state). This is what powers
+        # the "N days" chip in the UI so stuck orders leap off the page.
+        _CLOSED = {"delivered", "cancelled", "refunded"}
+        now = datetime.now(timezone.utc)
+        seen_order_ids: set[str] = set()
+        for e in timeline:
+            oid = e.get("order_id")
+            if not oid or oid in seen_order_ids:
+                continue
+            seen_order_ids.add(oid)
+            current_status = (e.get("to") if e.get("type") == "status_change" else e.get("status")) or ""
+            if current_status.lower() in _CLOSED:
+                continue
+            try:
+                since = datetime.fromisoformat((e.get("ts") or "").replace("Z", "+00:00"))
+                if since.tzinfo is None:
+                    since = since.replace(tzinfo=timezone.utc)
+                delta = now - since
+                # Round up so anything past 24h shows "1 day"; under 24h → 0.
+                e["days_in_status"] = max(0, delta.days)
+                e["hours_in_status"] = max(0, int(delta.total_seconds() // 3600))
+                e["is_current_status"] = True
+            except (ValueError, TypeError):
+                pass
         # Compute unread-reply flag the same way the list endpoint does.
         last_in  = max((m.get("created_at", "") for m in thread if m.get("direction") == "inbound"), default="")
         last_out = max((m.get("created_at", "") for m in thread if m.get("direction") == "outbound"), default="")

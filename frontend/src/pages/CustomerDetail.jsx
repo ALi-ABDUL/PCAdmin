@@ -293,6 +293,19 @@ function TimelineEvent({ event: e }) {
   const isCreate = e.type === "order_created";
   const tone = isCreate ? _tone(e.status) : _tone(e.to);
   const Icon = isCreate ? PackagePlus : Circle;
+  // "Days-in-status" chip is only present on the *latest* event per order,
+  // and only when the order is still open (backend won't set the field on
+  // terminal statuses like delivered / cancelled / refunded).
+  const showAge = e.is_current_status;
+  const days = e.days_in_status || 0;
+  const hours = e.hours_in_status || 0;
+  const ageLabel = days >= 1 ? `${days} day${days === 1 ? "" : "s"}` : `${hours}h`;
+  // Tone the chip amber past 3 days, red past 7 days — quick "stuck" signal.
+  const ageChipTone = days >= 7
+    ? "!bg-red-50 !text-red-700 !border-red-200"
+    : days >= 3
+      ? "!bg-amber-50 !text-amber-700 !border-amber-200"
+      : "!bg-slate-100 !text-slate-600 !border-slate-200";
   return (
     <li className="relative pl-8" data-testid={`timeline-event-${e.type}`}>
       <span
@@ -301,7 +314,7 @@ function TimelineEvent({ event: e }) {
       >
         <Icon size={9} className="text-white"/>
       </span>
-      <div className="text-sm text-slate-800">
+      <div className="text-sm text-slate-800 flex items-center gap-2 flex-wrap">
         {isCreate ? (
           <>
             <span className="font-bold">Order placed</span>
@@ -328,6 +341,15 @@ function TimelineEvent({ event: e }) {
               </>
             )}
           </>
+        )}
+        {showAge && (
+          <span
+            className={`chip ${ageChipTone} !text-[10px] !py-0.5`}
+            data-testid={`timeline-age-${e.order_id}`}
+            title={`In this status for ${ageLabel}`}
+          >
+            {ageLabel} in status
+          </span>
         )}
       </div>
       {isCreate && e.product_title && (

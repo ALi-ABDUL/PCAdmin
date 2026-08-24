@@ -145,7 +145,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <Sidebar tab={tab} setTab={changeTab} mobileOpen={mobileNavOpen} setMobileOpen={setMobileNavOpen} unreadCustomerCount={unreadCustomerCount} />
+      <Sidebar tab={tab} setTab={changeTab} mobileOpen={mobileNavOpen} setMobileOpen={setMobileNavOpen} unreadCustomerCount={unreadCustomerCount} onCustomersBadgeClick={() => navigateTo({ tab: "customers", section: "messages" })}/>
 
       <AnimatePresence>
         {inStore && (

@@ -494,3 +494,17 @@ Notification Bell deep-links) — zero regressions detected.
   search, and restock code-path presence.
 - Latest iteration report: `/app/test_reports/iteration_7.json` (100% backend & frontend
   post-refactor).
+
+## Feb 24, 2026 — Customers list pagination
+- Backend `GET /api/customers` now accepts `skip` (default 0) alongside
+  existing `limit`, enabling proper page-based navigation.
+- Frontend `CustomersModule` tracks `page` + `pageSize` (default 50, options
+  50/100/150/200) and resets to page 1 when section/search/sort/pageSize
+  change.
+- `CustomerTable` renders a footer with "Showing X–Y of TOTAL", a page-size
+  dropdown, Prev/Next buttons, and windowed numeric page buttons (first,
+  last, current ±1) with ellipses for large ranges.
+- Smoke-tested end-to-end with 238 seeded customers: page 1 shows 1–50,
+  page 2 shows 51–100, page-size switches correctly, URL query passes
+  `limit`/`skip`.
+

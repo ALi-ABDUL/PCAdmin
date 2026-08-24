@@ -7,7 +7,7 @@ import { Orders } from "../pages/Orders";
 import { Products } from "../pages/ProductsList";
 import { Suppliers } from "../pages/Suppliers";
 
-export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomerCount = 0 }) {
+export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomerCount = 0, onCustomersBadgeClick }) {
   const nav = [
     { id: "dashboard", label: "Dashboard",  icon: LayoutDashboard, group: "General" },
     { id: "store",     label: "Store Management", icon: Store, group: "General", hasSub: true },
@@ -17,7 +17,7 @@ export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomer
     { id: "scraper",   label: "Product Sourcing", icon: Zap, badge: "AU", group: "Catalog" },
     { id: "orders",    label: "Orders",     icon: ShoppingCart,   group: "Operations", hasSub: true },
     { id: "payments",  label: "Payments",   icon: CreditCard,     group: "Operations", hasSub: true },
-    { id: "customers", label: "Customers",  icon: Users,          group: "Operations", hasSub: true, count: unreadCustomerCount },
+    { id: "customers", label: "Customers",  icon: Users,          group: "Operations", hasSub: true, count: unreadCustomerCount, onBadgeClick: onCustomersBadgeClick },
     { id: "analytics", label: "Analytics",  icon: BarChart3,      group: "Insights" },
     { id: "settings",  label: "Settings",   icon: Settings2,      group: "System" },
   ];
@@ -42,20 +42,26 @@ export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomer
                 const Icon = n.icon; const active = tab === n.id;
                 return (
                   <button key={n.id} data-testid={`nav-${n.id}`} onClick={() => setTab(n.id)} className={`sidebar-link ${active ? "active" : ""}`}>
-                    <Icon size={16} className="sidebar-icon" />
+                    <span className="relative shrink-0">
+                      <Icon size={16} className="sidebar-icon" />
+                      {n.count > 0 && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(ev) => { ev.stopPropagation(); n.onBadgeClick?.(); }}
+                          onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); n.onBadgeClick?.(); } }}
+                          className="absolute -top-1.5 -right-2 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] leading-none font-bold shadow ring-2 ring-white animate-pulse cursor-pointer hover:bg-red-600 hover:scale-110 transition"
+                          data-testid={`nav-${n.id}-unread-badge`}
+                          title={`${n.count} customer${n.count === 1 ? "" : "s"} waiting for a reply — click to open messages`}
+                          aria-label={`${n.count} unread — open messages`}
+                        >
+                          {n.count > 99 ? "99+" : n.count}
+                        </span>
+                      )}
+                    </span>
                     <span className="flex-1 text-left">{n.label}</span>
                     {n.hasSub && <ChevronRight size={13} className={`transition-transform ${active ? "rotate-90 text-indigo-500" : "text-slate-300"}`}/>}
                     {n.badge && <span className="chip chip-primary">{n.badge}</span>}
-                    {n.count > 0 && (
-                      <span
-                        className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold shadow-sm animate-pulse"
-                        data-testid={`nav-${n.id}-unread-badge`}
-                        title={`${n.count} customer${n.count === 1 ? "" : "s"} waiting for a reply`}
-                        aria-label={`${n.count} unread`}
-                      >
-                        {n.count > 99 ? "99+" : n.count}
-                      </span>
-                    )}
                   </button>
                 );
               })}

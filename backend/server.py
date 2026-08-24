@@ -771,6 +771,7 @@ async def list_customers(
     type: Optional[str] = None,
     sort: str = "created_at_desc",
     limit: int = Query(500, le=2000),
+    skip: int = Query(0, ge=0),
 ):
     query: dict[str, Any] = {}
     if status: query["status"] = status
@@ -788,7 +789,7 @@ async def list_customers(
         "spend_desc": [("total_spend", -1)],
         "orders_desc": [("orders_count", -1)],
     }
-    cursor = db.customers.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).limit(limit)
+    cursor = db.customers.find(query, {"_id": 0}).sort(sort_map.get(sort, [("created_at", -1)])).skip(skip).limit(limit)
     customers = await cursor.to_list(length=limit)
     # For every customer with an email in this page, work out whether their
     # most-recent INBOUND message is newer than any outbound reply — if so we

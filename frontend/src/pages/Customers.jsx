@@ -15,9 +15,12 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
   const [list, setList] = useState([]); const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
   const [q, setQ] = useState(""); const [sort, setSort] = useState("created_at_desc");
+  const [page, setPage] = useState(1); const [pageSize, setPageSize] = useState(50);
   const [messages, setMessages] = useState([]);
   const [coupons, setCoupons] = useState([]);
   const [reviews, setReviews] = useState([]);
+
+  const isPaginated = ["all","pending","active","guest","registered","blocked"].includes(section);
 
   const params = {};
   if (["pending","active","blocked"].includes(section)) params.status = section;
@@ -25,6 +28,10 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
   if (section === "registered") params.type = "registered";
   if (q) params.q = q;
   params.sort = sort;
+  if (isPaginated) {
+    params.limit = pageSize;
+    params.skip = (page - 1) * pageSize;
+  }
 
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/customers`, { params });
@@ -35,6 +42,8 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
   useEffect(() => { if (section === "messages") axios.get(`${API}/messages`).then(r => setMessages(r.data.messages)); }, [section]);
   useEffect(() => { if (section === "coupons") axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons)); }, [section]);
   useEffect(() => { if (section === "reviews") axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews)); }, [section]);
+  // Reset to page 1 when filters, section, or page size change.
+  useEffect(() => { setPage(1); }, [section, q, sort, pageSize]);
 
   // Customer detail takes over the module UI when a specific customer is open.
   if (customerDetailId) {
@@ -67,7 +76,7 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
       {section === "portal"     && <CustomerPortal/>}
       {section === "create"     && <CreateCustomer onCreated={() => { load(); setSection("all"); }}/>}
       {section === "import"     && <ImportCustomers onImported={() => { load(); setSection("all"); }}/>}
-      {(["all","pending","active","guest","registered","blocked"].includes(section)) && <CustomerTable list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} onChanged={load} onOpen={openCustomerDetail}/>}
+      {(["all","pending","active","guest","registered","blocked"].includes(section)) && <CustomerTable list={list} total={total} q={q} setQ={setQ} sort={sort} setSort={setSort} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} onChanged={load} onOpen={openCustomerDetail}/>}
       {section === "top"        && <TopCustomers list={summary?.top || []}/>}
       {section === "messages"   && <CustomerMessages messages={messages} reload={() => axios.get(`${API}/messages`).then(r => setMessages(r.data.messages))}/>}
       {section === "coupons"    && <CouponsView coupons={coupons} reload={() => axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons))}/>}
@@ -146,10 +155,19 @@ export function ImportCustomers({ onImported }) {
   );
 }
 
-export function CustomerTable({ list, total, q, setQ, sort, setSort, onChanged, onOpen }) {
+export function CustomerTable({ list, total, q, setQ, sort, setSort, page = 1, setPage, pageSize = 50, setPageSize, onChanged, onOpen }) {
   const setStatus = async (c, status) => { await axios.patch(`${API}/customers/${c.id}`, { status }); onChanged(); };
   const del = async (c) => { if (!window.confirm(`Delete ${c.name}?`)) return; await axios.delete(`${API}/customers/${c.id}`); toast.success("Deleted"); onChanged(); };
   const stop = (e) => e.stopPropagation();
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const from = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const to = Math.min(currentPage * pageSize, total);
+  // Windowed page number list (max 7 visible, with ellipses for big ranges).
+  const pageNumbers = (() => {
+    const nums = new Set([1, totalPages, currentPage, currentPage - 1, currentPage + 1]);
+    return [...nums].filter(n => n >= 1 && n <= totalPages).sort((a, b) => a - b);
+  })();
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -158,6 +176,15 @@ export function CustomerTable({ list, total, q, setQ, sort, setSort, onChanged, 
           <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search name / email" className="input pl-9 pr-3 py-2 text-sm w-64"/></div>
           <select value={sort} onChange={(e)=>setSort(e.target.value)} className="input px-3 py-2 text-sm">
             <option value="created_at_desc">Newest</option><option value="name_asc">Name A→Z</option><option value="spend_desc">Spend ↓</option><option value="orders_desc">Orders ↓</option>
+          </select>
+          <select
+            value={pageSize}
+            onChange={(e) => setPageSize?.(Number(e.target.value))}
+            className="input px-3 py-2 text-sm"
+            data-testid="cus-page-size"
+            aria-label="Customers per page"
+          >
+            {[50, 100, 150, 200].map(n => <option key={n} value={n}>{n} / page</option>)}
           </select>
         </div>
       </div>
@@ -198,6 +225,48 @@ export function CustomerTable({ list, total, q, setQ, sort, setSort, onChanged, 
           ))}
         </tbody>
       </table></div></div>
+      {total > 0 && (
+        <div className="flex items-center justify-between flex-wrap gap-3" data-testid="cus-pagination">
+          <div className="text-xs text-slate-500 font-mono">
+            Showing <span className="text-slate-700 font-semibold">{from}</span>–<span className="text-slate-700 font-semibold">{to}</span> of <span className="text-slate-700 font-semibold">{total}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage?.(Math.max(1, currentPage - 1))}
+              disabled={currentPage <= 1}
+              className="btn btn-ghost text-xs !px-3 disabled:opacity-40 disabled:cursor-not-allowed"
+              data-testid="cus-page-prev"
+            >
+              ← Prev
+            </button>
+            {pageNumbers.map((n, i) => {
+              const prev = pageNumbers[i - 1];
+              const gap = prev && n - prev > 1;
+              return (
+                <span key={n} className="flex items-center gap-1">
+                  {gap && <span className="text-slate-400 text-xs px-1">…</span>}
+                  <button
+                    onClick={() => setPage?.(n)}
+                    className={`min-w-[32px] px-2 py-1 rounded-md text-xs font-mono border transition-colors ${n === currentPage ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"}`}
+                    data-testid={`cus-page-${n}`}
+                    aria-current={n === currentPage ? "page" : undefined}
+                  >
+                    {n}
+                  </button>
+                </span>
+              );
+            })}
+            <button
+              onClick={() => setPage?.(Math.min(totalPages, currentPage + 1))}
+              disabled={currentPage >= totalPages}
+              className="btn btn-ghost text-xs !px-3 disabled:opacity-40 disabled:cursor-not-allowed"
+              data-testid="cus-page-next"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

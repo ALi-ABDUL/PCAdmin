@@ -1,0 +1,30 @@
+{
+  "summary": "Frontend-only verification of the Customers unread badge repositioning + click-to-messages navigation. All 7 requirements verified as passing.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verified_behaviors": [
+    "Sidebar Customers row (data-testid=nav-customers) still activates customers tab on normal click.",
+    "Badge (data-testid=nav-customers-unread-badge) is absolutely positioned as overlay at top-right of the person icon. Measured icon box x=24.8,y=528.5,w=16,h=16 and badge box x=32.8,y=522.5,w=16,h=16 -> badge.x >= icon.x AND badge.y <= icon.y+icon.height (overlap in top-right quadrant).",
+    "Badge class contains bg-red-500, animate-pulse, ring-2 ring-white, rounded-full, white text. Text shows unread count ('8' at test time); '99+' cap logic present in code (n.count > 99 ? '99+' : n.count).",
+    "Clicking the badge stops propagation and navigates directly to Customers > Customer Messages. After click: data-testid=cus-messages has class 'sidebar-link active' and page header reads 'Customer messages'.",
+    "Keyboard: Focusing the badge and pressing Enter navigates to Customer Messages (verified). Pressing Space also navigates to Customer Messages (verified).",
+    "When count = 0 the badge is not rendered (guarded by n.count > 0 in layout.jsx).",
+    "Row click on Customers still activates the customers tab as expected (regression preserved)."
+  ],
+  "test_report_links": ["/app/test_reports/iteration_30.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Nesting an interactive element (role='button', tabIndex=0) inside a native <button> is invalid HTML (button-in-button). Works functionally in Chromium but may cause a11y warnings and inconsistent behavior in some assistive tech. Consider rendering the outer sidebar item as a div with role='button' OR the badge as a plain span with onClick + explicit event handling outside the button element.",
+    "The badge's aria-label ('N unread — open messages') is good; ensure focus outline is visible (currently no focus-visible ring classes)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100% (7/7 requirements)"},
+  "seed_data_creation": "None. Existing unread messages in DB (count=8) were used to render the badge.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Badge overlay + click-to-messages nav works. Watch out for a11y: nested role='button' inside <button>. Regression items (stuck-orders widget, unread reply dot, timeline thumbs, days-in-status chip) were not re-tested in this iter — previous iterations 27–29 verified them and no code touched those areas."
+}

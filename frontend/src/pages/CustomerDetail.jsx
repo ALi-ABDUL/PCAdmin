@@ -8,7 +8,7 @@ import { CustomerAvatar } from "./Customers";
 import { API } from "../lib/api";
 import { fmtDate, fmtLongDateTime, moneyCents } from "../lib/format";
 
-export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
+export function CustomerDetailPage({ customerId, onBack, onDeleted, onMessageSent }) {
   const [c, setC] = useState(null);
   const [orders, setOrders] = useState([]);
   const [thread, setThread] = useState([]);
@@ -265,7 +265,7 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted }) {
         customer={c}
         replyTo={replyTo}
         onClose={() => setMsgOpen(false)}
-        onSent={() => load()}
+        onSent={() => { load(); onMessageSent?.(); }}
       />
     </div>
   );

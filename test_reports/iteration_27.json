@@ -1,0 +1,26 @@
+{
+  "summary": "Verified new unread-customer badge feature end-to-end. Backend GET /api/customers/unread-count returns correct count, POST /api/messages increments it, emails are case-insensitively deduped, and blank emails are ignored. Frontend sidebar renders red pulsing badge with correct number, disappears at 0, and refreshes when clicking Customers tab. Aggregation logic (compare newest inbound ts > newest outbound ts) works correctly for the seeded scenarios.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_unread_count.py",
+    "/app/test_reports/pytest/unread_count.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "String-based ISO timestamp comparison in /api/customers/unread-count works because all values are always UTC ISO-8601 with 'Z'/offset produced by Message model, but is fragile if a future writer stores a naive/local ISO string with different offset — consider parsing to datetime for robustness.",
+    "Endpoint has no auth; matches rest of app but worth noting for future hardening."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_unread_count.py (new)"
+  ],
+  "success_rate": { "backend": "100% (4/4)", "frontend": "100%" },
+  "seed_data_creation": "Created a few TEST_-prefixed inbound messages (TEST_unread_*, TEST_case_*, TEST_ui_*) via POST /api/messages to exercise the counter. No cleanup performed; messages don't have a DELETE endpoint but are prefixed for easy identification.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Unread-count badge feature fully validated. Backend endpoint at line 776 in server.py. Frontend testid: nav-customers-unread-badge. Polling every 20s + refresh on tab/customerDetailId change and onMessageSent from MessageCustomerDialog is wired via App.js refreshUnread. Reply-send E2E not tested (Resend not configured) but wiring inspected."
+}

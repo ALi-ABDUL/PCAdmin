@@ -773,6 +773,35 @@ async def customers_summary():
     return {"total": total, "active": active, "pending": pending, "blocked": blocked, "guest": guest, "registered": registered, "top": top}
 
 
+@api_router.get("/customers/unread-count")
+async def customers_unread_count():
+    """How many customers are currently waiting for an admin reply?
+
+    Groups messages by (email, direction), keeps the latest ts per side, then
+    counts emails whose newest inbound is newer than their newest outbound
+    (or that have no outbound at all). Powers the sidebar badge.
+    """
+    pipeline = [
+        {"$group": {
+            "_id": {"email": "$customer_email", "direction": "$direction"},
+            "last_ts": {"$max": "$created_at"},
+        }},
+    ]
+    rows = await db.messages.aggregate(pipeline).to_list(length=None)
+    per_email: dict[str, dict[str, str]] = {}
+    for r in rows:
+        key = (r["_id"].get("email") or "").strip().lower()
+        if not key:
+            continue
+        direction = r["_id"].get("direction") or "inbound"
+        per_email.setdefault(key, {})[direction] = r.get("last_ts") or ""
+    count = sum(
+        1 for v in per_email.values()
+        if (v.get("inbound") or "") > (v.get("outbound") or "")
+    )
+    return {"count": count}
+
+
 @api_router.get("/customers/{cid}")
 async def get_customer(cid: str):
     """Full profile for a single customer plus their recent orders (last 25),

@@ -37,8 +37,27 @@ export default function App() {
   const [productDetailId, setProductDetailId] = useState(null);
   const [orderDetailId, setOrderDetailId] = useState(null);
   const [customerDetailId, setCustomerDetailId] = useState(null);
+  const [unreadCustomerCount, setUnreadCustomerCount] = useState(0);
 
   useEffect(() => { setMobileNavOpen(false); }, [tab]);
+
+  // Poll the "customers waiting for a reply" count and keep the sidebar badge
+  // fresh. 20s cadence matches the notification poll and keeps the badge
+  // effectively real-time without hammering the API.
+  const refreshUnread = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${API}/customers/unread-count`);
+      setUnreadCustomerCount(data?.count || 0);
+    } catch { /* silent — sidebar just won't update this cycle */ }
+  }, []);
+  useEffect(() => {
+    refreshUnread();
+    const iv = setInterval(refreshUnread, 20000);
+    return () => clearInterval(iv);
+  }, [refreshUnread]);
+  // Refresh immediately when the user navigates in/out of Customers so a
+  // just-sent reply clears the badge without waiting for the next poll tick.
+  useEffect(() => { if (tab === "customers") refreshUnread(); }, [tab, customerDetailId, refreshUnread]);
 
   // Poll for new sold events every 60s and fire toasts
   useEffect(() => {
@@ -126,7 +145,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <Sidebar tab={tab} setTab={changeTab} mobileOpen={mobileNavOpen} setMobileOpen={setMobileNavOpen} />
+      <Sidebar tab={tab} setTab={changeTab} mobileOpen={mobileNavOpen} setMobileOpen={setMobileNavOpen} unreadCustomerCount={unreadCustomerCount} />
 
       <AnimatePresence>
         {inStore && (
@@ -175,7 +194,7 @@ export default function App() {
               {tab === "dashboard" && <Dashboard />}
               {tab === "store"     && <StoreManagement section={storeSection} setSection={setStoreSection}/>}
               {tab === "suppliers" && <Suppliers section={supplierSection} setSection={setSupplierSection}/>}
-              {tab === "customers" && <CustomersModule section={customerSection} setSection={changeCustomerSection} customerDetailId={customerDetailId} openCustomerDetail={setCustomerDetailId}/>}
+              {tab === "customers" && <CustomersModule section={customerSection} setSection={changeCustomerSection} customerDetailId={customerDetailId} openCustomerDetail={setCustomerDetailId} onMessageSent={refreshUnread}/>}
               {tab === "products"  && <ProductsModule section={productSection} setSection={changeProductSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openProductDetail={setProductDetailId} productDetailId={productDetailId}/>}
               {tab === "orders"    && <OrdersModule section={ordersSection} setSection={changeOrdersSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openOrderDetail={setOrderDetailId} orderDetailId={orderDetailId}/>}
               {tab === "payments"  && <PaymentsModule section={paymentsSection} setSection={setPaymentsSection}/>}

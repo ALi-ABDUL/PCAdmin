@@ -1082,9 +1082,36 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
     postage_display: Optional[str] = None
     postage_fee: Optional[float] = None
     delivery_estimate: Optional[str] = None
+    delivery_speed: Optional[str] = None      # e.g. "Free delivery in 2-4 days"
+    delivery_date_range: Optional[str] = None # e.g. "Get it between Wed, 26 Aug and Fri, 28 Aug"
     collection: Optional[str] = None
     returns_policy: Optional[str] = None
     payment_methods: Optional[str] = None
+
+    # --- Clean delivery blurbs (green-bold "Free delivery in N days" +
+    #     "Get it between …" ETA span). We prefer these because eBay shows
+    #     them prominently and they carry no shipping-restriction noise
+    #     ("Doesn't post to United States", "Located in: …", etc).
+    for span in soup.select("span.ux-textspans--POSITIVE.ux-textspans--BOLD"):
+        txt = _text(span)
+        if not txt: continue
+        low = txt.lower()
+        # Skip stock/status phrases that also use this positive-bold styling.
+        if any(k in low for k in ("delivery", "post", "ship")):
+            delivery_speed = txt
+            break
+    for span in soup.find_all("span"):
+        txt = _text(span)
+        if txt and "get it between" in txt.lower():
+            delivery_date_range = re.sub(r"\s+", " ", txt).strip()
+            break
+    # Regex fallbacks in case the class names change or the ETA lives in JSON.
+    if not delivery_speed:
+        m = re.search(r"(Free\s+delivery(?:\s+in\s+[0-9\-\u2013\s]+\s*(?:business\s+)?days?)?)", html, re.IGNORECASE)
+        if m: delivery_speed = m.group(1).strip()
+    if not delivery_date_range:
+        m = re.search(r"(Get it between[^<\"\n]{5,120}?)(?:[<\"\n])", html, re.IGNORECASE)
+        if m: delivery_date_range = re.sub(r"\s+", " ", m.group(1)).strip()
 
     # Scan every ux-labels-values dl by label text
     for dl in soup.select("dl.ux-labels-values"):
@@ -1310,6 +1337,8 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
         "postage_display": postage_display,
         "postage_fee": postage_fee,
         "delivery_estimate": delivery_estimate,
+        "delivery_speed": delivery_speed,
+        "delivery_date_range": delivery_date_range,
         "collection": collection,
         "returns_policy": returns_policy,
         "payment_methods": payment_methods,

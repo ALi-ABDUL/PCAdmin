@@ -173,6 +173,164 @@ export function PricingRulesEditor() {
   );
 }
 
+export function PostagePresetsEditor() {
+  const [presets, setPresets] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/postage-presets`);
+    setPresets(data.presets || []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const kindLabel = (k) => k === "free" ? "Free" : k === "large_item" ? "Large Item" : "Standard";
+  const kindChip = (k) => k === "free" ? "chip-success" : k === "large_item" ? "chip-warning" : "chip-primary";
+
+  const save = async () => {
+    if (!editing) return;
+    const name = (editing.name || "").trim();
+    if (!name) return toast.error("Name is required");
+    const kind = editing.kind || "standard";
+    const postage = kind === "free" ? 0 : (Number(editing.postage_amount) || 0);
+    const insurance = kind === "large_item" ? (Number(editing.insurance_amount) || 0) : 0;
+    if (postage < 0 || insurance < 0) return toast.error("Amounts must be zero or positive");
+    const body = { name, kind, postage_amount: postage, insurance_amount: insurance,
+                   active: editing.active !== false, sort_order: Number(editing.sort_order) || 0 };
+    setBusy(true);
+    try {
+      if (editing.id) {
+        await axios.patch(`${API}/postage-presets/${editing.id}`, body);
+        toast.success("Preset updated");
+      } else {
+        await axios.post(`${API}/postage-presets`, body);
+        toast.success("Preset created");
+      }
+      setEditing(null);
+      await load();
+    } catch (e) {
+      toast.error("Save failed", { description: e?.response?.data?.detail?.slice(0, 200) || e.message });
+    } finally { setBusy(false); }
+  };
+
+  const del = async (r) => {
+    if (!window.confirm(`Delete postage preset "${r.name}"? Products using it will be reset to "Not selected".`)) return;
+    try {
+      await axios.delete(`${API}/postage-presets/${r.id}`);
+      toast.success("Deleted");
+      await load();
+    } catch (e) {
+      toast.error("Delete failed", { description: e?.response?.data?.detail?.slice(0, 200) || e.message });
+    }
+  };
+
+  const toggleActive = async (r) => {
+    await axios.patch(`${API}/postage-presets/${r.id}`, { active: !r.active });
+    await load();
+  };
+
+  const emptyPreset = { name: "", kind: "standard", postage_amount: "", insurance_amount: "", active: true, sort_order: (presets.length + 1) * 10 };
+
+  const fmtMoney = (n) => `$${(Number(n) || 0).toFixed(2)}`;
+
+  return (
+    <div className="grid gap-4" data-testid="postage-presets-editor">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="text-sm text-slate-500">
+          Presets appear as a dropdown on every product. <span className="font-mono">Large Item</span> presets carry an extra insurance amount.
+        </div>
+        <button onClick={() => setEditing(emptyPreset)} className="btn btn-primary text-sm" data-testid="pp-add-btn"><Plus size={14}/> Add preset</button>
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="tbl">
+            <thead><tr>
+              <th className="w-16">Order</th>
+              <th>Name</th>
+              <th>Type</th>
+              <th className="text-right">Postage</th>
+              <th className="text-right">Insurance</th>
+              <th>Status</th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              {presets.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-slate-500">No postage presets yet — add your first one.</td></tr>}
+              {presets.map((r) => (
+                <tr key={r.id} data-testid={`pp-row-${r.id}`} className={r.active ? "" : "opacity-50"}>
+                  <td className="font-mono text-slate-500">{r.sort_order}</td>
+                  <td className="text-sm font-medium">{r.name}</td>
+                  <td><span className={`chip ${kindChip(r.kind)} font-mono text-[10px]`}>{kindLabel(r.kind)}</span></td>
+                  <td className="text-right font-mono text-sm">{r.kind === "free" ? "—" : fmtMoney(r.postage_amount)}</td>
+                  <td className="text-right font-mono text-sm">{r.kind === "large_item" ? fmtMoney(r.insurance_amount) : "—"}</td>
+                  <td>
+                    <label className="flex items-center gap-1.5 text-[11px] font-mono uppercase text-slate-500 cursor-pointer">
+                      <input type="checkbox" checked={r.active} onChange={() => toggleActive(r)} className="accent-indigo-600 w-3.5 h-3.5"/>
+                      {r.active ? "Active" : "Off"}
+                    </label>
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-1 justify-end">
+                      <button onClick={() => setEditing(r)} className="btn btn-ghost text-xs !py-1 !px-2" data-testid={`pp-edit-btn-${r.id}`}>Edit</button>
+                      <button onClick={() => del(r)} className="btn btn-danger text-xs !py-1 !px-2" data-testid={`pp-del-btn-${r.id}`}><Trash2 size={12}/></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md overflow-y-auto" onClick={() => setEditing(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="card max-w-lg mx-auto my-10 p-6" data-testid="pp-modal">
+            <div className="flex items-center justify-between mb-5">
+              <div className="font-display font-bold text-xl">{editing.id ? "Edit preset" : "New preset"}</div>
+              <button onClick={() => setEditing(null)} className="btn btn-ghost !p-2"><X size={16}/></button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Name" className="col-span-2">
+                <input className="input px-3 py-2 w-full" value={editing.name || ""} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="e.g. Express Post" data-testid="pp-name"/>
+              </Field>
+              <Field label="Type" className="col-span-2">
+                <select className="input px-3 py-2 w-full" value={editing.kind || "standard"} onChange={(e) => setEditing({ ...editing, kind: e.target.value })} data-testid="pp-kind">
+                  <option value="free">Free Postage (always $0)</option>
+                  <option value="standard">Standard Postage (fixed amount)</option>
+                  <option value="large_item">Large Item (postage + insurance)</option>
+                </select>
+              </Field>
+              {editing.kind !== "free" && (
+                <Field label="Postage amount (AUD)">
+                  <input type="number" min="0" step="0.01" className="input px-3 py-2 w-full font-mono" value={editing.postage_amount} onChange={(e) => setEditing({ ...editing, postage_amount: e.target.value })} data-testid="pp-postage-amount"/>
+                </Field>
+              )}
+              {editing.kind === "large_item" && (
+                <Field label="Insurance amount (AUD)">
+                  <input type="number" min="0" step="0.01" className="input px-3 py-2 w-full font-mono" value={editing.insurance_amount} onChange={(e) => setEditing({ ...editing, insurance_amount: e.target.value })} data-testid="pp-insurance-amount"/>
+                </Field>
+              )}
+              <Field label="Sort order (lower first)">
+                <input type="number" className="input px-3 py-2 w-full font-mono" value={editing.sort_order} onChange={(e) => setEditing({ ...editing, sort_order: e.target.value })} data-testid="pp-sort-order"/>
+              </Field>
+              <Field label="Active">
+                <select className="input px-3 py-2 w-full" value={editing.active !== false ? "1" : "0"} onChange={(e) => setEditing({ ...editing, active: e.target.value === "1" })} data-testid="pp-active">
+                  <option value="1">Yes</option><option value="0">No</option>
+                </select>
+              </Field>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button onClick={() => setEditing(null)} className="btn btn-ghost">Cancel</button>
+              <button onClick={save} disabled={busy} className="btn btn-primary" data-testid="pp-save-btn">{busy ? <Loader2 className="animate-spin" size={14}/> : <Plus size={14}/>} {editing.id ? "Save changes" : "Create preset"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 export function PushNotificationSettings() {
   const [settings, setSettings] = useState(null);
   const [draft, setDraft] = useState({}); // holds unsaved input values
@@ -743,6 +901,7 @@ export function StoreManagement({ section, setSection }) {
   const sections = {
     "store-settings":      { hint: "Store name, brand, contact details, business hours and legal info.", fields: ["Store name","Legal business name","ABN","Contact email","Support phone","Business hours"] },
     "pricing-rules":       { hint: "Tiered profit rules the scraper uses when calculating sell prices for imported items.", fields: [], custom: <PricingRulesEditor/> },
+    "postage-presets":     { hint: "Reusable postage options shown as a dropdown on every product. Free, Standard, or Large Item (postage + insurance).", fields: [], custom: <PostagePresetsEditor/> },
     "scraper-schedule":    { hint: "Automate the eBay re-fetch: set a start time, frequency, optional stop date, or run one right now.", fields: [], custom: <ScraperScheduleEditor/> },
     "payment-gateway":     { hint: "Enable/disable payment providers and configure their credentials.", fields: ["Stripe","PayPal","Apple Pay","Google Pay","Afterpay","Zip Pay","Bank transfer","Cash on delivery"] },
     "shipping-methods":    { hint: "Zones, carriers, rates and free-shipping thresholds.", fields: ["Australia Post — Parcel Post","Australia Post — Express","Sendle","Aramex","Local delivery","Click & collect","Free shipping threshold"] },

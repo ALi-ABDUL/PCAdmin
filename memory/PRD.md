@@ -835,3 +835,57 @@ Notification Bell deep-links) — zero regressions detected.
   `{Colour: Red, Length: 30 cm}` and the card re-grouped rows into
   DIMENSIONS (Length) and COLOURS (Colour) sections.
 
+
+## Feb 24, 2026 — Clean Postage / Delivery card
+- Scraper now extracts two new positive-signal fields:
+  * `delivery_speed` — from
+    `span.ux-textspans--POSITIVE.ux-textspans--BOLD`, filtered to spans
+    whose text mentions delivery/post/ship (avoids grabbing "In stock"
+    style positive-bold blurbs). Regex fallback matches
+    `Free delivery in N days` when the class names change.
+  * `delivery_date_range` — from the first `<span>` whose text starts
+    with "Get it between …". Regex fallback matches the same phrase in
+    raw HTML.
+- Fields carry through: `EbayItem` model → `_scrape_item` return dict
+  → both add-to-product paths (`bulk` + single) → new `Product` fields
+  → `ProductUpdate` so admins can edit later.
+- Frontend Postage field replaced with a `<PostageCard product={p}/>`
+  component that renders **only** the two clean lines when they exist:
+  * Green bold text with a CheckCircle icon (delivery speed)
+  * Smaller grey text with a Calendar icon (ETA)
+  * Falls back to `p.postage` ("Free Postage" / "$X.XX") when the
+    positive-bold spans weren't scraped.
+  * `cleanPostageText` defensively strips legacy junk phrases
+    ("Doesn't post to United States", "See details for delivery",
+    "Located in:", "International shipment") at render time so old
+    records also render clean.
+- Verified via Playwright: seeded product with
+  `delivery_speed="Free delivery in 2-4 days"` and
+  `delivery_date_range="Get it between Wed, 26 Aug and Fri, 28 Aug"`
+  → both lines render with the right icons and colors inside the
+  emerald-tinted card.
+
+
+
+## Feb 24, 2026 — Postage Presets (Store Management + Product Detail)
+- **Backend** — new `PostagePreset` model (`name`, `kind` ∈ {free, standard, large_item}, `postage_amount`, `insurance_amount`, `active`, `sort_order`) plus CRUD endpoints:
+  * `GET /api/postage-presets`, `POST /api/postage-presets`,
+    `PATCH /api/postage-presets/{id}`, `DELETE /api/postage-presets/{id}`.
+  * Validation: `free` must be $0, `insurance_amount` only allowed on `large_item`, no negative amounts.
+  * PATCH auto-zeros irrelevant amounts when switching kind (free / non-large_item).
+  * On preset delete, any product referencing it is auto-cleared
+    (`postage_preset_id → None`).
+- Seeded three defaults on startup: Free Postage ($0), Standard Postage ($9.95), Large Item ($29.95 postage + $12 insurance).
+- `Product` / `ProductUpdate` gained three new fields:
+  `postage_preset_id`, `postage_amount`, `postage_insurance_amount`
+  (per-product overrides pre-filled from the preset but editable).
+- **Frontend**
+  * New Store Management section "Postage Presets" (`postage-presets` nav id, `PackageSearch` icon) with a full CRUD editor mirroring the Pricing Rules editor (add / edit / delete / toggle active). Type-aware modal hides irrelevant fields per kind.
+  * Product Detail: read-only Postage `Field` replaced with a new
+    `PostagePresetField` — dropdown of active presets. On selection:
+      - `free` → no editable fields, saves $0
+      - `standard` → single "Postage amount" input pre-filled from preset
+      - `large_item` → two inputs (Postage + Insurance) pre-filled from preset
+    Amounts save alongside `postage_preset_id` on Save changes.
+    Scraped delivery-speed / ETA card still shown underneath for reference.
+- **Tests**: `/app/backend/tests/test_postage_presets.py` — 11 cases covering seeding, validation, PATCH auto-zero behaviour, product wiring, and delete-cascade to products. All pass.

@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html']
+__all__ = ['_rand_au_address', '_slug', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_ensure_postage_presets_seeded']
 
 
 import bcrypt
@@ -30,6 +30,7 @@ from models import (
     SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, FREQ_INTERVAL_SECONDS,
     JWT_ALGO, JWT_ACCESS_TTL,
     Category, Customer, Notification, PricingRule, ScrapeRequest,
+    PostagePreset, _DEFAULT_POSTAGE_PRESETS,
 )
 import httpx
 
@@ -1192,6 +1193,15 @@ async def _ensure_pricing_rules_seeded() -> None:
         rule = PricingRule(**r)
         await db.pricing_rules.insert_one(rule.model_dump())
     logger.info(f"Seeded {len(_DEFAULT_PRICING_RULES)} pricing rules")
+
+
+async def _ensure_postage_presets_seeded() -> None:
+    if await db.postage_presets.count_documents({}) > 0:
+        return
+    for r in _DEFAULT_POSTAGE_PRESETS:
+        preset = PostagePreset(**r)
+        await db.postage_presets.insert_one(preset.model_dump())
+    logger.info(f"Seeded {len(_DEFAULT_POSTAGE_PRESETS)} postage presets")
 
 
 async def _load_pricing_rules() -> list[dict]:

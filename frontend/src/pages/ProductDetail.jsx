@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Pencil, Plus, RefreshCw, Save, Star as StarIcon, Trash2, X } from "lucide-react";
+import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Pencil, Plus, RefreshCw, Save, Star as StarIcon, Trash2, X } from "lucide-react";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
@@ -12,6 +12,7 @@ export function ProductDetailPage({ productId, onBack }) {
   const [p, setP] = useState(null);
   const [f, setF] = useState({});
   const [cats, setCats] = useState([]);
+  const [presets, setPresets] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -39,22 +40,45 @@ export function ProductDetailPage({ productId, onBack }) {
       stock: prod.stock ?? 0,
       active: !!prod.active,
       description: prod.description || "",
+      postage_preset_id: prod.postage_preset_id || "",
+      postage_amount: prod.postage_amount ?? "",
+      postage_insurance_amount: prod.postage_insurance_amount ?? "",
     });
     setReviews(rev);
     setDirty(false);
   }, [productId]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { axios.get(`${API}/categories`, { params: { active: true }}).then(r => setCats(r.data.categories || [])); }, []);
+  useEffect(() => { axios.get(`${API}/postage-presets`).then(r => setPresets((r.data.presets || []).filter(x => x.active !== false))); }, []);
 
   const setField = (k, v) => { setF(prev => ({ ...prev, [k]: v })); setDirty(true); };
   const save = async () => {
     setSaving(true);
     try {
-      await axios.patch(`${API}/products/${productId}`, {
+      const selectedPreset = presets.find(x => x.id === f.postage_preset_id);
+      const body = {
         title: f.title, sku: f.sku, category: f.category,
         price: Number(f.price), cost: Number(f.cost), stock: Number(f.stock),
         active: !!f.active, description: f.description,
-      });
+      };
+      // Only include postage fields when the admin has actually chosen a preset.
+      // A blank selection leaves whatever was already stored on the product
+      // (typically the scraped `postage` string) untouched.
+      if (f.postage_preset_id) {
+        body.postage_preset_id = f.postage_preset_id;
+        if (selectedPreset?.kind === "free") {
+          body.postage_amount = 0;
+          body.postage_insurance_amount = 0;
+        } else if (selectedPreset?.kind === "large_item") {
+          body.postage_amount = Number(f.postage_amount) || 0;
+          body.postage_insurance_amount = Number(f.postage_insurance_amount) || 0;
+        } else {
+          // "standard" or unknown → single amount, insurance cleared
+          body.postage_amount = Number(f.postage_amount) || 0;
+          body.postage_insurance_amount = 0;
+        }
+      }
+      await axios.patch(`${API}/products/${productId}`, body);
       toast.success("Saved");
       await load();
     } catch (e) {
@@ -295,16 +319,21 @@ export function ProductDetailPage({ productId, onBack }) {
             </select>
           </Field>
           <Field label="Margin"><div className={`input w-full px-3 py-2 font-mono ${margin>=40?"text-emerald-600":margin>=20?"text-amber-600":"text-red-600"} font-bold`}>{margin.toFixed(1)}%</div></Field>
-          {/* Postage is scraped verbatim from the eBay listing — read-only,
-              so admins never accidentally overwrite it with a made-up value. */}
-          <Field label="Postage">
-            <div
-              className={`input w-full px-3 py-2 font-mono ${(p.postage || "").toLowerCase().includes("free") ? "text-emerald-600 font-bold" : "text-slate-800"}`}
-              data-testid="product-postage-display"
-            >
-              {p.postage || <span className="text-slate-400 italic font-sans">Not specified</span>}
-            </div>
-          </Field>
+          {/* Postage preset — replaces the previously read-only scraped
+              postage line. The admin picks a preset from Store Management ›
+              Postage Presets. If the chosen preset is "Large Item" we show
+              two extra fields (postage + insurance) pre-filled from the
+              preset but editable so an admin can tweak them for this
+              specific product without changing the shared preset. */}
+          <div className="md:col-span-3">
+            <PostagePresetField
+              presets={presets}
+              product={p}
+              f={f}
+              setF={setF}
+              setDirty={setDirty}
+            />
+          </div>
         </div>
         <Field label="Description" className="mt-3"><textarea className="input w-full px-3 py-2 min-h-[160px] leading-relaxed" value={f.description} onChange={(e) => setField("description", e.target.value)} data-testid="product-description-input"/></Field>
       </div>
@@ -471,8 +500,154 @@ function bucketSpecs(specifics) {
   return { groups: filled, other };
 }
 
-function SpecRow({ label, value }) {
+/* ------------------------ Postage / Delivery card --------------------------
+ *
+ * eBay listings pack the postage area with restriction lines ("Doesn't post
+ * to United States", "Located in:", "See details for delivery"). We only
+ * scrape the two positive signals — the green-bold delivery speed and the
+ * "Get it between …" ETA — and render them as a clean two-line card. If
+ * neither was captured we fall back to the plain postage string.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Product-level postage picker. Renders a dropdown of active presets from
+ * Store Management. When the chosen preset is `large_item`, we surface two
+ * editable amounts (postage + insurance) pre-filled from the preset so the
+ * admin can override per product without touching the shared preset.
+ *
+ * The scraped delivery-speed / ETA still show underneath for reference so
+ * the admin can compare eBay's advertised delivery to their own priced-in
+ * postage.
+ */
+export function PostagePresetField({ presets, product, f, setF, setDirty }) {
+  const selectedId = f.postage_preset_id || "";
+  const selected = presets.find(p => p.id === selectedId) || null;
+  const kind = selected?.kind || null;
+
+  const pickPreset = (pid) => {
+    const pr = presets.find(x => x.id === pid) || null;
+    setF(prev => ({
+      ...prev,
+      postage_preset_id: pid,
+      // Pre-fill overrides from the preset each time the user changes it.
+      postage_amount: pr && pr.kind !== "free" ? pr.postage_amount : "",
+      postage_insurance_amount: pr && pr.kind === "large_item" ? pr.insurance_amount : "",
+    }));
+    setDirty(true);
+  };
+
   return (
+    <div className="grid gap-3" data-testid="product-postage-preset-field">
+      <Field label="Postage preset">
+        <select
+          className="input w-full px-3 py-2"
+          value={selectedId}
+          onChange={(e) => pickPreset(e.target.value)}
+          data-testid="product-postage-preset-select"
+        >
+          <option value="">— Not selected (use scraped postage below) —</option>
+          {presets.map(pr => (
+            <option key={pr.id} value={pr.id}>
+              {pr.name}
+              {pr.kind === "free"       ? "  ·  Free"
+                : pr.kind === "large_item" ? `  ·  $${Number(pr.postage_amount).toFixed(2)} + $${Number(pr.insurance_amount).toFixed(2)} insurance`
+                : `  ·  $${Number(pr.postage_amount).toFixed(2)}`}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      {kind === "large_item" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Field label="Postage amount (AUD)">
+            <input
+              type="number" min="0" step="0.01"
+              className="input w-full px-3 py-2 font-mono"
+              value={f.postage_amount}
+              onChange={(e) => { setF(v => ({ ...v, postage_amount: e.target.value })); setDirty(true); }}
+              data-testid="product-postage-amount-input"
+            />
+          </Field>
+          <Field label="Insurance amount (AUD)">
+            <input
+              type="number" min="0" step="0.01"
+              className="input w-full px-3 py-2 font-mono"
+              value={f.postage_insurance_amount}
+              onChange={(e) => { setF(v => ({ ...v, postage_insurance_amount: e.target.value })); setDirty(true); }}
+              data-testid="product-postage-insurance-input"
+            />
+          </Field>
+        </div>
+      )}
+
+      {kind === "standard" && (
+        <Field label="Postage amount (AUD)">
+          <input
+            type="number" min="0" step="0.01"
+            className="input w-full px-3 py-2 font-mono md:w-1/2"
+            value={f.postage_amount}
+            onChange={(e) => { setF(v => ({ ...v, postage_amount: e.target.value })); setDirty(true); }}
+            data-testid="product-postage-amount-input"
+          />
+        </Field>
+      )}
+
+      {/* Scraped delivery/ETA reference (informational). */}
+      <PostageCard product={product}/>
+    </div>
+  );
+}
+
+
+// Junk phrases sometimes leaked into the postage string on older records.
+// We defensively strip them at render time so retro data cleans itself up.
+const _POSTAGE_JUNK = /(doesn't\s+post\s+to.*|see\s+details\s+for\s+delivery.*|located\s+in:.*|international\s+shipment.*)/gi;
+
+function cleanPostageText(s) {
+  return (s || "").replace(_POSTAGE_JUNK, "").replace(/\s{2,}/g, " ").trim();
+}
+
+export function PostageCard({ product }) {
+  const speed = cleanPostageText(product?.delivery_speed);
+  const eta = cleanPostageText(product?.delivery_date_range);
+  const fallback = cleanPostageText(product?.postage);
+  const isFree = /free/i.test(speed || fallback || "");
+  const hasClean = !!(speed || eta);
+
+  return (
+    <div
+      className="w-full px-4 py-3 rounded-lg border hairline bg-emerald-50/40"
+      data-testid="product-postage-display"
+    >
+      {hasClean ? (
+        <div className="grid gap-1">
+          {speed && (
+            <div className="flex items-center gap-2 text-emerald-700 font-bold text-sm" data-testid="postage-speed">
+              <CheckCircle2 size={14} className="shrink-0"/>
+              <span>{speed}</span>
+            </div>
+          )}
+          {eta && (
+            <div className="flex items-center gap-2 text-slate-500 text-xs" data-testid="postage-eta">
+              <Calendar size={12} className="shrink-0"/>
+              <span>{eta}</span>
+            </div>
+          )}
+        </div>
+      ) : fallback ? (
+        <div className={`flex items-center gap-2 text-sm font-medium ${isFree ? "text-emerald-700" : "text-slate-800"}`}>
+          <CheckCircle2 size={14} className="shrink-0"/>
+          <span>{fallback}</span>
+        </div>
+      ) : (
+        <span className="text-slate-400 italic text-sm">Not specified</span>
+      )}
+    </div>
+  );
+}
+
+
+function SpecRow({ label, value }) {  return (
     <div className="grid grid-cols-[minmax(120px,180px)_1fr] gap-3 py-1.5 text-sm border-b hairline last:border-0" data-testid="product-spec-row">
       <div className="text-slate-500 font-medium">{label}</div>
       <div className="text-slate-800 whitespace-pre-wrap break-words">{value}</div>

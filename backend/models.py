@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 
 
-__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds']
+__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS']
 
 
 CATEGORIES = ["electronics", "home", "tools", "apparel", "other"]
@@ -79,6 +79,8 @@ class ScrapedItem(BaseModel):
     postage_fee: Optional[float] = None
     delivery_estimate: Optional[str] = None
     delivery_estimate_updated_at: Optional[str] = None
+    delivery_speed: Optional[str] = None          # "Free delivery in 2-4 days"
+    delivery_date_range: Optional[str] = None     # "Get it between Wed, 26 Aug and Fri, 28 Aug"
     collection: Optional[str] = None
     returns_policy: Optional[str] = None
     payment_methods: Optional[str] = None
@@ -126,6 +128,15 @@ class ProductCreate(BaseModel):
     variants: List[dict] = Field(default_factory=list)  # [{type, option, price, currency, stock_status, sku?}]
     specifics: dict = Field(default_factory=dict)   # scraped eBay item specifics (label → value)
     postage: Optional[str] = None                   # scraped eBay postage — "Free Postage" or "$15.00"
+    delivery_speed: Optional[str] = None            # scraped "Free delivery in 2-4 days"
+    delivery_date_range: Optional[str] = None       # scraped "Get it between Wed, 26 Aug and Fri, 28 Aug"
+    # Postage preset (from Store Management → Postage Presets). Overrides the
+    # scraped `postage` field on the storefront. `postage_amount` /
+    # `postage_insurance_amount` are per-product overrides pre-filled from the
+    # preset but editable so admins can tweak them for a single product.
+    postage_preset_id: Optional[str] = None
+    postage_amount: Optional[float] = None
+    postage_insurance_amount: Optional[float] = None
 
 
 class Product(ProductCreate):
@@ -149,6 +160,11 @@ class ProductUpdate(BaseModel):
     archived: Optional[bool] = None
     specifics: Optional[dict] = None
     postage: Optional[str] = None
+    delivery_speed: Optional[str] = None
+    delivery_date_range: Optional[str] = None
+    postage_preset_id: Optional[str] = None
+    postage_amount: Optional[float] = None
+    postage_insurance_amount: Optional[float] = None
 
 
 # AU address generator used by the demo seed + backfill for existing orders without addresses.
@@ -588,3 +604,50 @@ _DEFAULT_PRICING_RULES = [
 class BulkProductIds(BaseModel):
     product_ids: List[str]
 
+
+
+# ---------------------------------------------------------------------------
+# Postage Presets
+# Admin-managed shipping presets shown as a dropdown on the Product Detail
+# page. `kind` drives the UI:
+#   - "free":       always $0.00 (no editable fields on product)
+#   - "standard":   configurable fixed postage amount
+#   - "large_item": configurable postage amount + separate insurance amount
+# On a product, the selected preset is stored on `products.postage_preset_id`
+# and the amounts are copied to per-product overrides (`postage_amount`,
+# `postage_insurance_amount`) so admins can tweak a single product without
+# touching the shared preset.
+# ---------------------------------------------------------------------------
+POSTAGE_PRESET_KINDS = {"free", "standard", "large_item"}
+
+
+class PostagePresetBase(BaseModel):
+    name: str
+    kind: str = "standard"                          # "free" | "standard" | "large_item"
+    postage_amount: float = 0.0                     # for standard + large_item
+    insurance_amount: float = 0.0                   # for large_item only
+    active: bool = True
+    sort_order: int = 0
+
+
+class PostagePreset(PostagePresetBase):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class PostagePresetUpdate(BaseModel):
+    name: Optional[str] = None
+    kind: Optional[str] = None
+    postage_amount: Optional[float] = None
+    insurance_amount: Optional[float] = None
+    active: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+# Seeded on first startup so the admin has a working starter set.
+_DEFAULT_POSTAGE_PRESETS = [
+    {"name": "Free Postage",     "kind": "free",       "postage_amount": 0.0,   "insurance_amount": 0.0,  "sort_order": 10},
+    {"name": "Standard Postage", "kind": "standard",   "postage_amount": 9.95,  "insurance_amount": 0.0,  "sort_order": 20},
+    {"name": "Large Item",       "kind": "large_item", "postage_amount": 29.95, "insurance_amount": 12.00, "sort_order": 30},
+]

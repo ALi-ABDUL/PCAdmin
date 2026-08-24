@@ -34,6 +34,7 @@ from models import (
     _CATEGORY_RULES, _EBAY_BREADCRUMB_MAP, Notification, PUSH_SETTINGS_DEFAULTS, 
     PUSH_CRITICAL_TYPES, PushSettingsUpdate, PricingRuleBase, PricingRule, PricingRuleUpdate, 
     _DEFAULT_PRICING_RULES, BulkProductIds,
+    PostagePresetBase, PostagePreset, PostagePresetUpdate, POSTAGE_PRESET_KINDS,
 )
 from helpers import (
     _rand_au_address, _slug, _product_code_base, _generate_unique_product_code, 
@@ -46,7 +47,7 @@ from helpers import (
     _get_credential, _push_channel_status, _notif_is_critical, _send_email, _send_telegram, 
     _format_notification_html, _push_notification, _emit_notification, 
     _emit_price_change_notifications, _auto_archive_if_out_of_stock, calc_pricing, _ensure_pricing_rules_seeded, 
-    _load_pricing_rules,
+    _load_pricing_rules, _ensure_postage_presets_seeded,
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
     _customer_email_html,
@@ -365,6 +366,8 @@ async def items_bulk_action(body: ItemBulkAction):
                     variants=it.get("variants") or [],
                     specifics=it.get("specifics") or {},
                     postage=it.get("postage_display") or None,
+                    delivery_speed=it.get("delivery_speed") or None,
+                    delivery_date_range=it.get("delivery_date_range") or None,
                 )
                 prod.product_code = await _generate_unique_product_code(prod.title)
                 await db.products.insert_one(prod.model_dump())
@@ -492,6 +495,7 @@ async def clear_scraper_history():
 async def _start_scheduler():
     await _ensure_categories_seeded()
     await _ensure_pricing_rules_seeded()
+    await _ensure_postage_presets_seeded()
     if await db.customers.count_documents({}) == 0:
         await _rebuild_customers_from_orders()
     # One-shot migration: the customer-group feature was removed — strip legacy
@@ -1667,6 +1671,79 @@ async def pricing_calc(ebay_price: float):
     return calc_pricing(ebay_price, rules=rules)
 
 
+# ---------------------------------------------------------------------------
+# Postage Presets (admin-managed shipping presets used on the Product page)
+# ---------------------------------------------------------------------------
+
+
+def _validate_postage_preset(kind: str, postage_amount: float, insurance_amount: float) -> None:
+    if kind not in POSTAGE_PRESET_KINDS:
+        raise HTTPException(status_code=400, detail=f"kind must be one of {sorted(POSTAGE_PRESET_KINDS)}")
+    if kind == "free" and postage_amount not in (0, 0.0):
+        raise HTTPException(status_code=400, detail="'free' presets must have postage_amount = 0")
+    if kind != "large_item" and insurance_amount not in (0, 0.0):
+        raise HTTPException(status_code=400, detail="insurance_amount is only allowed on 'large_item' presets")
+    if postage_amount < 0 or insurance_amount < 0:
+        raise HTTPException(status_code=400, detail="Amounts must be zero or positive")
+
+
+@api_router.get("/postage-presets")
+async def list_postage_presets():
+    cursor = db.postage_presets.find({}, {"_id": 0}).sort("sort_order", 1)
+    return {"presets": await cursor.to_list(500)}
+
+
+@api_router.post("/postage-presets")
+async def create_postage_preset(body: PostagePresetBase):
+    _validate_postage_preset(body.kind, body.postage_amount, body.insurance_amount)
+    preset = PostagePreset(**body.model_dump())
+    await db.postage_presets.insert_one(preset.model_dump())
+    return preset.model_dump()
+
+
+@api_router.patch("/postage-presets/{pid}")
+async def update_postage_preset(pid: str, body: PostagePresetUpdate):
+    existing = await db.postage_presets.find_one({"id": pid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Postage preset not found")
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    merged = {**existing, **fields}
+    kind = merged.get("kind")
+    # Auto-zero irrelevant amounts before validation so a caller can PATCH
+    # just `kind` without also having to clear the old amounts by hand.
+    if kind == "free":
+        fields["postage_amount"] = 0.0
+        fields["insurance_amount"] = 0.0
+    elif kind != "large_item":
+        fields["insurance_amount"] = 0.0
+    merged = {**existing, **fields}
+    _validate_postage_preset(
+        merged.get("kind"),
+        float(merged.get("postage_amount") or 0),
+        float(merged.get("insurance_amount") or 0),
+    )
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.postage_presets.update_one({"id": pid}, {"$set": fields})
+    return await db.postage_presets.find_one({"id": pid}, {"_id": 0})
+
+
+@api_router.delete("/postage-presets/{pid}")
+async def delete_postage_preset(pid: str):
+    r = await db.postage_presets.delete_one({"id": pid})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Postage preset not found")
+    # Detach the deleted preset from any products that referenced it so the
+    # dropdown falls back to "Not selected" instead of showing a dangling id.
+    await db.products.update_many(
+        {"postage_preset_id": pid},
+        {"$set": {"postage_preset_id": None}},
+    )
+    return {"deleted": True}
+
+
+
 @api_router.post("/products/from-item/{item_id}")
 async def create_product_from_item(item_id: str):
     it = await db.items.find_one({"id": item_id}, {"_id": 0})
@@ -1694,6 +1771,8 @@ async def create_product_from_item(item_id: str):
         variants=it.get("variants") or [],
         specifics=it.get("specifics") or {},
         postage=it.get("postage_display") or None,
+        delivery_speed=it.get("delivery_speed") or None,
+        delivery_date_range=it.get("delivery_date_range") or None,
     )
     prod.product_code = await _generate_unique_product_code(prod.title)
     await db.products.insert_one(prod.model_dump())

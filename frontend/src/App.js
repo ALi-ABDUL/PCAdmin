@@ -37,6 +37,7 @@ export default function App() {
   const [productDetailId, setProductDetailId] = useState(null);
   const [orderDetailId, setOrderDetailId] = useState(null);
   const [customerDetailId, setCustomerDetailId] = useState(null);
+  const [supplierDetailId, setSupplierDetailId] = useState(null);
   const [unreadCustomerCount, setUnreadCustomerCount] = useState(0);
 
   useEffect(() => { setMobileNavOpen(false); }, [tab]);
@@ -119,6 +120,7 @@ export default function App() {
     setProductDetailId(null);
     setOrderDetailId(null);
     setCustomerDetailId(null);
+    setSupplierDetailId(null);
     setTab(t);
   }, []);
   const changeProductSection = useCallback((s) => {
@@ -133,11 +135,16 @@ export default function App() {
     setCustomerDetailId(null);
     setCustomerSection(s);
   }, []);
+  const changeSupplierSection = useCallback((s) => {
+    setSupplierDetailId(null);
+    setSupplierSection(s);
+  }, []);
 
   // Safety net: leaving the module entirely still collapses the detail.
   useEffect(() => { if (tab !== "products")  setProductDetailId(null); }, [tab]);
   useEffect(() => { if (tab !== "orders")    setOrderDetailId(null); }, [tab]);
   useEffect(() => { if (tab !== "customers") setCustomerDetailId(null); }, [tab]);
+  useEffect(() => { if (tab !== "suppliers") setSupplierDetailId(null); }, [tab]);
 
   const inStore = tab === "store";
   const inSuppliers = tab === "suppliers";
@@ -166,7 +173,7 @@ export default function App() {
         )}
         {inSuppliers && (
           <motion.aside key="supplier-sidebar" initial={{ opacity: 0, x: -20, width: 0 }} animate={{ opacity: 1, x: 0, width: 280 }} exit={{ opacity: 0, x: -20, width: 0 }} transition={{ duration: 0.22 }} className="hidden xl:flex flex-col shrink-0 border-r hairline bg-white/85 backdrop-blur-xl sticky top-0 h-screen overflow-hidden">
-            <SubSideNav title="Suppliers" subtitle="Manage your sourcing network" icon={Factory} nav={SUPPLIER_NAV} testPrefix="sup" active={supplierSection} setActive={setSupplierSection}/>
+            <SubSideNav title="Suppliers" subtitle="Manage your sourcing network" icon={Factory} nav={SUPPLIER_NAV} testPrefix="sup" active={supplierSection} setActive={changeSupplierSection}/>
           </motion.aside>
         )}
         {inCustomers && (
@@ -194,7 +201,7 @@ export default function App() {
       <div className="flex-1 min-w-0 flex flex-col">
         <TopHeader tab={tab} storeSection={storeSection} supplierSection={supplierSection} customerSection={customerSection} productSection={productSection} ordersSection={ordersSection} paymentsSection={paymentsSection} onMenu={() => setMobileNavOpen(true)} onNavigate={navigateTo}/>
         {inStore     && <SubMobileNav nav={STORE_NAV}    testPrefix="store-m" active={storeSection}    setActive={setStoreSection}/>}
-        {inSuppliers && <SubMobileNav nav={SUPPLIER_NAV} testPrefix="sup-m"   active={supplierSection} setActive={setSupplierSection}/>}
+        {inSuppliers && <SubMobileNav nav={SUPPLIER_NAV} testPrefix="sup-m"   active={supplierSection} setActive={changeSupplierSection}/>}
         {inCustomers && <SubMobileNav nav={CUSTOMER_NAV} testPrefix="cus-m"   active={customerSection} setActive={changeCustomerSection}/>}
         {inProducts  && <SubMobileNav nav={PRODUCT_NAV}  testPrefix="prd-m"   active={productSection}  setActive={changeProductSection}/>}
         {inOrders    && <SubMobileNav nav={ORDERS_NAV}   testPrefix="ord-m"   active={ordersSection}   setActive={changeOrdersSection}/>}
@@ -204,7 +211,7 @@ export default function App() {
             <motion.div key={subKey} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
               {tab === "dashboard" && <Dashboard navigateTo={navigateTo}/>}
               {tab === "store"     && <StoreManagement section={storeSection} setSection={setStoreSection}/>}
-              {tab === "suppliers" && <Suppliers section={supplierSection} setSection={setSupplierSection}/>}
+              {tab === "suppliers" && <Suppliers section={supplierSection} setSection={changeSupplierSection} supplierDetailId={supplierDetailId} openSupplierDetail={setSupplierDetailId} openProductDetail={(pid) => { setTab("products"); setSupplierDetailId(null); setProductDetailId(pid); }}/>}
               {tab === "customers" && <CustomersModule section={customerSection} setSection={changeCustomerSection} customerDetailId={customerDetailId} openCustomerDetail={setCustomerDetailId} onMessageSent={refreshUnread} navigateTo={navigateTo}/>}
               {tab === "products"  && <ProductsModule section={productSection} setSection={changeProductSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openProductDetail={setProductDetailId} productDetailId={productDetailId}/>}
               {tab === "orders"    && <OrdersModule section={ordersSection} setSection={changeOrdersSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openOrderDetail={setOrderDetailId} orderDetailId={orderDetailId}/>}

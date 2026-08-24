@@ -609,3 +609,30 @@ Notification Bell deep-links) — zero regressions detected.
   opened the "Scanpan Classic Steel 8 Piece Eclipse Knife Block Set 18382"
   product detail page with its Save button visible.
 
+
+## Feb 24, 2026 — Supplier detail page
+- Backend: replaced the thin `GET /suppliers/{sid}` with a richer version
+  that returns `{supplier, products, product_count}`. Products are matched
+  by re-querying `items.item_id` for the seller's name (fixes a
+  pre-existing mismatch between item uuids in `_build_sellers.item_ids`
+  and `products.source_item_id` which uses the eBay listing id).
+- Frontend: new `SupplierDetailPage` component in `Suppliers.jsx`.
+  Suppliers list rows are now clickable and route to the detail page via
+  a new `supplierDetailId` state in `App.js` (parallels the existing
+  product / order / customer detail patterns). Header shows the supplier
+  avatar, name, location, active chip, scraped-listing count and
+  last-active date. Below that, a "Products in your store" section shows
+  the exact count on the right and renders a responsive
+  1/2/3/4-col grid of product cards (image, title, product code, price,
+  stock chip — Out of stock / Low · N / N in stock). Each card is a
+  button that opens the product detail page.
+- Wiring in `App.js`: added `supplierDetailId` state, cleared it via
+  `changeTab` and by a new `changeSupplierSection` setter + a
+  `useEffect(tab !== "suppliers")` safety net. `openProductDetail` from
+  the supplier detail sets `tab=products` FIRST and then the product id
+  (order matters — `changeTab` would clear the pid otherwise).
+- Verified end-to-end via Playwright: clicking the "HomeFashion AU
+  (144001)" row opens the detail page showing the "Akitas C5 Parquet
+  2000W Bagged Vacuum Cleaner" card with $149.49 / 10 in stock; clicking
+  the card lands on the full product detail page with Save button.
+

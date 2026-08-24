@@ -1460,11 +1460,26 @@ async def suppliers_summary():
 
 @api_router.get("/suppliers/{sid}")
 async def get_supplier(sid: str):
+    """Detail view for one supplier: seller stats + every product ever
+    sourced from that seller.
+
+    Products are matched by `products.source_item_id == items.item_id` (the
+    eBay listing id), so we re-fetch items by seller name to collect their
+    eBay ids instead of relying on the item uuids stored in `_build_sellers`.
+    """
     sellers = await _build_sellers()
-    for s in sellers:
-        if s["id"] == sid:
-            return s
-    raise HTTPException(status_code=404, detail="Seller not found")
+    seller = next((s for s in sellers if s["id"] == sid), None)
+    if not seller:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    ebay_ids = await db.items.distinct("item_id", {"seller": seller["name"]})
+    ebay_ids = [x for x in ebay_ids if x]
+    products = []
+    if ebay_ids:
+        products = await db.products.find(
+            {"source_item_id": {"$in": ebay_ids}, "archived": {"$ne": True}},
+            {"_id": 0},
+        ).sort("created_at", -1).to_list(length=1000)
+    return {"supplier": seller, "products": products, "product_count": len(products)}
 
 
 

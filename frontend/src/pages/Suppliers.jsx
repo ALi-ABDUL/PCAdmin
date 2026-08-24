@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
-import { BadgeCheck, Ban, History, Search } from "lucide-react";
+import { BadgeCheck, Ban, ChevronLeft, ExternalLink, History, ImageIcon, Loader2, Search } from "lucide-react";
 import { StatBox } from "../components/atoms";
 import { Pagination, usePagePref } from "../components/Pagination";
 import { SortableTh, useSortPref } from "../components/SortableTh";
-import { API } from "../lib/api";
+import { API, proxyImg } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 import { SUPPLIER_NAV } from "../lib/nav";
 import { Orders } from "./Orders";
 import { Products } from "./ProductsList";
 
-export function Suppliers({ section, setSection }) {
+export function Suppliers({ section, setSection, supplierDetailId, openSupplierDetail, openProductDetail }) {
   const [list, setList] = useState([]);
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
@@ -41,6 +41,11 @@ export function Suppliers({ section, setSection }) {
   useEffect(() => { loadSummary(); }, [loadSummary, list.length]);
   useEffect(() => { setPage(1); }, [q, status, sortParam, pageSize]);
 
+  // Supplier detail takes over the entire Suppliers UI when active.
+  if (supplierDetailId) {
+    return <SupplierDetailPage supplierId={supplierDetailId} onBack={() => openSupplierDetail?.(null)} openProductDetail={openProductDetail}/>;
+  }
+
   const meta = SUPPLIER_NAV.find((s) => s.id === section) || SUPPLIER_NAV[0];
   const Icon = meta.icon;
   const descriptions = {
@@ -62,7 +67,7 @@ export function Suppliers({ section, setSection }) {
         </div>
       </div>
 
-      {section === "all"      && <AllSuppliers list={list} total={total} q={q} setQ={setQ} sortField={sortField} sortDir={sortDir} toggleSort={toggleSort} status={status} setStatus={setStatus} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}/>}
+      {section === "all"      && <AllSuppliers list={list} total={total} q={q} setQ={setQ} sortField={sortField} sortDir={sortDir} toggleSort={toggleSort} status={status} setStatus={setStatus} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} onOpen={openSupplierDetail}/>}
       {section === "top"      && <TopSuppliers list={summary?.top_suppliers || []} agg={summary?.aggregate}/>}
       {section === "products" && <SupplierProducts list={list}/>}
       {section === "orders"   && <SupplierOrders list={list}/>}
@@ -81,7 +86,7 @@ export function SellerStatusChip({ status }) {
   return <span className={`chip ${active ? "chip-success" : "chip-neutral"}`} data-testid="sup-status">{active ? <BadgeCheck size={11}/> : <Ban size={11}/>} {active ? "Active" : "Inactive"}</span>;
 }
 
-export function AllSuppliers({ list, total, q, setQ, sortField, sortDir, toggleSort, status, setStatus, page = 1, setPage, pageSize = 50, setPageSize }) {
+export function AllSuppliers({ list, total, q, setQ, sortField, sortDir, toggleSort, status, setStatus, page = 1, setPage, pageSize = 50, setPageSize, onOpen }) {
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -109,7 +114,12 @@ export function AllSuppliers({ list, total, q, setQ, sortField, sortDir, toggleS
             <tbody>
               {list.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-500">No eBay sellers yet — import a listing on the Product Sourcing page.</td></tr>}
               {list.map((s) => (
-                <tr key={s.id} className={s.status === "inactive" ? "opacity-60" : ""} data-testid="sup-row">
+                <tr
+                  key={s.id}
+                  className={`cursor-pointer hover:bg-slate-50 transition-colors ${s.status === "inactive" ? "opacity-60" : ""}`}
+                  data-testid="sup-row"
+                  onClick={() => onOpen?.(s.id)}
+                >
                   <td>
                     <div className="flex items-center gap-3 min-w-0">
                       <SupplierAvatar s={s} size={36}/>
@@ -243,3 +253,122 @@ export function SupplierActivity({ list }) {
 }
 
 /* ------------------------------- Customers -------------------------------- */
+
+
+/* ------------------------------ Supplier Detail ---------------------------- */
+
+export function SupplierDetailPage({ supplierId, onBack, openProductDetail }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true); setError(null);
+    axios.get(`${API}/suppliers/${supplierId}`)
+      .then((r) => { if (alive) setData(r.data); })
+      .catch((e) => { if (alive) setError(e?.response?.data?.detail || "Failed to load supplier"); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [supplierId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-24 text-slate-500 text-sm">
+        <Loader2 className="animate-spin mr-2" size={16}/> Loading supplier…
+      </div>
+    );
+  }
+  if (error || !data) {
+    return (
+      <div className="grid gap-4">
+        <button onClick={onBack} className="btn btn-ghost text-sm w-fit" data-testid="sup-detail-back"><ChevronLeft size={14}/> Back to suppliers</button>
+        <div className="card p-8 text-center text-slate-500">{error || "Supplier not found"}</div>
+      </div>
+    );
+  }
+
+  const { supplier: s, products, product_count } = data;
+  return (
+    <div className="grid gap-6" data-testid="supplier-detail">
+      <div>
+        <button onClick={onBack} className="btn btn-ghost text-sm" data-testid="sup-detail-back">
+          <ChevronLeft size={14}/> Back to suppliers
+        </button>
+      </div>
+      <div className="card p-5 md:p-6 flex items-start gap-4">
+        <SupplierAvatar s={s} size={56}/>
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500">Supplier</div>
+          <div className="font-display text-2xl font-bold tracking-tight truncate" data-testid="sup-detail-name">{s.name}</div>
+          <div className="text-sm text-slate-500 mt-1 truncate">{s.location}</div>
+          <div className="mt-3 flex items-center gap-3 flex-wrap text-xs text-slate-500">
+            <SellerStatusChip status={s.status}/>
+            <span className="font-mono">{s.total_products} scraped listing{s.total_products === 1 ? "" : "s"}</span>
+            {s.last_active && <span className="font-mono">last active {fmtDate(s.last_active)}</span>}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-baseline justify-between flex-wrap gap-2">
+        <div className="font-display text-lg font-bold">Products in your store</div>
+        <div className="text-xs text-slate-500 font-mono" data-testid="sup-detail-count">
+          {product_count} product{product_count === 1 ? "" : "s"} sourced from this supplier
+        </div>
+      </div>
+
+      {products.length === 0 ? (
+        <div className="card p-10 text-center text-slate-500">
+          No products from this supplier are in your store yet. Import listings from Product Sourcing to add some.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" data-testid="sup-detail-grid">
+          {products.map((p) => (
+            <SupplierProductCard key={p.id} product={p} onOpen={() => openProductDetail?.(p.id)}/>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SupplierProductCard({ product: p, onOpen }) {
+  const image = p.images?.[0] || null;
+  const stock = Number(p.stock ?? 0);
+  const stockChip = stock <= 0
+    ? { cls: "chip-danger", label: "Out of stock" }
+    : stock <= 3
+      ? { cls: "chip-warning", label: `Low · ${stock}` }
+      : { cls: "chip-success", label: `${stock} in stock` };
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-testid={`sup-detail-product-${p.id}`}
+      className="card overflow-hidden hover:shadow-lg transition-shadow text-left group flex flex-col"
+      title="Open product detail"
+    >
+      <div className="aspect-[4/3] bg-slate-50 relative overflow-hidden">
+        {image ? (
+          <img src={proxyImg(image)} alt={p.title} className="w-full h-full object-contain p-3 group-hover:scale-105 transition-transform duration-500"/>
+        ) : (
+          <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={32}/></div>
+        )}
+        {p.active === false && (
+          <span className="absolute top-2 left-2 chip chip-neutral text-[10px]">Inactive</span>
+        )}
+      </div>
+      <div className="p-4 flex-1 flex flex-col gap-2">
+        <div className="text-sm font-medium line-clamp-2 min-h-[2.5rem]" title={p.title}>{p.title}</div>
+        {p.product_code && <div className="text-[11px] text-slate-400 font-mono truncate">{p.product_code}</div>}
+        <div className="mt-auto flex items-center justify-between gap-2">
+          <div className="font-mono font-bold text-indigo-600">{moneyCents(p.price)}</div>
+          <span className={`chip ${stockChip.cls} text-[10px]`}>{stockChip.label}</span>
+        </div>
+        <div className="text-[11px] text-indigo-600 font-medium flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <ExternalLink size={11}/> View product details
+        </div>
+      </div>
+    </button>
+  );
+}

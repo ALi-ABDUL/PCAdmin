@@ -719,3 +719,28 @@ Notification Bell deep-links) — zero regressions detected.
   SPECIFICATIONS (Brand IKEA, MPN IKEA-DT-180, Warranty 2 Years,
   Assembly Required Yes).
 
+
+## Feb 24, 2026 — Clean product image scraping
+- New helpers in `scraper.py`:
+  * `_looks_like_chrome(url)` — flags anything whose URL contains a
+    logo/banner/store-logo/badge/sprite/icon/avatar/promo/header/footer/
+    sizechart/size-guide/sizing/measurement/diagram/chart/watermark/
+    shipping/return/feedback/about-us token, and any URL served from
+    `pics.ebaystatic.com` / `ir.ebaystatic.com`.
+  * `_image_signature(url)` — normalises an eBay image URL down to its
+    identity (strips `s-l<digits>` size token, file extension, query
+    string, scheme) so `/s-l500.jpg` and `/s-l1600.webp` of the same
+    image collapse into one row.
+  * `_filter_product_images(urls, limit=8)` — drops non-http URLs,
+    drops chrome via `_looks_like_chrome`, dedupes by signature, and
+    hard-caps at 8. Called at the end of `_extract_images`, replacing
+    the naive `urls[:20]` slice.
+- Because the upstream regex already upgrades `/s-l<n>.` → `/s-l1600.`,
+  the biggest available version of each unique photo is what survives
+  the signature dedup (first occurrence wins).
+- Regression suite: `backend/tests/test_image_filters.py` — 14 pytest
+  cases (chrome detection, signature collapsing, hard cap at 8, dedup
+  same-image-different-sizes, skip chrome mixed with valid URLs, drops
+  non-http, preserves order). All green. Combined scraper test suite
+  (title cleaner + description cleaner + image filters) — 35 passing.
+

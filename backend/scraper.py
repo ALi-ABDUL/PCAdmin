@@ -502,7 +502,93 @@ def _extract_images(soup: BeautifulSoup, html: str) -> list[str]:
             seen.add(u)
             urls.append(u)
 
-    return urls[:20]
+    return _filter_product_images(urls)
+
+
+# ---------------------------------------------------------------------------
+# Image quality filters
+# ---------------------------------------------------------------------------
+
+# URL fragments that almost always mark chrome (seller banners, store logos,
+# eBay UI icons, promotional badges, size charts, sizing guides, etc). Case-
+# insensitive substring match on the URL path/filename.
+_IMG_SKIP_TOKENS = (
+    "logo", "banner", "storelogo", "store-logo", "storeheader",
+    "badge", "sprite", "icon", "avatar",
+    "promo", "promotion", "header", "footer",
+    "sizechart", "size-chart", "size_chart",
+    "sizeguide", "size-guide", "size_guide",
+    "sizing", "measurement", "measurements", "measure", "diagram",
+    "chart", "howto", "guide",
+    "watermark", "shipping", "delivery", "return-policy", "warranty",
+    "feedback", "aboutus", "about-us",
+)
+# eBay static CDN paths only ever serve UI chrome, never product photos.
+_IMG_HARD_SKIP_HOSTS = ("pics.ebaystatic.com", "ir.ebaystatic.com")
+
+
+def _image_signature(url: str) -> str:
+    """Normalize an eBay image URL down to its identity so different
+    resolutions (`/s-l500.jpg` vs `/s-l1600.webp`) collapse to one row.
+
+    Examples:
+      https://i.ebayimg.com/images/g/ABC123/s-l500.jpg  → i.ebayimg.com/images/g/ABC123
+      https://i.ebayimg.com/00/s/foo.webp?_=1            → i.ebayimg.com/00/s/foo
+    """
+    u = (url or "").split("?", 1)[0].split("#", 1)[0]
+    # Drop `s-l<digits>` size token and file extension.
+    u = re.sub(r"/s-l\d+", "", u, flags=re.IGNORECASE)
+    u = re.sub(r"\.(?:jpg|jpeg|webp|png|gif|bmp)$", "", u, flags=re.IGNORECASE)
+    # Strip scheme + trailing slash for canonical form.
+    u = re.sub(r"^https?://", "", u).rstrip("/")
+    return u.lower()
+
+
+def _looks_like_chrome(url: str) -> bool:
+    """True when the URL smells like a seller logo, store banner, UI icon,
+    size chart, or other non-product decoration."""
+    u = (url or "").lower()
+    if not u:
+        return True
+    if any(h in u for h in _IMG_HARD_SKIP_HOSTS):
+        return True
+    # Only inspect the path/filename portion — sellers sometimes have benign
+    # tokens like "chart" inside the domain of an unrelated CDN we do want.
+    path = u.split("://", 1)[-1].split("?", 1)[0]
+    filename = path.rsplit("/", 1)[-1]
+    for tok in _IMG_SKIP_TOKENS:
+        if tok in filename or f"/{tok}" in path or f"{tok}/" in path:
+            return True
+    return False
+
+
+def _filter_product_images(urls: list[str], limit: int = 8) -> list[str]:
+    """Reduce a raw scraped image list to at most `limit` clean product photos.
+
+    Steps:
+    1. Drop empty / non-http URLs.
+    2. Drop anything that looks like seller chrome (logos, banners, size
+       charts, measurement diagrams — see `_looks_like_chrome`).
+    3. Collapse near-identical URLs (same eBay image at different sizes) via
+       `_image_signature`. Keeps the first occurrence, which — because
+       upstream regex upgrades `s-l` to `s-l1600` — is the biggest version.
+    4. Truncate to `limit` (default 8).
+    """
+    out: list[str] = []
+    sigs: set[str] = set()
+    for u in urls:
+        if not u or not u.startswith("http"):
+            continue
+        if _looks_like_chrome(u):
+            continue
+        sig = _image_signature(u)
+        if not sig or sig in sigs:
+            continue
+        sigs.add(sig)
+        out.append(u)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _extract_price(soup: BeautifulSoup) -> tuple[Optional[str], Optional[float], Optional[str]]:

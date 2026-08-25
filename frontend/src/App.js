@@ -11,7 +11,7 @@ import { API } from "./lib/api";
 import { fmtDate } from "./lib/format";
 import { CUSTOMER_NAV, ORDERS_NAV, PAYMENTS_NAV, PRODUCT_NAV, STORE_NAV, SUPPLIER_NAV } from "./lib/nav";
 import { applyTheme, getCachedTheme } from "./lib/theme";
-import { canAccess, loadAdminSession } from "./lib/adminSession";
+import { canAccess, hasAdminSession, loadAdminSession } from "./lib/adminSession";
 import { Analytics } from "./pages/Analytics";
 import { Categories } from "./pages/Categories";
 import { CustomersModule } from "./pages/Customers";
@@ -22,6 +22,7 @@ import { ProductsModule } from "./pages/Products";
 import { Products } from "./pages/ProductsList";
 import { ScraperPage } from "./pages/Scraper";
 import { SettingsPage } from "./pages/Settings";
+import { AdminLoginScreen } from "./pages/AdminLogin";
 import { StoreManagement } from "./pages/Store";
 import { Suppliers } from "./pages/Suppliers";
 
@@ -41,6 +42,16 @@ export default function App() {
   const [customerDetailId, setCustomerDetailId] = useState(null);
   const [supplierDetailId, setSupplierDetailId] = useState(null);
   const [unreadCustomerCount, setUnreadCustomerCount] = useState(0);
+  // Session-gated shell — until the admin/manager signs in, we render
+  // `AdminLoginScreen` instead of the full dashboard. Logout clears the
+  // session which fires `adminsessionchange` → this state flips back to
+  // false and the login screen mounts.
+  const [signedIn, setSignedIn] = useState(hasAdminSession());
+  useEffect(() => {
+    const on = () => setSignedIn(hasAdminSession());
+    window.addEventListener("adminsessionchange", on);
+    return () => window.removeEventListener("adminsessionchange", on);
+  }, []);
 
   useEffect(() => { setMobileNavOpen(false); }, [tab]);
 
@@ -180,6 +191,17 @@ export default function App() {
   const inOrders    = tab === "orders";
   const inPayments  = tab === "payments";
   const subKey = inStore ? `store-${storeSection}` : inSuppliers ? `sup-${supplierSection}` : inCustomers ? `cus-${customerSection}` : inProducts ? `prd-${productSection}` : inOrders ? `ord-${ordersSection}` : inPayments ? `pay-${paymentsSection}` : tab;
+
+  // Session gate: no session → render the login screen and nothing else.
+  if (!signedIn) {
+    return (
+      <div className="min-h-screen bg-[color:var(--bg)]">
+        <Toaster theme="light" position="bottom-right"/>
+        <AdminLoginScreen/>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex bg-[color:var(--bg)]">
       <Toaster theme="light" position="bottom-right" />

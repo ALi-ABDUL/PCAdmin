@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Bell, BellOff, ChevronRight, DollarSign, HelpCircle, ImageIcon, LogIn, Menu, Moon, PackageMinus, RefreshCw, Search, ShieldCheck, ShoppingBag, Store, Sun, TrendingDown, TrendingUp, UserPlus, XCircle } from "lucide-react";
+import { BadgeCheck, Ban, Bell, BellOff, ChevronRight, DollarSign, HelpCircle, ImageIcon, LogIn, LogOut, Menu, Moon, PackageMinus, RefreshCw, Search, ShieldCheck, ShoppingBag, Store, Sun, TrendingDown, TrendingUp, UserCircle, UserPlus, XCircle } from "lucide-react";
 import { API, proxyImg } from "../lib/api";
 import { applyTheme, getCachedTheme } from "../lib/theme";
-import { loadAdminSession, saveAdminSession } from "../lib/adminSession";
+import { clearAdminSession, loadAdminSession, saveAdminSession } from "../lib/adminSession";
 import { fmtDate, moneyCents } from "../lib/format";
 import { CUSTOMER_NAV, ORDERS_NAV, PAYMENTS_NAV, PRODUCT_NAV, STORE_NAV, SUPPLIER_NAV } from "../lib/nav";
 import { Analytics } from "../pages/Analytics";
@@ -407,6 +407,98 @@ export function SwitchToMainAdminButton() {
 }
 
 
+export function AvatarMenu() {
+  const [open, setOpen] = useState(false);
+  const [session, setSession] = useState(loadAdminSession());
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const on = () => setSession(loadAdminSession());
+    window.addEventListener("adminsessionchange", on);
+    return () => window.removeEventListener("adminsessionchange", on);
+  }, []);
+
+  // Close on outside click / Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // Two-letter initial from the current session name, falling back to email
+  // or a generic "?" when we haven't loaded anything yet.
+  const initials = (() => {
+    const src = (session.name || session.email || "?").trim();
+    if (!src) return "?";
+    const parts = src.split(/\s+|@/).filter(Boolean);
+    const two = (parts[0]?.[0] || "") + (parts[1]?.[0] || parts[0]?.[1] || "");
+    return two.toUpperCase().slice(0, 2) || "?";
+  })();
+
+  const logout = () => {
+    clearAdminSession();
+    toast.success("Signed out");
+  };
+
+  const roleLabel = session.role === "admin" ? "Admin · full access"
+    : session.role === "manager" ? "Manager · Orders, Customers, Products"
+    : "Not signed in";
+  const roleChip = session.role === "admin" ? "chip-primary" : "chip-neutral";
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-9 h-9 rounded-full grid place-items-center text-white font-bold text-xs shadow-md shadow-indigo-500/20 hover:scale-105 transition-transform"
+        style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}
+        title={session.name || session.email || "Signed in"}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        data-testid="avatar-menu-btn"
+      >
+        {initials}
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 mt-2 w-72 card p-3 z-50 shadow-xl"
+          role="menu"
+          data-testid="avatar-menu-dropdown"
+        >
+          <div className="flex items-center gap-3 p-2">
+            <div className="w-11 h-11 rounded-full grid place-items-center text-white font-bold text-sm shrink-0" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>{initials}</div>
+            <div className="min-w-0">
+              <div className="font-display font-bold text-sm truncate" data-testid="avatar-menu-name">{session.name || "Aussie Admin"}</div>
+              <div className="text-xs text-slate-500 truncate font-mono" data-testid="avatar-menu-email">{session.email || "—"}</div>
+            </div>
+          </div>
+          <div className="px-2 pb-2">
+            <span className={`chip ${roleChip} font-mono text-[10px]`} data-testid="avatar-menu-role">
+              <UserCircle size={11}/> {roleLabel}
+            </span>
+          </div>
+          <div className="border-t hairline mt-1 pt-2">
+            <button
+              onClick={logout}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 transition-colors"
+              data-testid="avatar-menu-logout"
+              role="menuitem"
+            >
+              <LogOut size={14}/> Log out
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 export function TopHeader({ tab, storeSection, supplierSection, customerSection, productSection, ordersSection, paymentsSection, onMenu, onNavigate }) {
   const titles = {
     dashboard: "Dashboard", store: "Store Management", products: "Products", categories: "Categories",
@@ -449,7 +541,7 @@ export function TopHeader({ tab, storeSection, supplierSection, customerSection,
           <NotificationBell onNavigate={onNavigate}/>
           <ThemeToggle/>
           <button className="btn btn-ghost !p-2 hidden sm:grid" title="Help"><HelpCircle size={16}/></button>
-          <div className="w-9 h-9 rounded-full grid place-items-center text-white font-bold text-xs" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>AK</div>
+          <AvatarMenu/>
         </div>
       </div>
     </div>

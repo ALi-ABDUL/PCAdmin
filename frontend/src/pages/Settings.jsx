@@ -343,11 +343,6 @@ export function AccountsCard() {
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/admin-accounts`);
     setRows(data.accounts || []);
-    // On first load, default the session to the main admin if nothing set.
-    if (!loadAdminSession().id) {
-      const main = (data.accounts || []).find(a => a.is_main);
-      if (main) { saveAdminSession(main); setSession(loadAdminSession()); }
-    }
   }, []);
   useEffect(() => { load(); }, [load]);
 

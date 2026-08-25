@@ -1,40 +1,56 @@
 /**
  * Admin-side session helpers.
  *
- * There is intentionally no admin login flow yet — the app was built as
- * an internal dashboard and every /api route is open. However, once the
- * user starts creating additional Admin / Manager accounts inside
- * `Settings › Accounts` we need *some* concept of "who is currently
- * viewing the dashboard" so we can gate the sidebar (Managers must not
- * see Store Management / Payments / Settings).
+ * The active session lives in localStorage under a small handful of keys.
+ * It's swapped in three places:
+ *   1. `AdminLoginScreen` on successful email+password verification.
+ *   2. Settings › Accounts row action "Sign in as".
+ *   3. Header shortcut "Switch to main admin".
  *
- * We keep it dead-simple: an id + role snapshot lives in localStorage
- * and can be swapped from the Accounts card by clicking "Sign in as
- * this account". The main admin id is set on first boot after the
- * accounts list loads. This is enough for the RBAC UI hiding the user
- * asked for; a proper JWT-backed admin login can layer on later.
+ * On boot, if there's no session id we render `AdminLoginScreen` in App.js
+ * so nobody sees the dashboard before entering credentials.
  */
 
-const ID_KEY = "admin_current_id";
-const ROLE_KEY = "admin_current_role";
+const ID_KEY    = "admin_current_id";
+const ROLE_KEY  = "admin_current_role";
+const NAME_KEY  = "admin_current_name";
+const EMAIL_KEY = "admin_current_email";
 
 export const ADMIN_ROLES = ["admin", "manager"];
 
 export function loadAdminSession() {
   try {
     return {
-      id: localStorage.getItem(ID_KEY) || null,
-      role: localStorage.getItem(ROLE_KEY) || "admin",
+      id:    localStorage.getItem(ID_KEY)    || null,
+      role:  localStorage.getItem(ROLE_KEY)  || null,
+      name:  localStorage.getItem(NAME_KEY)  || null,
+      email: localStorage.getItem(EMAIL_KEY) || null,
     };
-  } catch { return { id: null, role: "admin" }; }
+  } catch { return { id: null, role: null, name: null, email: null }; }
 }
 
 export function saveAdminSession(account) {
   try {
-    if (account?.id) localStorage.setItem(ID_KEY, account.id);
-    if (account?.role) localStorage.setItem(ROLE_KEY, account.role);
+    if (!account?.id) return;
+    localStorage.setItem(ID_KEY,    account.id);
+    localStorage.setItem(ROLE_KEY,  account.role || "manager");
+    localStorage.setItem(NAME_KEY,  account.name || "");
+    localStorage.setItem(EMAIL_KEY, account.email || "");
     window.dispatchEvent(new CustomEvent("adminsessionchange", { detail: loadAdminSession() }));
   } catch { /* private-mode: ignore */ }
+}
+
+export function clearAdminSession() {
+  try {
+    [ID_KEY, ROLE_KEY, NAME_KEY, EMAIL_KEY].forEach(k => localStorage.removeItem(k));
+    window.dispatchEvent(new CustomEvent("adminsessionchange", { detail: loadAdminSession() }));
+  } catch { /* ignore */ }
+}
+
+/** Whether the session is signed in (all four keys populated). */
+export function hasAdminSession() {
+  const s = loadAdminSession();
+  return !!(s.id && s.role);
 }
 
 /** Managers can only reach these top-level tabs. */

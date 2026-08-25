@@ -1878,6 +1878,27 @@ async def delete_admin_account(aid: str):
     return {"deleted": True}
 
 
+@api_router.post("/admin-accounts/login")
+async def login_admin_account(body: dict = Body(...)):
+    """Verify email + password against the admin_accounts collection.
+
+    Returns the account row (no hash) on success so the frontend can drop it
+    into its localStorage-based session. The old localStorage-only flow
+    continues to work — this endpoint just gives us a proper password check
+    for the new login screen.
+    """
+    from helpers import _verify_password
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password are required")
+    doc = await db.admin_accounts.find_one({"email": email}, {"_id": 0})
+    if not doc or not _verify_password(password, doc.get("password_hash", "")):
+        # Same message either way so we don't leak whether the email exists.
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    return _admin_row(doc)
+
+
 # ---------------------------------------------------------------------------
 # Backup — export/import full JSON dumps of the primary collections.
 # Admin Settings › Backup uses these to let the store owner download a

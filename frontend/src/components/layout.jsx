@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import { BarChart3, ChevronRight, CreditCard, Factory, LayoutDashboard, Package, Settings2, ShoppingCart, Store, Tags, Users, X, Zap } from "lucide-react";
+import { BarChart3, ChevronRight, CreditCard, Factory, LayoutDashboard, Package, Settings2, ShoppingCart, Sparkles, Store, Tags, Users, X, Zap } from "lucide-react";
 import { Analytics } from "../pages/Analytics";
 import { Categories } from "../pages/Categories";
 import { Dashboard } from "../pages/Dashboard";
@@ -31,7 +31,6 @@ export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomer
     { id: "payments",  label: "Payments",   icon: CreditCard,     group: "Operations", hasSub: true },
     { id: "customers", label: "Customers",  icon: Users,          group: "Operations", hasSub: true, count: unreadCustomerCount, onBadgeClick: onCustomersBadgeClick },
     { id: "analytics", label: "Analytics",  icon: BarChart3,      group: "Insights" },
-    { id: "settings",  label: "Settings",   icon: Settings2,      group: "System" },
   ].filter(n => canAccess(role, n.id));
   const grouped = nav.reduce((acc, n) => { (acc[n.group] = acc[n.group] || []).push(n); return acc; }, {});
 
@@ -81,6 +80,26 @@ export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomer
           </div>
         ))}
       </div>
+      <div className="p-4 border-t hairline">
+        {/* Mobile variant (< 768px): quick access to the eBay sourcing flow. */}
+        <div className="md:hidden card p-4 bg-gradient-to-br from-indigo-50 to-pink-50 border-indigo-100" data-testid="sidebar-cta-mobile">
+          <div className="flex items-center gap-2 text-indigo-700 font-display font-bold text-sm"><Sparkles size={14}/> Product Sourcing</div>
+          <p className="text-xs text-slate-600 mt-1 leading-relaxed">Discover and import new products directly into your store.</p>
+          <button onClick={() => setTab("scraper")} className="btn btn-primary w-full mt-3 text-xs py-2" data-testid="sidebar-cta-mobile-btn">Open Sourcing</button>
+        </div>
+        {/* Desktop variant (≥ 768px): shortcut to Admin Settings — hidden
+            for Managers (Settings access is admin-only). This is the ONLY
+            entry point to Admin Settings now that we removed the System
+            group "Settings" nav item. */}
+        {role !== "manager" && (
+          <div className="hidden md:block card p-4 bg-gradient-to-br from-indigo-50 to-pink-50 border-indigo-100" data-testid="sidebar-cta-desktop">
+            <div className="flex items-center gap-2 text-indigo-700 font-display font-bold text-sm"><Settings2 size={14}/> Admin Settings</div>
+            <p className="text-xs text-slate-600 mt-1 leading-relaxed">Configure system preferences, security, access, and administrator controls.</p>
+            <button onClick={() => setTab("settings")} className="btn btn-primary w-full mt-3 text-xs py-2" data-testid="sidebar-cta-desktop-btn">Open Settings</button>
+          </div>
+        )}
+      </div>
+
     </>
   );
 

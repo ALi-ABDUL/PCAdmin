@@ -70,10 +70,17 @@ export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomer
         ))}
       </div>
       <div className="p-4 border-t hairline">
-        <div className="card p-4 bg-gradient-to-br from-indigo-50 to-pink-50 border-indigo-100">
-          <div className="flex items-center gap-2 text-indigo-700 font-display font-bold text-sm"><Sparkles size={14}/> Import from eBay</div>
-          <p className="text-xs text-slate-600 mt-1 leading-relaxed">Paste any ebay.com.au URL to add a new product.</p>
-          <button onClick={() => setTab("scraper")} className="btn btn-primary w-full mt-3 text-xs py-2">Open sourcing</button>
+        {/* Mobile variant (< 768px): quick access to the eBay sourcing flow. */}
+        <div className="md:hidden card p-4 bg-gradient-to-br from-indigo-50 to-pink-50 border-indigo-100" data-testid="sidebar-cta-mobile">
+          <div className="flex items-center gap-2 text-indigo-700 font-display font-bold text-sm"><Sparkles size={14}/> Product Sourcing</div>
+          <p className="text-xs text-slate-600 mt-1 leading-relaxed">Discover and import new products directly into your store.</p>
+          <button onClick={() => setTab("scraper")} className="btn btn-primary w-full mt-3 text-xs py-2" data-testid="sidebar-cta-mobile-btn">Open Sourcing</button>
+        </div>
+        {/* Desktop variant (≥ 768px): shortcut to Admin Settings. */}
+        <div className="hidden md:block card p-4 bg-gradient-to-br from-indigo-50 to-pink-50 border-indigo-100" data-testid="sidebar-cta-desktop">
+          <div className="flex items-center gap-2 text-indigo-700 font-display font-bold text-sm"><Settings2 size={14}/> Admin Settings</div>
+          <p className="text-xs text-slate-600 mt-1 leading-relaxed">Configure system preferences, security, access, and administrator controls.</p>
+          <button onClick={() => setTab("settings")} className="btn btn-primary w-full mt-3 text-xs py-2" data-testid="sidebar-cta-desktop-btn">Open Settings</button>
         </div>
       </div>
     </>

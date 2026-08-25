@@ -935,3 +935,19 @@ Notification Bell deep-links) — zero regressions detected.
   covering single-delete, partial-delete (category kept), bulk-delete
   emptying, bulk-delete partial, and bulk-delete emptying multiple
   categories in one call.
+
+
+## Feb 25, 2026 — Admin Accounts (Settings › Accounts) + RBAC nav filter
+- **Backend** — new `admin_accounts` collection with bcrypt-hashed passwords.
+  * `AdminAccount` model: id, name, email, password_hash, role, is_main, timestamps.
+  * Roles: `admin` (full access) and `manager` (Orders / Customers / Products only).
+  * CRUD endpoints: `GET/POST/PATCH/DELETE /api/admin-accounts`. Password hash is stripped from every response.
+  * Validation: email format, role ∈ {admin, manager}, min 8-char password, no duplicate emails.
+  * Main admin: seeded on first startup (`admin@example.com` / `admin123`), flagged `is_main=True`. Cannot be deleted or demoted from admin role. Name is still editable.
+- **Frontend**
+  * New `AccountsCard` in Admin Settings — full list with Name / Email / Role chip / Session / Actions columns and a "+ Add account" modal (name, email, password, role dropdown).
+  * Main admin row shows a green `Main` badge and a `Protected` chip instead of a Delete button.
+  * "Sign in as this account" action on non-active rows swaps the localStorage-based admin session (`admin_current_id` + `admin_current_role`). A `Signed in` chip highlights the active row.
+  * Nav filter: `lib/adminSession.js` centralises `canAccess(role, tabId)`. Sidebar and App.js both listen for the `adminsessionchange` event and either hide or redirect from disallowed tabs — when the session flips to Manager, the sidebar shrinks to just Products / Orders / Customers and the bottom Admin Settings CTA disappears. App.js auto-redirects to Orders.
+- **Tests**: `/app/backend/tests/test_admin_accounts.py` — 13 cases covering seeding, hash-non-leak, CRUD, validation, duplicate-email, and main-admin protection.
+- **Docs**: `test_credentials.md` now lists the main admin creds so QA can log in against future auth.

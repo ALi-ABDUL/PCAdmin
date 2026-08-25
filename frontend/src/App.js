@@ -11,6 +11,7 @@ import { API } from "./lib/api";
 import { fmtDate } from "./lib/format";
 import { CUSTOMER_NAV, ORDERS_NAV, PAYMENTS_NAV, PRODUCT_NAV, STORE_NAV, SUPPLIER_NAV } from "./lib/nav";
 import { applyTheme, getCachedTheme } from "./lib/theme";
+import { canAccess, loadAdminSession } from "./lib/adminSession";
 import { Analytics } from "./pages/Analytics";
 import { Categories } from "./pages/Categories";
 import { CustomersModule } from "./pages/Customers";
@@ -52,6 +53,21 @@ export default function App() {
       .then(r => { if (r.data?.theme) applyTheme(r.data.theme); })
       .catch(() => { /* keep cached theme on failure */ });
   }, []);
+
+  // RBAC redirect: whenever the admin session role changes (Manager signs in,
+  // account deleted, etc.), snap the active tab back to a page they're
+  // allowed to see. Falls to "orders" for Managers, "dashboard" otherwise.
+  useEffect(() => {
+    const check = () => {
+      const { role } = loadAdminSession();
+      if (!canAccess(role, tab)) {
+        setTab(role === "manager" ? "orders" : "dashboard");
+      }
+    };
+    check();
+    window.addEventListener("adminsessionchange", check);
+    return () => window.removeEventListener("adminsessionchange", check);
+  }, [tab]);
 
   // Poll the "customers waiting for a reply" count and keep the sidebar badge
   // fresh. 20s cadence matches the notification poll and keeps the badge

@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useState } from "react";
 import { BarChart3, ChevronRight, CreditCard, Factory, LayoutDashboard, Package, Settings2, ShoppingCart, Sparkles, Store, Tags, Users, X, Zap } from "lucide-react";
 import { Analytics } from "../pages/Analytics";
 import { Categories } from "../pages/Categories";
@@ -6,8 +7,19 @@ import { Dashboard } from "../pages/Dashboard";
 import { Orders } from "../pages/Orders";
 import { Products } from "../pages/ProductsList";
 import { Suppliers } from "../pages/Suppliers";
+import { canAccess, loadAdminSession } from "../lib/adminSession";
 
 export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomerCount = 0, onCustomersBadgeClick }) {
+  // Track the active admin session so the sidebar can hide Store /
+  // Payments / Settings for Managers. The Settings › Accounts UI dispatches
+  // `adminsessionchange` whenever the admin swaps identity.
+  const [role, setRole] = useState(loadAdminSession().role);
+  useEffect(() => {
+    const on = (e) => setRole(e?.detail?.role || loadAdminSession().role);
+    window.addEventListener("adminsessionchange", on);
+    return () => window.removeEventListener("adminsessionchange", on);
+  }, []);
+
   const nav = [
     { id: "dashboard", label: "Dashboard",  icon: LayoutDashboard, group: "General" },
     { id: "store",     label: "Store Management", icon: Store, group: "General", hasSub: true },
@@ -20,7 +32,7 @@ export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomer
     { id: "customers", label: "Customers",  icon: Users,          group: "Operations", hasSub: true, count: unreadCustomerCount, onBadgeClick: onCustomersBadgeClick },
     { id: "analytics", label: "Analytics",  icon: BarChart3,      group: "Insights" },
     { id: "settings",  label: "Settings",   icon: Settings2,      group: "System" },
-  ];
+  ].filter(n => canAccess(role, n.id));
   const grouped = nav.reduce((acc, n) => { (acc[n.group] = acc[n.group] || []).push(n); return acc; }, {});
 
   const content = (
@@ -76,12 +88,15 @@ export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomer
           <p className="text-xs text-slate-600 mt-1 leading-relaxed">Discover and import new products directly into your store.</p>
           <button onClick={() => setTab("scraper")} className="btn btn-primary w-full mt-3 text-xs py-2" data-testid="sidebar-cta-mobile-btn">Open Sourcing</button>
         </div>
-        {/* Desktop variant (≥ 768px): shortcut to Admin Settings. */}
-        <div className="hidden md:block card p-4 bg-gradient-to-br from-indigo-50 to-pink-50 border-indigo-100" data-testid="sidebar-cta-desktop">
-          <div className="flex items-center gap-2 text-indigo-700 font-display font-bold text-sm"><Settings2 size={14}/> Admin Settings</div>
-          <p className="text-xs text-slate-600 mt-1 leading-relaxed">Configure system preferences, security, access, and administrator controls.</p>
-          <button onClick={() => setTab("settings")} className="btn btn-primary w-full mt-3 text-xs py-2" data-testid="sidebar-cta-desktop-btn">Open Settings</button>
-        </div>
+        {/* Desktop variant (≥ 768px): shortcut to Admin Settings — hidden
+            entirely for Managers, whose role excludes Settings access. */}
+        {role !== "manager" && (
+          <div className="hidden md:block card p-4 bg-gradient-to-br from-indigo-50 to-pink-50 border-indigo-100" data-testid="sidebar-cta-desktop">
+            <div className="flex items-center gap-2 text-indigo-700 font-display font-bold text-sm"><Settings2 size={14}/> Admin Settings</div>
+            <p className="text-xs text-slate-600 mt-1 leading-relaxed">Configure system preferences, security, access, and administrator controls.</p>
+            <button onClick={() => setTab("settings")} className="btn btn-primary w-full mt-3 text-xs py-2" data-testid="sidebar-cta-desktop-btn">Open Settings</button>
+          </div>
+        )}
       </div>
     </>
   );

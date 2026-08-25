@@ -36,6 +36,7 @@ from models import (
     _DEFAULT_PRICING_RULES, BulkProductIds,
     PostagePresetBase, PostagePreset, PostagePresetUpdate, POSTAGE_PRESET_KINDS,
     DeliverySettingsUpdate,
+    ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
 )
 from helpers import (
     _rand_au_address, _slug, _product_code_base, _generate_unique_product_code, 
@@ -49,6 +50,7 @@ from helpers import (
     _format_notification_html, _push_notification, _emit_notification, 
     _emit_price_change_notifications, _auto_archive_if_out_of_stock, calc_pricing, _ensure_pricing_rules_seeded, 
     _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings, _delete_categories_if_empty,
+    _ensure_main_admin_seeded,
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
     _customer_email_html,
@@ -497,6 +499,7 @@ async def _start_scheduler():
     await _ensure_categories_seeded()
     await _ensure_pricing_rules_seeded()
     await _ensure_postage_presets_seeded()
+    await _ensure_main_admin_seeded()
     if await db.customers.count_documents({}) == 0:
         await _rebuild_customers_from_orders()
     # One-shot migration: the customer-group feature was removed — strip legacy
@@ -1786,6 +1789,93 @@ async def update_delivery_settings(body: DeliverySettingsUpdate):
     fields["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.delivery_settings.update_one({"id": "singleton"}, {"$set": fields}, upsert=True)
     return await _get_delivery_settings()
+
+
+# ---------------------------------------------------------------------------
+# Admin Accounts (Admin Settings › Accounts)
+# ---------------------------------------------------------------------------
+
+
+def _admin_row(doc: dict) -> dict:
+    """Strip the password hash before shipping a row to the frontend."""
+    return {k: v for k, v in (doc or {}).items() if k not in ("password_hash",)}
+
+
+def _validate_admin_payload(email: str | None, role: str | None, password: str | None, *, require_password: bool) -> None:
+    if email is not None:
+        e = (email or "").strip().lower()
+        if not e or "@" not in e or "." not in e.split("@", 1)[-1]:
+            raise HTTPException(status_code=400, detail="Enter a valid email address")
+    if role is not None and role not in ADMIN_ROLES:
+        raise HTTPException(status_code=400, detail=f"role must be one of {list(ADMIN_ROLES)}")
+    if require_password and not password:
+        raise HTTPException(status_code=400, detail="Password is required")
+    if password is not None and password != "" and len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+
+@api_router.get("/admin-accounts")
+async def list_admin_accounts():
+    cursor = db.admin_accounts.find({}, {"_id": 0}).sort("is_main", -1)
+    accounts = [_admin_row(d) async for d in cursor]
+    return {"accounts": accounts}
+
+
+@api_router.post("/admin-accounts")
+async def create_admin_account(body: AdminAccountCreate):
+    from helpers import _hash_password as hash_pw
+    _validate_admin_payload(body.email, body.role, body.password, require_password=True)
+    email = body.email.strip().lower()
+    if await db.admin_accounts.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="An account with this email already exists")
+    acct = AdminAccount(
+        name=body.name.strip(),
+        email=email,
+        role=body.role,
+        password_hash=hash_pw(body.password),
+        is_main=False,
+    )
+    await db.admin_accounts.insert_one(acct.model_dump())
+    return _admin_row(acct.model_dump())
+
+
+@api_router.patch("/admin-accounts/{aid}")
+async def update_admin_account(aid: str, body: AdminAccountUpdate):
+    from helpers import _hash_password as hash_pw
+    existing = await db.admin_accounts.find_one({"id": aid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Account not found")
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    _validate_admin_payload(fields.get("email"), fields.get("role"), fields.get("password"), require_password=False)
+    # Protect the main admin: role can't be demoted to manager, otherwise the
+    # dashboard could end up with zero admins.
+    if existing.get("is_main") and fields.get("role") not in (None, "admin"):
+        raise HTTPException(status_code=400, detail="The main admin must keep the admin role")
+    if fields.get("email"):
+        fields["email"] = fields["email"].strip().lower()
+        clash = await db.admin_accounts.find_one({"email": fields["email"], "id": {"$ne": aid}})
+        if clash:
+            raise HTTPException(status_code=400, detail="Another account already uses this email")
+    if fields.get("password"):
+        fields["password_hash"] = hash_pw(fields["password"])
+    fields.pop("password", None)
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.admin_accounts.update_one({"id": aid}, {"$set": fields})
+    doc = await db.admin_accounts.find_one({"id": aid}, {"_id": 0})
+    return _admin_row(doc)
+
+
+@api_router.delete("/admin-accounts/{aid}")
+async def delete_admin_account(aid: str):
+    existing = await db.admin_accounts.find_one({"id": aid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if existing.get("is_main"):
+        raise HTTPException(status_code=400, detail="The main admin account cannot be deleted")
+    await db.admin_accounts.delete_one({"id": aid})
+    return {"deleted": True}
 
 
 

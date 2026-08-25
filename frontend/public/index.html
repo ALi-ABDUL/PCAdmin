@@ -22,6 +22,19 @@
         Learn how to configure a non-root public URL by running `npm run build`.
         -->
         <title>eBay AU Scraper — Import any item from ebay.com.au</title>
+        <script>
+            // Apply cached admin theme before React mounts to avoid a
+            // light-then-dark flash on first paint. The full source of truth
+            // is `/api/settings.theme`, which is fetched + reconciled in
+            // App.js. See src/lib/theme.js for the full flow.
+            (function () {
+                try {
+                    var t = localStorage.getItem("admin_theme") || "light";
+                    if (t === "dark") document.documentElement.classList.add("dark");
+                    document.documentElement.dataset.theme = t;
+                } catch (e) { /* private-mode: just keep default light theme */ }
+            })();
+        </script>
         <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
         <script src="https://assets.emergent.sh/scripts/emergent-main.js"></script>
     </head>

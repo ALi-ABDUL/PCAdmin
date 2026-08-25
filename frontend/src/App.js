@@ -10,6 +10,7 @@ import { ItemModal } from "./components/modals/ItemModal";
 import { API } from "./lib/api";
 import { fmtDate } from "./lib/format";
 import { CUSTOMER_NAV, ORDERS_NAV, PAYMENTS_NAV, PRODUCT_NAV, STORE_NAV, SUPPLIER_NAV } from "./lib/nav";
+import { applyTheme, getCachedTheme } from "./lib/theme";
 import { Analytics } from "./pages/Analytics";
 import { Categories } from "./pages/Categories";
 import { CustomersModule } from "./pages/Customers";
@@ -41,6 +42,16 @@ export default function App() {
   const [unreadCustomerCount, setUnreadCustomerCount] = useState(0);
 
   useEffect(() => { setMobileNavOpen(false); }, [tab]);
+
+  // Boot-time theme: paint from localStorage cache immediately, then reconcile
+  // with the server value so a login on a fresh device still lands on the
+  // theme the admin last picked (persisted in `settings.theme`).
+  useEffect(() => {
+    applyTheme(getCachedTheme());
+    axios.get(`${API}/settings`)
+      .then(r => { if (r.data?.theme) applyTheme(r.data.theme); })
+      .catch(() => { /* keep cached theme on failure */ });
+  }, []);
 
   // Poll the "customers waiting for a reply" count and keep the sidebar badge
   // fresh. 20s cadence matches the notification poll and keeps the badge

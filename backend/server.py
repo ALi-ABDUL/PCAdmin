@@ -2444,8 +2444,10 @@ async def demo_seed(reset: bool = False):
 
 @api_router.get("/settings")
 async def get_settings():
-    doc = await db.settings.find_one({"_id": "main"}, {"_id": 0})
-    return doc or Settings().model_dump()
+    doc = await db.settings.find_one({"_id": "main"}, {"_id": 0}) or {}
+    # Merge with defaults so newly-added fields (e.g. `theme`) surface even
+    # when the persisted doc pre-dates the schema change.
+    return {**Settings().model_dump(), **doc}
 
 
 @api_router.put("/settings")

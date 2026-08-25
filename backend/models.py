@@ -219,6 +219,7 @@ class Settings(BaseModel):
     country: str = "Australia"
     tax_rate: float = 10.0
     accent_color: str = "indigo"
+    theme: str = "light"   # "light" | "dark" — applied across the admin dashboard
 
 _DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"]  # Mon..Sun (matches user spec: first letter of day)
 

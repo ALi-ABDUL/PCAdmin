@@ -24,7 +24,60 @@
     --danger-soft: #FEECEC;
     --sky: #0EA5E9;
     --pink: #EC4899;
+    --bg-glow-1: rgba(79, 70, 229, 0.10);
+    --bg-glow-2: rgba(236, 72, 153, 0.07);
+    --scrollbar-thumb: #DADAE3;
+    --scrollbar-thumb-hover: #C4C4CF;
 }
+
+/* Dark theme — activated by adding `dark` class to <html>.
+   All UI primitives (cards, inputs, buttons, chips, tables, sidebar) read
+   the CSS variables above so a single override cascade recolours the whole
+   dashboard instantly. Tailwind utility colours (bg-slate-*, text-slate-*)
+   remain — we opted for CSS-variable overrides only for the paint layer
+   because the app has too many utility classes to hand-annotate `dark:`
+   variants everywhere. */
+html.dark {
+    --bg: #0B1020;
+    --panel: #14192B;
+    --panel-2: #1C2237;
+    --border: #2A2F45;
+    --border-strong: #3A4059;
+    --ink: #E4E7F1;
+    --ink-2: #C7CCDD;
+    --muted: #9AA0B4;
+    --dim: #6B7185;
+    --primary: #8B85F5;
+    --primary-hover: #A5A0FF;
+    --primary-soft: rgba(139, 133, 245, 0.15);
+    --success: #34D399;
+    --success-soft: rgba(52, 211, 153, 0.15);
+    --warning: #FBBF24;
+    --warning-soft: rgba(251, 191, 36, 0.15);
+    --danger: #F87171;
+    --danger-soft: rgba(248, 113, 113, 0.15);
+    --bg-glow-1: rgba(139, 133, 245, 0.15);
+    --bg-glow-2: rgba(236, 72, 153, 0.10);
+    --scrollbar-thumb: #3A4059;
+    --scrollbar-thumb-hover: #4C5273;
+    color-scheme: dark;
+}
+
+html.dark body {
+    color: var(--ink);
+}
+
+/* Dark-mode Tailwind text/bg polish so the sea of `text-slate-*` / `bg-slate-*`
+   utility classes we sprinkle throughout the app stay readable without
+   rewriting every component. */
+html.dark .text-slate-800, html.dark .text-slate-900, html.dark .text-black { color: var(--ink) !important; }
+html.dark .text-slate-700 { color: var(--ink-2) !important; }
+html.dark .text-slate-600, html.dark .text-slate-500 { color: var(--muted) !important; }
+html.dark .text-slate-400, html.dark .text-slate-300 { color: var(--dim) !important; }
+html.dark .bg-white, html.dark .bg-white\/80 { background-color: var(--panel) !important; }
+html.dark .bg-slate-50, html.dark .bg-slate-50\/40, html.dark .bg-slate-50\/60 { background-color: var(--panel-2) !important; }
+html.dark .bg-slate-100 { background-color: var(--panel-2) !important; }
+html.dark .border-slate-100, html.dark .border-slate-200 { border-color: var(--border) !important; }
 
 html, body, #root { background: var(--bg); color: var(--ink); min-height: 100vh; }
 
@@ -34,8 +87,8 @@ body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background-image:
-        radial-gradient(1200px 700px at 90% -10%, rgba(79, 70, 229, 0.10), transparent 55%),
-        radial-gradient(900px 500px at -10% 100%, rgba(236, 72, 153, 0.07), transparent 55%);
+        radial-gradient(1200px 700px at 90% -10%, var(--bg-glow-1), transparent 55%),
+        radial-gradient(900px 500px at -10% 100%, var(--bg-glow-2), transparent 55%);
     background-attachment: fixed;
 }
 
@@ -95,7 +148,7 @@ body {
 }
 .sidebar-link:hover { background: var(--panel-2); color: var(--ink); }
 .sidebar-link.active {
-    background: linear-gradient(180deg, #EEF0FF, #E5E8FF);
+    background: linear-gradient(180deg, var(--primary-soft), var(--primary-soft));
     color: var(--primary);
     box-shadow: inset 0 0 0 1px rgba(79, 70, 229, 0.15);
 }
@@ -124,12 +177,12 @@ body {
 /* Scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #DADAE3; border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: #C4C4CF; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 .hairline { border-color: var(--border) !important; }
 
 /* Sparkline tooltip */
-[data-sonner-toaster] { --normal-bg: #ffffff; --normal-border: #EAEAF0; --normal-text: #0F1220; }
+[data-sonner-toaster] { --normal-bg: var(--panel); --normal-border: var(--border); --normal-text: var(--ink); }

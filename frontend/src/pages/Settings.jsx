@@ -403,9 +403,36 @@ export function AccountsCard() {
 
   const emptyDraft = { name: "", email: "", role: "manager", password: "" };
   const roleChip = (r) => r === "admin" ? "chip-primary" : "chip-neutral";
+  const mainAcct = rows.find(a => a.is_main);
+  const isMainActive = mainAcct ? session.id === mainAcct.id : true;
 
   return (
     <div className="card p-6" data-testid="accounts-card">
+      {/* Quick-switch banner — shows only when the active session isn't the
+          main admin. Saves the user from having to hunt down the row +
+          Sign in-as button in the table below. */}
+      {mainAcct && !isMainActive && (
+        <div
+          className="mb-5 flex items-center justify-between gap-3 p-3 rounded-lg border border-indigo-200 bg-indigo-50/60 flex-wrap"
+          data-testid="accounts-switch-banner"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-lg bg-indigo-100 text-indigo-700 grid place-items-center shrink-0"><ShieldCheck size={16}/></div>
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-slate-800">You're signed in as <span className="font-mono">{session.role}</span></div>
+              <div className="text-xs text-slate-500 truncate">Switch back to <span className="font-mono">{mainAcct.email}</span> to regain full access.</div>
+            </div>
+          </div>
+          <button
+            onClick={() => signInAs(mainAcct)}
+            className="btn btn-primary text-sm shrink-0"
+            data-testid="switch-to-main-admin-btn"
+          >
+            <LogIn size={14}/> Switch to main admin
+          </button>
+        </div>
+      )}
+
       <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
         <div>
           <div className="font-display font-bold text-lg mb-1 flex items-center gap-2"><ShieldCheck size={18} className="text-indigo-600"/> Accounts</div>

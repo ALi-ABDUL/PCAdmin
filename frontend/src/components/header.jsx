@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Bell, BellOff, ChevronRight, DollarSign, HelpCircle, ImageIcon, Menu, Moon, PackageMinus, RefreshCw, Search, ShoppingBag, Store, Sun, TrendingDown, TrendingUp, UserPlus, XCircle } from "lucide-react";
+import { BadgeCheck, Ban, Bell, BellOff, ChevronRight, DollarSign, HelpCircle, ImageIcon, LogIn, Menu, Moon, PackageMinus, RefreshCw, Search, ShieldCheck, ShoppingBag, Store, Sun, TrendingDown, TrendingUp, UserPlus, XCircle } from "lucide-react";
 import { API, proxyImg } from "../lib/api";
 import { applyTheme, getCachedTheme } from "../lib/theme";
+import { loadAdminSession, saveAdminSession } from "../lib/adminSession";
 import { fmtDate, moneyCents } from "../lib/format";
 import { CUSTOMER_NAV, ORDERS_NAV, PAYMENTS_NAV, PRODUCT_NAV, STORE_NAV, SUPPLIER_NAV } from "../lib/nav";
 import { Analytics } from "../pages/Analytics";
@@ -362,6 +363,48 @@ export function ThemeToggle() {
 }
 
 
+export function SwitchToMainAdminButton() {
+  const [session, setSession] = useState(loadAdminSession());
+  const [mainAcct, setMainAcct] = useState(null);
+
+  const refresh = async () => {
+    try {
+      const { data } = await axios.get(`${API}/admin-accounts`);
+      const main = (data.accounts || []).find(a => a.is_main);
+      setMainAcct(main || null);
+    } catch { /* silently ignore — button just stays hidden */ }
+  };
+  useEffect(() => { refresh(); }, []);
+
+  // Re-check whenever someone else swaps identity (from Settings › Accounts).
+  useEffect(() => {
+    const on = () => setSession(loadAdminSession());
+    window.addEventListener("adminsessionchange", on);
+    return () => window.removeEventListener("adminsessionchange", on);
+  }, []);
+
+  // Hidden when we already are the main admin — this is a switch-back
+  // shortcut, not a permanent header control.
+  if (!mainAcct || session.id === mainAcct.id) return null;
+
+  const switchNow = () => {
+    saveAdminSession(mainAcct);
+    toast.success(`Signed in as ${mainAcct.name}`);
+  };
+
+  return (
+    <button
+      onClick={switchNow}
+      className="btn btn-primary !py-1.5 !px-2.5 text-xs flex items-center gap-1.5"
+      title="Switch back to the main admin account"
+      data-testid="header-switch-to-main-admin"
+    >
+      <ShieldCheck size={13}/> <span className="hidden sm:inline">Switch to main admin</span><span className="sm:hidden">Main admin</span>
+    </button>
+  );
+}
+
+
 export function TopHeader({ tab, storeSection, supplierSection, customerSection, productSection, ordersSection, paymentsSection, onMenu, onNavigate }) {
   const titles = {
     dashboard: "Dashboard", store: "Store Management", products: "Products", categories: "Categories",
@@ -400,6 +443,7 @@ export function TopHeader({ tab, storeSection, supplierSection, customerSection,
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <GlobalSearch onNavigate={onNavigate}/>
+          <SwitchToMainAdminButton/>
           <NotificationBell onNavigate={onNavigate}/>
           <ThemeToggle/>
           <button className="btn btn-ghost !p-2 hidden sm:grid" title="Help"><HelpCircle size={16}/></button>

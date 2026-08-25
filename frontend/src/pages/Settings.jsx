@@ -409,9 +409,10 @@ export function AccountsCard() {
   return (
     <div className="card p-6" data-testid="accounts-card">
       {/* Quick-switch banner — shows only when the active session isn't the
-          main admin. Saves the user from having to hunt down the row +
-          Sign in-as button in the table below. */}
-      {mainAcct && !isMainActive && (
+          main admin AND has admin role. Managers cannot switch back to the
+          main admin (they can't reach this screen anyway, but the check
+          documents intent). */}
+      {mainAcct && !isMainActive && session.role === "admin" && (
         <div
           className="mb-5 flex items-center justify-between gap-3 p-3 rounded-lg border border-indigo-200 bg-indigo-50/60 flex-wrap"
           data-testid="accounts-switch-banner"

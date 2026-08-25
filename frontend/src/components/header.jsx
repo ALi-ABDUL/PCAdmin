@@ -384,8 +384,10 @@ export function SwitchToMainAdminButton() {
   }, []);
 
   // Hidden when we already are the main admin — this is a switch-back
-  // shortcut, not a permanent header control.
+  // shortcut, not a permanent header control. Also hidden for Managers:
+  // per policy, only Admin-role sessions may escalate back to main admin.
   if (!mainAcct || session.id === mainAcct.id) return null;
+  if (session.role !== "admin") return null;
 
   const switchNow = () => {
     saveAdminSession(mainAcct);

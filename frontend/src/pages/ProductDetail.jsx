@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Pencil, Plus, RefreshCw, Save, Star as StarIcon, Trash2, Truck, X } from "lucide-react";
+import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Pencil, Plus, RefreshCw, Rocket, Save, Star as StarIcon, Trash2, Truck, X } from "lucide-react";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
@@ -607,8 +607,18 @@ export function DeliveryWindowField({ f, setF, setDirty, defaults }) {
           data-testid="product-delivery-estimate-preview"
         >
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-700 flex items-center gap-1">
-              <Calendar size={11}/> Live delivery estimate
+            {/* Green blinking dot — Tailwind's animate-ping ring + a solid
+                dot so the label reads as a genuine "live" indicator. */}
+            <span
+              className="relative flex h-2 w-2 shrink-0"
+              data-testid="product-delivery-live-dot"
+              aria-hidden="true"
+            >
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-700">
+              Live delivery estimate
             </div>
             {est.shifted && (
               <span className="chip chip-warning font-mono text-[10px]" data-testid="product-delivery-shift-chip">
@@ -621,8 +631,9 @@ export function DeliveryWindowField({ f, setF, setDirty, defaults }) {
           <div className="text-sm text-slate-800 mt-0.5 font-medium" data-testid="product-delivery-estimate-label">
             {est.label}
           </div>
-          <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-            {min}–{max} business days · weekends skipped · {useCustom ? "custom override" : "store default"}
+          <div className="text-[11px] text-slate-500 font-mono mt-0.5 flex items-center gap-1.5">
+            <Rocket size={11} className="text-indigo-500 shrink-0"/>
+            <span>{min}–{max} business days</span>
           </div>
         </div>
       )}

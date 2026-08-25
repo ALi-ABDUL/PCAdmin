@@ -53,7 +53,6 @@ export const CUSTOMER_NAV = [
   { id: "messages",   label: "Customer messages",   icon: MessageCircle,  group: "Engagement" },
   { id: "top",        label: "Top customers",       icon: Award,          group: "Engagement" },
   { id: "addresses",  label: "Addresses",           icon: MapPinned,      group: "Data" },
-  { id: "orders",     label: "Orders",              icon: ShoppingCart,   group: "Data" },
   { id: "wishlist",   label: "Wishlist",            icon: Heart,          group: "Data" },
   { id: "reviews",    label: "Reviews",             icon: StarIcon,       group: "Data" },
   { id: "coupons",    label: "Coupons",             icon: Ticket,         group: "Marketing" },

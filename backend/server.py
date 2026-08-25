@@ -1,7 +1,7 @@
 """FastAPI endpoints for the Admin Dashboard API.
 Deps: app/router/db/logger from deps.py — Pydantic models from models.py — helpers from helpers.py.
 Refactored Feb 2026."""
-from fastapi import HTTPException, Query, Depends, Header
+from fastapi import HTTPException, Query, Depends, Header, Body
 from fastapi.responses import Response
 from starlette.middleware.cors import CORSMiddleware
 import os
@@ -1876,6 +1876,64 @@ async def delete_admin_account(aid: str):
         raise HTTPException(status_code=400, detail="The main admin account cannot be deleted")
     await db.admin_accounts.delete_one({"id": aid})
     return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# Backup — export/import full JSON dumps of the primary collections.
+# Admin Settings › Backup uses these to let the store owner download a
+# point-in-time snapshot or restore a previous one.
+# ---------------------------------------------------------------------------
+# Collections included in a backup. `admin_accounts` is intentionally
+# excluded because it carries password hashes we don't want to move around
+# in plain files; the frontend surfaces that in the UI.
+BACKUP_COLLECTIONS = [
+    "products", "orders", "customers", "customer_accounts",
+    "categories", "suppliers", "reviews", "messages",
+    "pricing_rules", "postage_presets", "delivery_settings",
+    "settings", "coupons", "notifications", "transactions",
+    "returns", "abandoned_carts",
+]
+
+
+@api_router.get("/backup/export")
+async def backup_export():
+    """Return a JSON snapshot of every collection the admin cares about."""
+    data: dict = {}
+    for name in BACKUP_COLLECTIONS:
+        cursor = getattr(db, name).find({}, {"_id": 0})
+        data[name] = await cursor.to_list(100000)
+    return {
+        "version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "collections": data,
+        "counts": {k: len(v) for k, v in data.items()},
+    }
+
+
+@api_router.post("/backup/import")
+async def backup_import(payload: dict = Body(...)):
+    """Restore collections from a backup payload.
+
+    The payload must match the shape returned by `/backup/export`. Each
+    listed collection is fully replaced (delete + insert) — a partial
+    import is intentionally not supported, so the admin gets a predictable
+    all-or-nothing result. Unknown collections in the payload are ignored.
+    """
+    collections = payload.get("collections") or {}
+    if not isinstance(collections, dict) or not collections:
+        raise HTTPException(status_code=400, detail="Backup payload missing 'collections' object")
+    restored: dict = {}
+    for name, rows in collections.items():
+        if name not in BACKUP_COLLECTIONS:
+            continue
+        if not isinstance(rows, list):
+            raise HTTPException(status_code=400, detail=f"Collection '{name}' must be a list")
+        coll = getattr(db, name)
+        await coll.delete_many({})
+        if rows:
+            await coll.insert_many(rows)
+        restored[name] = len(rows)
+    return {"restored": restored, "restored_at": datetime.now(timezone.utc).isoformat()}
 
 
 

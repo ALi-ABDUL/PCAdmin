@@ -1,34 +1,78 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, LogIn, Moon, Pencil, Plus, ShieldCheck, Sun, Trash2, UserPlus, X } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Database, Download, LayoutGrid, LogIn, Moon, Palette, Pencil, Plus, RotateCcw, ShieldCheck, Sun, Trash2, Upload, UserPlus, X } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API, KEYS, loadKeys } from "../lib/api";
 import { applyTheme } from "../lib/theme";
 import { ADMIN_ROLES, loadAdminSession, saveAdminSession } from "../lib/adminSession";
+import { DASHBOARD_WIDGETS, loadDashboardLayout, resetDashboardLayout, saveDashboardLayout } from "../lib/dashboardLayout";
+
+const TABS = [
+  { id: "theme",     label: "Theme",            icon: Palette },
+  { id: "accounts",  label: "Accounts",         icon: ShieldCheck },
+  { id: "layout",    label: "Dashboard Layout", icon: LayoutGrid },
+  { id: "cache",     label: "Cache",            icon: RotateCcw },
+  { id: "backup",    label: "Backup",           icon: Database },
+];
+
+const TAB_STORAGE = "settings_active_tab";
 
 export function SettingsPage() {
-  const [s, setS] = useState({ store_name:"", store_email:"", currency:"AUD", country:"Australia", tax_rate:10.0, accent_color:"indigo", theme:"light" });
-  const [sb, setSb] = useState(""); const [sa, setSa] = useState(""); const [method, setMethod] = useState("auto");
+  // Persist the active tab so returning to Settings lands the admin
+  // where they left off. Small quality-of-life win when hopping between
+  // Accounts + Backup during onboarding.
+  const [activeTab, setActiveTab] = useState(() => {
+    try { return localStorage.getItem(TAB_STORAGE) || "theme"; } catch { return "theme"; }
+  });
+  const pickTab = (id) => {
+    setActiveTab(id);
+    try { localStorage.setItem(TAB_STORAGE, id); } catch { /* ignore */ }
+  };
+
+  return (
+    <div className="grid gap-6 max-w-5xl" data-testid="settings-page">
+      <div className="card p-2 sticky top-16 z-10 flex flex-wrap gap-1 backdrop-blur-md" data-testid="settings-tabs">
+        {TABS.map(t => {
+          const Icon = t.icon;
+          const active = activeTab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => pickTab(t.id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${active ? "bg-indigo-50 text-indigo-700 shadow-inner" : "text-slate-500 hover:bg-slate-50"}`}
+              data-testid={`settings-tab-${t.id}`}
+              aria-pressed={active}
+            >
+              <Icon size={14}/>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeTab === "theme"    && <ThemeCard/>}
+      {activeTab === "accounts" && <AccountsCard/>}
+      {activeTab === "layout"   && <DashboardLayoutCard/>}
+      {activeTab === "cache"    && <CacheCard/>}
+      {activeTab === "backup"   && <BackupCard/>}
+    </div>
+  );
+}
+
+
+/* --------------------------------- Theme --------------------------------- */
+export function ThemeCard() {
+  const [s, setS] = useState({ theme: "light" });
   const [themeSaving, setThemeSaving] = useState(false);
 
-  useEffect(() => { axios.get(`${API}/settings`).then(r => setS(prev => ({ ...prev, ...r.data }))); const k = loadKeys(); setSb(k.scrapingbee_key); setSa(k.scraperapi_key); setMethod(k.method); }, []);
-
-  // Stay in sync with the header ThemeToggle — when it fires `themechange`
-  // we mirror the value into local state so the "Active" chip reflects the
-  // current theme even if the user toggled from the top bar.
+  useEffect(() => { axios.get(`${API}/settings`).then(r => setS(prev => ({ ...prev, ...r.data }))); }, []);
   useEffect(() => {
     const on = (e) => setS(prev => ({ ...prev, theme: e?.detail?.theme || prev.theme }));
     window.addEventListener("themechange", on);
     return () => window.removeEventListener("themechange", on);
   }, []);
 
-  const saveStore = async () => { try { await axios.put(`${API}/settings`, s); toast.success("Store settings saved"); } catch { toast.error("Save failed"); } };
-  const saveKeys = () => { localStorage.setItem(KEYS.sb, sb.trim()); localStorage.setItem(KEYS.sa, sa.trim()); localStorage.setItem(KEYS.method, method); toast.success("Scraper settings saved locally"); };
-
-  // Toggling the theme should feel instant: apply the class immediately
-  // for the visual flip, then PUT the full settings doc so the choice
-  // survives logout / new browsers.
   const pickTheme = async (next) => {
     if (next === s.theme) return;
     applyTheme(next);
@@ -36,98 +80,246 @@ export function SettingsPage() {
     setS(merged);
     setThemeSaving(true);
     try {
-      await axios.put(`${API}/settings`, merged);
+      const cur = (await axios.get(`${API}/settings`)).data || {};
+      await axios.put(`${API}/settings`, { ...cur, theme: next });
       toast.success(`${next === "dark" ? "Dark" : "Light"} theme saved`);
-    } catch {
-      toast.error("Couldn't save theme");
-    } finally { setThemeSaving(false); }
+    } catch { toast.error("Couldn't save theme"); }
+    finally { setThemeSaving(false); }
   };
 
   return (
-    <div className="grid gap-6 max-w-4xl">
-      <div className="card p-6" data-testid="theme-card">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="font-display font-bold text-lg mb-1">Theme</div>
-            <div className="text-xs text-slate-500">Applies instantly across the admin dashboard and stays with your account after logout.</div>
-          </div>
-          {themeSaving && <span className="text-xs text-slate-500 font-mono">Saving…</span>}
+    <div className="card p-6" data-testid="theme-card">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <div className="font-display font-bold text-lg mb-1">Theme</div>
+          <div className="text-xs text-slate-500">Applies instantly across the admin dashboard and stays with your account after logout.</div>
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-3 max-w-md">
-          {[
-            { id: "light", label: "Light", icon: Sun,  swatch: ["#F7F8FB", "#FFFFFF", "#0B1020"] },
-            { id: "dark",  label: "Dark",  icon: Moon, swatch: ["#0B1020", "#14192B", "#E4E7F1"] },
-          ].map(opt => {
-            const active = s.theme === opt.id;
-            const Icon = opt.icon;
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => pickTheme(opt.id)}
-                className={`text-left rounded-xl p-4 border-2 transition-all ${active ? "border-indigo-500 shadow-md shadow-indigo-500/10" : "border-slate-200 hover:border-slate-300"}`}
-                data-testid={`theme-option-${opt.id}`}
-                aria-pressed={active}
-              >
-                <div className="flex items-center gap-2 mb-3">
-                  <div
-                    className="w-8 h-8 grid place-items-center rounded-lg"
-                    style={{ background: opt.swatch[1], color: opt.swatch[2], boxShadow: "inset 0 0 0 1px rgba(0,0,0,.08)" }}
-                  >
-                    <Icon size={15}/>
-                  </div>
-                  <div className="font-display font-bold text-sm">{opt.label}</div>
-                  {active && <span className="chip chip-primary text-[10px] font-mono ml-auto">Active</span>}
+        {themeSaving && <span className="text-xs text-slate-500 font-mono">Saving…</span>}
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 max-w-md">
+        {[
+          { id: "light", label: "Light", icon: Sun,  swatch: ["#F7F8FB", "#FFFFFF", "#0B1020"] },
+          { id: "dark",  label: "Dark",  icon: Moon, swatch: ["#0B1020", "#14192B", "#E4E7F1"] },
+        ].map(opt => {
+          const active = s.theme === opt.id;
+          const Icon = opt.icon;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => pickTheme(opt.id)}
+              className={`text-left rounded-xl p-4 border-2 transition-all ${active ? "border-indigo-500 shadow-md shadow-indigo-500/10" : "border-slate-200 hover:border-slate-300"}`}
+              data-testid={`theme-option-${opt.id}`}
+              aria-pressed={active}
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-8 h-8 grid place-items-center rounded-lg" style={{ background: opt.swatch[1], color: opt.swatch[2], boxShadow: "inset 0 0 0 1px rgba(0,0,0,.08)" }}>
+                  <Icon size={15}/>
                 </div>
-                {/* Mini preview swatch */}
-                <div className="flex gap-1.5">
-                  {opt.swatch.map((c, i) => (
-                    <div key={i} className="flex-1 h-6 rounded" style={{ background: c, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.06)" }}/>
-                  ))}
-                </div>
-              </button>
-            );
-          })}
+                <div className="font-display font-bold text-sm">{opt.label}</div>
+                {active && <span className="chip chip-primary text-[10px] font-mono ml-auto">Active</span>}
+              </div>
+              <div className="flex gap-1.5">
+                {opt.swatch.map((c, i) => (
+                  <div key={i} className="flex-1 h-6 rounded" style={{ background: c, boxShadow: "inset 0 0 0 1px rgba(0,0,0,.06)" }}/>
+                ))}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+/* ---------------------------- Dashboard Layout --------------------------- */
+export function DashboardLayoutCard() {
+  const [layout, setLayout] = useState(loadDashboardLayout());
+  const toggle = (id) => {
+    const next = { ...layout, [id]: !layout[id] };
+    setLayout(next);
+    saveDashboardLayout(next);
+  };
+  const reset = () => {
+    resetDashboardLayout();
+    setLayout(loadDashboardLayout());
+    toast.success("Dashboard layout reset");
+  };
+  const shown = DASHBOARD_WIDGETS.filter(w => layout[w.id]).length;
+  return (
+    <div className="card p-6" data-testid="layout-card">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <div className="font-display font-bold text-lg mb-1 flex items-center gap-2"><LayoutGrid size={18} className="text-indigo-600"/> Dashboard Layout</div>
+          <div className="text-xs text-slate-500 max-w-lg">Hide or show individual widgets on the Dashboard. Changes apply instantly and stay with this browser.</div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="chip chip-neutral font-mono text-[10px]">{shown} / {DASHBOARD_WIDGETS.length} visible</span>
+          <button onClick={reset} className="btn btn-ghost text-sm" data-testid="layout-reset-btn"><RotateCcw size={13}/> Reset</button>
         </div>
       </div>
-
-      <div className="card p-6">
-        <div className="font-display font-bold text-lg mb-1">Store settings</div>
-        <div className="text-xs text-slate-500 mb-4">Global settings for your storefront and admin.</div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Field label="Store name"><input className="input px-3 py-2 w-full" value={s.store_name||""} onChange={(e)=>setS({...s, store_name:e.target.value})}/></Field>
-          <Field label="Store email"><input className="input px-3 py-2 w-full" value={s.store_email||""} onChange={(e)=>setS({...s, store_email:e.target.value})}/></Field>
-          <Field label="Currency"><input className="input px-3 py-2 w-full font-mono" value={s.currency||"AUD"} onChange={(e)=>setS({...s, currency:e.target.value})}/></Field>
-          <Field label="Country"><input className="input px-3 py-2 w-full" value={s.country||"Australia"} onChange={(e)=>setS({...s, country:e.target.value})}/></Field>
-          <Field label="Tax rate (%)"><input type="number" className="input px-3 py-2 w-full font-mono" value={s.tax_rate||0} onChange={(e)=>setS({...s, tax_rate: Number(e.target.value)})}/></Field>
-          <Field label="Accent theme">
-            <select className="input px-3 py-2 w-full" value={s.accent_color||"indigo"} onChange={(e)=>setS({...s, accent_color:e.target.value})}>
-              {["indigo","violet","pink","emerald","sky"].map(x=><option key={x}>{x}</option>)}
-            </select>
-          </Field>
-        </div>
-        <div className="mt-4 flex justify-end"><button onClick={saveStore} className="btn btn-primary">Save store settings</button></div>
+      <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+        {DASHBOARD_WIDGETS.map(w => {
+          const on = !!layout[w.id];
+          return (
+            <label key={w.id} className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${on ? "border-indigo-500 bg-indigo-50/40" : "border-slate-200 hover:border-slate-300"}`} data-testid={`layout-toggle-${w.id}`}>
+              <input type="checkbox" checked={on} onChange={() => toggle(w.id)} className="accent-indigo-600 mt-1 w-4 h-4"/>
+              <div className="flex-1">
+                <div className="text-sm font-medium">{w.label}</div>
+                <div className="text-xs text-slate-500 mt-0.5">{w.hint}</div>
+              </div>
+            </label>
+          );
+        })}
       </div>
+    </div>
+  );
+}
 
-      <AccountsCard/>
 
-      <div className="card p-6">
-        <div className="font-display font-bold text-lg mb-1">eBay scraper settings</div>
-        <div className="text-xs text-slate-500 mb-4">API keys are stored in your browser only.</div>
-        <div className="grid gap-3">
-          <Field label="Default method">
-            <div className="flex flex-wrap gap-2">
-              {[{id:"auto",label:"Auto (manual → ScrapingBee → ScraperAPI)"}, {id:"manual",label:"Manual only"}, {id:"scrapingbee",label:"ScrapingBee only"}, {id:"scraperapi",label:"ScraperAPI only"}].map(m=>(
-                <button key={m.id} onClick={()=>setMethod(m.id)} className={`chip cursor-pointer ${method===m.id?"chip-primary":"chip-neutral"}`}>{m.label}</button>
-              ))}
+/* ---------------------------------- Cache -------------------------------- */
+export function CacheCard() {
+  const [busy, setBusy] = useState(null);
+
+  // Everything we let the admin nuke from the browser. Keys are namespaces
+  // rather than exact keys because Pagination/sort prefs use dynamic keys.
+  const CACHE_GROUPS = [
+    { id: "prefs",   label: "UI preferences",       hint: "Pagination sizes, column sort orders, dashboard layout, settings tab.", prefixes: ["page_size_", "sort_", "dashboard_", "settings_active_tab"] },
+    { id: "scraper", label: "Scraper API keys",     hint: "ScrapingBee / ScraperAPI keys stored in this browser.", prefixes: [KEYS.sb, KEYS.sa, KEYS.method] },
+    { id: "session", label: "Admin session",        hint: "Signs you out of the current admin/manager profile. Main admin restores on next load.", prefixes: ["admin_current_id", "admin_current_role"] },
+    { id: "all",     label: "Everything (nuclear)", hint: "Wipes every key in localStorage for this browser. Theme falls back to Light.", prefixes: ["*"] },
+  ];
+
+  const clearGroup = async (g) => {
+    if (!window.confirm(`Clear "${g.label}"? This only affects this browser.`)) return;
+    setBusy(g.id);
+    try {
+      if (g.prefixes.includes("*")) {
+        localStorage.clear();
+      } else {
+        const remove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (g.prefixes.some(p => key === p || key.startsWith(p))) remove.push(key);
+        }
+        remove.forEach(k => localStorage.removeItem(k));
+      }
+      toast.success(`${g.label} cleared`);
+      // Fire the events so subscribers (theme, admin session, layout) resync.
+      window.dispatchEvent(new CustomEvent("adminsessionchange", { detail: loadAdminSession() }));
+      window.dispatchEvent(new CustomEvent("dashboardlayoutchange", { detail: loadDashboardLayout() }));
+    } catch (e) { toast.error("Clear failed", { description: e.message }); }
+    finally { setBusy(null); }
+  };
+
+  return (
+    <div className="card p-6" data-testid="cache-card">
+      <div className="font-display font-bold text-lg mb-1 flex items-center gap-2"><RotateCcw size={18} className="text-indigo-600"/> Cache</div>
+      <div className="text-xs text-slate-500 mb-4 max-w-lg">Local browser storage the admin dashboard writes to. Clearing these buckets only affects this browser — server data is never touched.</div>
+      <div className="grid gap-3">
+        {CACHE_GROUPS.map(g => (
+          <div key={g.id} className="flex items-start gap-4 p-4 rounded-lg border hairline" data-testid={`cache-group-${g.id}`}>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium">{g.label}</div>
+              <div className="text-xs text-slate-500 mt-0.5">{g.hint}</div>
             </div>
-          </Field>
-          <Field label="ScrapingBee API key"><input type="password" className="input px-3 py-2 w-full font-mono" placeholder="sb-…" value={sb} onChange={(e)=>setSb(e.target.value)}/></Field>
-          <div className="text-xs text-slate-500 -mt-2">Free 1,000 credits at <a className="text-indigo-600 hover:underline" href="https://app.scrapingbee.com/account/api_key" target="_blank" rel="noreferrer">scrapingbee.com</a></div>
-          <Field label="ScraperAPI API key"><input type="password" className="input px-3 py-2 w-full font-mono" placeholder="…" value={sa} onChange={(e)=>setSa(e.target.value)}/></Field>
-          <div className="text-xs text-slate-500 -mt-2">Free 5,000 credits at <a className="text-indigo-600 hover:underline" href="https://www.scraperapi.com/" target="_blank" rel="noreferrer">scraperapi.com</a></div>
+            <button
+              onClick={() => clearGroup(g)}
+              disabled={busy === g.id}
+              className={`btn ${g.id === "all" ? "btn-danger" : "btn-ghost"} text-sm shrink-0`}
+              data-testid={`cache-clear-${g.id}`}
+            >
+              <Trash2 size={13}/> Clear
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+/* --------------------------------- Backup -------------------------------- */
+export function BackupCard() {
+  const [busy, setBusy] = useState(false);
+  const [lastPreview, setLastPreview] = useState(null);
+
+  const downloadBackup = async () => {
+    setBusy(true);
+    try {
+      const { data } = await axios.get(`${API}/backup/export`);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `admin-backup-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setLastPreview(data.counts);
+      toast.success("Backup downloaded");
+    } catch (e) { toast.error("Export failed", { description: e?.response?.data?.detail || e.message }); }
+    finally { setBusy(false); }
+  };
+
+  const restoreBackup = async (evt) => {
+    const file = evt.target.files?.[0];
+    evt.target.value = ""; // allow same file to be picked again later
+    if (!file) return;
+    if (!window.confirm(`Restore from "${file.name}"?\n\nThis WIPES the current data for every collection in the backup and cannot be undone.`)) return;
+    setBusy(true);
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const { data } = await axios.post(`${API}/backup/import`, payload);
+      setLastPreview(data.restored);
+      toast.success(`Restored ${Object.keys(data.restored || {}).length} collections`);
+    } catch (e) {
+      toast.error("Restore failed", { description: e?.response?.data?.detail?.slice(0, 200) || (e.message || "Bad JSON") });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="card p-6" data-testid="backup-card">
+      <div className="font-display font-bold text-lg mb-1 flex items-center gap-2"><Database size={18} className="text-indigo-600"/> Backup</div>
+      <div className="text-xs text-slate-500 mb-4 max-w-lg">Download a JSON snapshot of every collection (products, orders, customers, categories, suppliers, reviews, messages, settings, presets, delivery config, coupons, notifications) or restore one you saved earlier.</div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <button onClick={downloadBackup} disabled={busy} className="flex items-center justify-center gap-2 rounded-xl border-2 border-indigo-200 bg-indigo-50/40 p-6 hover:border-indigo-400 transition-all" data-testid="backup-export-btn">
+          <Download size={22} className="text-indigo-600"/>
+          <div className="text-left">
+            <div className="font-display font-bold text-sm">Download backup</div>
+            <div className="text-xs text-slate-500">Saves an <span className="font-mono">admin-backup-YYYY-MM-DD.json</span> file.</div>
+          </div>
+        </button>
+
+        <label className="flex items-center justify-center gap-2 rounded-xl border-2 border-slate-200 p-6 hover:border-amber-300 cursor-pointer transition-all" data-testid="backup-import-label">
+          <Upload size={22} className="text-amber-600"/>
+          <div className="text-left">
+            <div className="font-display font-bold text-sm">Restore from file</div>
+            <div className="text-xs text-slate-500">Wipes current data — this is destructive.</div>
+          </div>
+          <input type="file" accept="application/json,.json" className="hidden" onChange={restoreBackup} disabled={busy} data-testid="backup-import-input"/>
+        </label>
+      </div>
+
+      {lastPreview && (
+        <div className="mt-4 p-3 rounded-lg border hairline bg-slate-50/60" data-testid="backup-last-preview">
+          <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1">Last operation</div>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(lastPreview).map(([name, count]) => (
+              <span key={name} className="chip chip-neutral font-mono text-[10px]">{name}: {count}</span>
+            ))}
+          </div>
         </div>
-        <div className="mt-4 flex justify-end"><button onClick={saveKeys} className="btn btn-primary">Save scraper settings</button></div>
+      )}
+
+      <div className="mt-4 p-3 rounded-lg border border-amber-200 bg-amber-50/60 text-xs text-amber-800 flex items-start gap-2">
+        <AlertTriangle size={13} className="mt-0.5 shrink-0"/>
+        Admin passwords are intentionally excluded from backup files. Restore is all-or-nothing and cannot be reversed — download a fresh backup first.
       </div>
     </div>
   );

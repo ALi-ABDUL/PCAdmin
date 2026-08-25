@@ -6,12 +6,21 @@ import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContaine
 import { KpiCard, StatusChip } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, fmtDay, moneyCents } from "../lib/format";
+import { loadDashboardLayout } from "../lib/dashboardLayout";
 import { Products } from "./ProductsList";
 import { ProfitCalculator } from "./Store";
 
 export function Dashboard({ navigateTo }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Widget-visibility preferences from Settings › Dashboard Layout.
+  // Listen for changes so toggling in Settings live-updates the layout.
+  const [layout, setLayout] = useState(loadDashboardLayout());
+  useEffect(() => {
+    const on = (e) => setLayout(e?.detail || loadDashboardLayout());
+    window.addEventListener("dashboardlayoutchange", on);
+    return () => window.removeEventListener("dashboardlayoutchange", on);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,28 +68,33 @@ export function Dashboard({ navigateTo }) {
       )}
 
       {/* KPI row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {kpis.map((k) => <KpiCard key={k.label} {...k} />)}
-      </div>
+      {layout.kpi_primary && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {kpis.map((k) => <KpiCard key={k.label} {...k} />)}
+        </div>
+      )}
 
       {/* Secondary row */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-        {kpi2.map((k) => (
-          <div key={k.label} className="card p-4">
-            <div className="text-xs text-slate-500 font-medium">{k.label}</div>
-            <div className="mt-1 flex items-baseline gap-2">
-              <div className={`font-display text-2xl font-bold ${k.danger ? "text-red-600" : ""}`}>{k.value}</div>
-              {k.delta && <span className="chip chip-success">{k.delta}</span>}
+      {layout.kpi_secondary && (
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+          {kpi2.map((k) => (
+            <div key={k.label} className="card p-4">
+              <div className="text-xs text-slate-500 font-medium">{k.label}</div>
+              <div className="mt-1 flex items-baseline gap-2">
+                <div className={`font-display text-2xl font-bold ${k.danger ? "text-red-600" : ""}`}>{k.value}</div>
+                {k.delta && <span className="chip chip-success">{k.delta}</span>}
+              </div>
+              <div className="text-xs text-slate-400 mt-0.5">{k.sub}</div>
             </div>
-            <div className="text-xs text-slate-400 mt-0.5">{k.sub}</div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Profit calculator */}
-      <ProfitCalculator/>
+      {layout.profit_calc && <ProfitCalculator/>}
 
       {/* Revenue chart + category donut */}
+      {layout.revenue_chart && (
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="card p-5 xl:col-span-2">
           <div className="flex items-center justify-between mb-4">
@@ -139,10 +153,12 @@ export function Dashboard({ navigateTo }) {
           </div>
         </div>
       </div>
+      )}
 
-      <StuckOrdersWidget navigateTo={navigateTo}/>
+      {layout.stuck_orders && <StuckOrdersWidget navigateTo={navigateTo}/>}
 
       {/* Top products + recent orders */}
+      {layout.top_recent && (
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="card overflow-hidden">
           <div className="p-5 border-b hairline flex items-center justify-between">
@@ -195,6 +211,7 @@ export function Dashboard({ navigateTo }) {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

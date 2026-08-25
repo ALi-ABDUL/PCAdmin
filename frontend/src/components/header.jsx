@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Bell, BellOff, ChevronRight, DollarSign, HelpCircle, ImageIcon, Menu, PackageMinus, RefreshCw, Search, ShoppingBag, Store, TrendingDown, TrendingUp, UserPlus, XCircle } from "lucide-react";
+import { BadgeCheck, Ban, Bell, BellOff, ChevronRight, DollarSign, HelpCircle, ImageIcon, Menu, Moon, PackageMinus, RefreshCw, Search, ShoppingBag, Store, Sun, TrendingDown, TrendingUp, UserPlus, XCircle } from "lucide-react";
 import { API, proxyImg } from "../lib/api";
+import { applyTheme, getCachedTheme } from "../lib/theme";
 import { fmtDate, moneyCents } from "../lib/format";
 import { CUSTOMER_NAV, ORDERS_NAV, PAYMENTS_NAV, PRODUCT_NAV, STORE_NAV, SUPPLIER_NAV } from "../lib/nav";
 import { Analytics } from "../pages/Analytics";
@@ -316,6 +317,51 @@ export function NotifRow({ n, onClick }) {
   );
 }
 
+export function ThemeToggle() {
+  const [theme, setTheme] = useState(getCachedTheme());
+  const [busy, setBusy] = useState(false);
+
+  // Keep the button icon in sync with whatever set the theme last —
+  // Settings page picks, browser tabs, cross-device sync, etc.
+  useEffect(() => {
+    const on = (e) => setTheme(e?.detail?.theme || getCachedTheme());
+    window.addEventListener("themechange", on);
+    return () => window.removeEventListener("themechange", on);
+  }, []);
+
+  const toggle = async () => {
+    if (busy) return;
+    const next = theme === "dark" ? "light" : "dark";
+    applyTheme(next);       // instant paint flip
+    setTheme(next);
+    setBusy(true);
+    // Persist via the shared /api/settings endpoint so the choice survives
+    // logout and stays in lock-step with Admin Settings › Theme.
+    try {
+      const cur = (await axios.get(`${API}/settings`)).data || {};
+      await axios.put(`${API}/settings`, { ...cur, theme: next });
+    } catch {
+      // No toast on failure — the theme still flipped and the localStorage
+      // cache keeps it consistent until the next save succeeds.
+    } finally { setBusy(false); }
+  };
+
+  const isDark = theme === "dark";
+  return (
+    <button
+      onClick={toggle}
+      className="btn btn-ghost !p-2 relative"
+      title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+      aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+      aria-pressed={isDark}
+      data-testid="theme-toggle-btn"
+    >
+      {isDark ? <Sun size={16}/> : <Moon size={16}/>}
+    </button>
+  );
+}
+
+
 export function TopHeader({ tab, storeSection, supplierSection, customerSection, productSection, ordersSection, paymentsSection, onMenu, onNavigate }) {
   const titles = {
     dashboard: "Dashboard", store: "Store Management", products: "Products", categories: "Categories",
@@ -355,6 +401,7 @@ export function TopHeader({ tab, storeSection, supplierSection, customerSection,
         <div className="flex items-center gap-2 shrink-0">
           <GlobalSearch onNavigate={onNavigate}/>
           <NotificationBell onNavigate={onNavigate}/>
+          <ThemeToggle/>
           <button className="btn btn-ghost !p-2 hidden sm:grid" title="Help"><HelpCircle size={16}/></button>
           <div className="w-9 h-9 rounded-full grid place-items-center text-white font-bold text-xs" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>AK</div>
         </div>

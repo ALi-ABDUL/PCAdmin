@@ -13,6 +13,15 @@ export function SettingsPage() {
 
   useEffect(() => { axios.get(`${API}/settings`).then(r => setS(prev => ({ ...prev, ...r.data }))); const k = loadKeys(); setSb(k.scrapingbee_key); setSa(k.scraperapi_key); setMethod(k.method); }, []);
 
+  // Stay in sync with the header ThemeToggle — when it fires `themechange`
+  // we mirror the value into local state so the "Active" chip reflects the
+  // current theme even if the user toggled from the top bar.
+  useEffect(() => {
+    const on = (e) => setS(prev => ({ ...prev, theme: e?.detail?.theme || prev.theme }));
+    window.addEventListener("themechange", on);
+    return () => window.removeEventListener("themechange", on);
+  }, []);
+
   const saveStore = async () => { try { await axios.put(`${API}/settings`, s); toast.success("Store settings saved"); } catch { toast.error("Save failed"); } };
   const saveKeys = () => { localStorage.setItem(KEYS.sb, sb.trim()); localStorage.setItem(KEYS.sa, sa.trim()); localStorage.setItem(KEYS.method, method); toast.success("Scraper settings saved locally"); };
 

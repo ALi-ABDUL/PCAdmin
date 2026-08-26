@@ -5,6 +5,19 @@
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#000000" />
         <meta name="description" content="A product of emergent.sh" />
+        <!-- Admin dashboard — must never appear in search engine indexes.
+             Belt-and-braces alongside /robots.txt and the X-Robots-Tag
+             header set by the backend on the SPA shell. -->
+        <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, notranslate" />
+        <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex" />
+        <meta name="googlebot-news" content="noindex, nofollow" />
+        <meta name="bingbot" content="noindex, nofollow, noarchive, nosnippet" />
+        <meta name="duckduckbot" content="noindex, nofollow" />
+        <meta name="slurp" content="noindex, nofollow" />
+        <meta name="baiduspider" content="noindex, nofollow" />
+        <meta name="yandex" content="noindex, nofollow" />
+        <meta name="applebot" content="noindex, nofollow" />
+        <meta name="referrer" content="no-referrer" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;600;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />

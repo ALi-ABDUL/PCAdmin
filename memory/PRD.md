@@ -979,3 +979,20 @@ Notification Bell deep-links) — zero regressions detected.
   API round-trip auto-seed on create, PATCH normalisation, empty-list
   clearing, and confirming other SEO fields aren't touched by tag PATCHes.
 
+
+
+
+## Feb 25, 2026 — Robots policy (no-index everywhere)
+- **`/app/frontend/public/robots.txt`** created with `Disallow: /` for
+  the `*` wildcard plus explicit rules for every mainstream crawler
+  (Googlebot, Bingbot, DuckDuckBot, Slurp, Baiduspider, YandexBot,
+  Applebot, facebookexternalhit, Twitterbot, LinkedInBot) and the LLM
+  scrapers (GPTBot, ClaudeBot, PerplexityBot, CCBot, Google-Extended).
+- **`/app/frontend/public/index.html`** — added
+  `<meta name="robots" content="noindex, nofollow, noarchive, nosnippet,
+  noimageindex, notranslate">` plus per-crawler meta tags for Googlebot,
+  Bingbot, DuckDuckBot, etc, and `<meta name="referrer"
+  content="no-referrer">`. Because the app is a single-page React shell,
+  every admin route now inherits these headers.
+- Verified live: origin `/robots.txt` serves the full disallow ruleset
+  and the SPA shell HTML contains all 10 meta robots directives.

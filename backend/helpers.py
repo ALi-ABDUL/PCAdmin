@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded']
+__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded']
 
 
 import bcrypt
@@ -52,6 +52,77 @@ def _rand_au_address(rng: random.Random, full_name: str) -> dict:
 
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-") or "cat"
+
+
+def _default_seo(title: str, description: str, category: Optional[str] = None) -> dict:
+    """Compute default SEO field values from a product's title + description.
+
+    Every value is safe to overwrite — the frontend loads them straight
+    into editable inputs. Meta description is stripped of HTML and hard-
+    capped at 160 chars (Google's typical SERP snippet length).
+    `tags` are seeded from the title + category so the admin has a starting
+    point they can extend, edit, or clear.
+    """
+    t = (title or "").strip() or "Untitled product"
+    meta_title = t if len(t) <= 60 else t[:57].rstrip() + "…"
+    # Remove HTML tags / repeated whitespace from description, then trim.
+    plain = re.sub(r"<[^>]+>", " ", (description or ""))
+    plain = re.sub(r"\s+", " ", plain).strip()
+    if not plain:
+        plain = t
+    meta_desc = plain[:160] if len(plain) <= 160 else plain[:157].rstrip() + "…"
+    return {
+        "meta_title": meta_title,
+        "meta_description": meta_desc,
+        "url_slug": _slug(t),
+        "image_alt_text": t,
+        "tags": _suggest_tags(t, category),
+    }
+
+
+# Very small English stop-word list. eBay titles are keyword-heavy already so
+# we only strip the truly noisy connectors — anything specific (brand names,
+# model numbers, materials) stays as a candidate tag.
+_TAG_STOPWORDS = {
+    "the", "a", "an", "and", "or", "for", "with", "of", "in", "on", "by",
+    "to", "at", "from", "is", "be", "as", "it", "this", "that", "these",
+    "those", "new", "&", "-", "vs",
+}
+
+
+def _suggest_tags(title: str, category: Optional[str] = None, limit: int = 8) -> list:
+    """Return a small ordered list of tag suggestions derived from title +
+    category. Tokens are lower-cased, de-duplicated, stripped of stop-words,
+    and capped at `limit`. Category slug is added as-is (space-separated) so
+    "vacuums-cleaning" becomes "vacuums cleaning".
+
+    Callers are always free to overwrite the result — this is only a
+    starting point for the SEO card.
+    """
+    out: list = []
+    seen: set = set()
+
+    def _push(tok: str) -> None:
+        s = (tok or "").strip().lower()
+        if not s or s in _TAG_STOPWORDS or len(s) < 2 or s in seen:
+            return
+        seen.add(s)
+        out.append(s)
+
+    # Category first so the most descriptive tag lands at the front. Slugs
+    # like "vacuums-cleaning" become two tokens.
+    if category and category != "other":
+        for tok in re.split(r"[-_/\s]+", str(category)):
+            _push(tok)
+
+    # Title tokens — keep alphanumerics of length >= 2. Drops punctuation
+    # noise ("(new)", "-", ",", etc.) but retains model numbers and sizes.
+    for tok in re.findall(r"[A-Za-z0-9]+", title or ""):
+        _push(tok)
+        if len(out) >= limit:
+            break
+
+    return out[:limit]
 
 def _product_code_base(title: str, dt: Optional[datetime] = None) -> str:
     dt = dt or datetime.now(timezone.utc)

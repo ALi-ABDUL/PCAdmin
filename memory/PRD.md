@@ -951,3 +951,31 @@ Notification Bell deep-links) — zero regressions detected.
   * Nav filter: `lib/adminSession.js` centralises `canAccess(role, tabId)`. Sidebar and App.js both listen for the `adminsessionchange` event and either hide or redirect from disallowed tabs — when the session flips to Manager, the sidebar shrinks to just Products / Orders / Customers and the bottom Admin Settings CTA disappears. App.js auto-redirects to Orders.
 - **Tests**: `/app/backend/tests/test_admin_accounts.py` — 13 cases covering seeding, hash-non-leak, CRUD, validation, duplicate-email, and main-admin protection.
 - **Docs**: `test_credentials.md` now lists the main admin creds so QA can log in against future auth.
+
+
+## Feb 25, 2026 — SEO Card + Product Tags (Product Detail)
+- **Missing SEO card fixed** — `ProductDetail.jsx` referenced a `<SeoCard/>`
+  that was never defined. The card is now implemented with the full field
+  set from the earlier spec: **Meta Title**, **Meta Description** (with a
+  live 160-char counter that turns amber past 140 and red past 160), **URL
+  Slug** (lowercase-only auto-normaliser), and **Image Alt Text**.
+- **Tags field** — new chip-based editor sits inside the SEO card.
+  * Type → press Enter or comma to add · Backspace on the empty input
+    removes the last chip · click × on any chip to delete.
+  * Comma-separated bulk paste is split and de-duplicated.
+  * Persisted on Save alongside the other SEO fields.
+- **Auto-suggestion** — `helpers._suggest_tags(title, category)` seeds tags
+  from the category slug (split on hyphens) + title tokens. Stop-words
+  (`the`, `a`, `and`, `for`, …) and single-character tokens are dropped,
+  duplicates removed, cap = 8. Called from `_default_seo` so both product
+  create paths (`POST /products` and `add-to-products` from a scraped item)
+  auto-populate tags.
+- **Backend model** — `Product.tags: List[str] = []`, `ProductUpdate.tags:
+  Optional[List[str]] = None`. PATCH handler normalises incoming tags
+  (lowercase, strip, dedup) before persisting so the storage shape stays
+  predictable regardless of client input.
+- **Tests**: `/app/backend/tests/test_seo_tags.py` — 11 pytest cases
+  (all pass) covering `_suggest_tags` behaviour, `_default_seo` inclusion,
+  API round-trip auto-seed on create, PATCH normalisation, empty-list
+  clearing, and confirming other SEO fields aren't touched by tag PATCHes.
+

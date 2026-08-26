@@ -143,6 +143,18 @@ class ProductCreate(BaseModel):
     custom_delivery_window: bool = False
     delivery_min_days: Optional[int] = None   # business days
     delivery_max_days: Optional[int] = None   # business days
+    # SEO fields. Auto-filled from `title` / `description` at create time
+    # (see `_default_seo()` in helpers.py) but always editable in the
+    # ProductDetail SEO card. Meta description is capped at 160 chars —
+    # the frontend shows a live counter.
+    meta_title: Optional[str] = None
+    meta_description: Optional[str] = None
+    url_slug: Optional[str] = None
+    image_alt_text: Optional[str] = None
+    # Free-form marketing tags. Auto-suggested from the title + category at
+    # scrape/create time (see `_suggest_tags()` in helpers.py) but always
+    # editable in the ProductDetail SEO card as removable chips.
+    tags: List[str] = Field(default_factory=list)
 
 
 class Product(ProductCreate):
@@ -174,6 +186,11 @@ class ProductUpdate(BaseModel):
     custom_delivery_window: Optional[bool] = None
     delivery_min_days: Optional[int] = None
     delivery_max_days: Optional[int] = None
+    meta_title: Optional[str] = None
+    meta_description: Optional[str] = None
+    url_slug: Optional[str] = None
+    image_alt_text: Optional[str] = None
+    tags: Optional[List[str]] = None
 
 
 # AU address generator used by the demo seed + backfill for existing orders without addresses.

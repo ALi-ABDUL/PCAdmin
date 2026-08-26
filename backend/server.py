@@ -50,7 +50,7 @@ from helpers import (
     _format_notification_html, _push_notification, _emit_notification, 
     _emit_price_change_notifications, _auto_archive_if_out_of_stock, calc_pricing, _ensure_pricing_rules_seeded, 
     _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings, _delete_categories_if_empty,
-    _ensure_main_admin_seeded,
+    _ensure_main_admin_seeded, _default_seo,
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
     _customer_email_html,
@@ -1992,6 +1992,9 @@ async def create_product_from_item(item_id: str):
         delivery_date_range=it.get("delivery_date_range") or None,
     )
     prod.product_code = await _generate_unique_product_code(prod.title)
+    # Auto-fill SEO fields from title/description; admin can edit later.
+    for k, v in _default_seo(prod.title, prod.description or "", prod.category).items():
+        setattr(prod, k, v)
     await db.products.insert_one(prod.model_dump())
     await db.items.update_one({"id": item_id}, {"$set": {"added_to_products": True}})
     return prod.model_dump()
@@ -2002,6 +2005,11 @@ async def create_product(body: ProductCreate):
     prod = Product(**body.model_dump())
     if not prod.product_code:
         prod.product_code = await _generate_unique_product_code(prod.title)
+    # Auto-fill SEO fields when the caller hasn't supplied them.
+    defaults = _default_seo(prod.title, prod.description or "", prod.category)
+    for k, v in defaults.items():
+        if not getattr(prod, k, None):
+            setattr(prod, k, v)
     await db.products.insert_one(prod.model_dump())
     return prod
 
@@ -2234,6 +2242,24 @@ async def update_product(pid: str, body: ProductUpdate):
     # Admin may have just edited stock directly — auto-archive if it hit 0.
     if "stock" in fields:
         await _auto_archive_if_out_of_stock(pid)
+    # Cap meta_description on write so no client can persist an over-long
+    # value. Silent trim (frontend already exposes a counter) matches how
+    # we handle URL slugs — never fail a save on cosmetic fields.
+    if "meta_description" in fields and isinstance(fields["meta_description"], str) and len(fields["meta_description"]) > 160:
+        await db.products.update_one({"id": pid}, {"$set": {"meta_description": fields["meta_description"][:160]}})
+    # Normalise tags: lowercase, trim, drop blanks, dedupe (preserve order).
+    # Written back only if the input was actually a list so PATCHes that don't
+    # touch tags leave the stored value untouched.
+    if "tags" in fields and isinstance(fields["tags"], list):
+        seen: set = set()
+        cleaned: list = []
+        for t in fields["tags"]:
+            s = str(t or "").strip().lower()
+            if s and s not in seen:
+                seen.add(s)
+                cleaned.append(s)
+        if cleaned != fields["tags"]:
+            await db.products.update_one({"id": pid}, {"$set": {"tags": cleaned}})
     return await db.products.find_one({"id": pid}, {"_id": 0})
 
 

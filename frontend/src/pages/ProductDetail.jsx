@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Pencil, Plus, RefreshCw, Rocket, Save, Star as StarIcon, Trash2, Truck, X } from "lucide-react";
+import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Pencil, Plus, RefreshCw, Rocket, Save, Search, Star as StarIcon, Trash2, Truck, X } from "lucide-react";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
@@ -48,6 +48,11 @@ export function ProductDetailPage({ productId, onBack }) {
       custom_delivery_window: !!prod.custom_delivery_window,
       delivery_min_days: prod.delivery_min_days ?? "",
       delivery_max_days: prod.delivery_max_days ?? "",
+      meta_title: prod.meta_title || "",
+      meta_description: prod.meta_description || "",
+      url_slug: prod.url_slug || "",
+      image_alt_text: prod.image_alt_text || "",
+      tags: Array.isArray(prod.tags) ? [...prod.tags] : [],
     });
     setReviews(rev);
     setDirty(false);
@@ -66,6 +71,11 @@ export function ProductDetailPage({ productId, onBack }) {
         title: f.title, sku: f.sku, category: f.category,
         price: Number(f.price), cost: Number(f.cost), stock: Number(f.stock),
         active: !!f.active, description: f.description,
+        meta_title: (f.meta_title || "").trim(),
+        meta_description: (f.meta_description || "").slice(0, 160),
+        url_slug: (f.url_slug || "").trim(),
+        image_alt_text: (f.image_alt_text || "").trim(),
+        tags: Array.isArray(f.tags) ? f.tags : [],
       };
       // Only include postage fields when the admin has actually chosen a preset.
       // A blank selection leaves whatever was already stored on the product
@@ -367,6 +377,12 @@ export function ProductDetailPage({ productId, onBack }) {
       {/* Product specifications — grouped labelled fields scraped from eBay item specifics.
           Displayed as its own section so the description above stays a clean overview. */}
       <ProductSpecsCard product={p} onUpdated={(fresh) => setP(fresh)}/>
+
+      {/* SEO — meta title / description / URL slug / image alt text. Every
+          field is auto-populated on scrape/create from the title +
+          description, but the admin can override any of them here.
+          Persisted with the product on Save changes. */}
+      <SeoCard f={f} setField={setField}/>
 
       {/* Reviews */}
       {reviews.length > 0 && (
@@ -794,6 +810,188 @@ function SpecRow({ label, value }) {  return (
       <div className="text-slate-500 font-medium">{label}</div>
       <div className="text-slate-800 whitespace-pre-wrap break-words">{value}</div>
     </div>
+  );
+}
+
+/* ------------------------------ SEO card -----------------------------------
+ *
+ * Meta Title / Meta Description (with 160-char live counter) / URL Slug /
+ * Image Alt Text / Tags. All fields are pre-populated by the backend from the
+ * product title + category at scrape/create time (see `_default_seo` +
+ * `_suggest_tags` in helpers.py). Admin edits persist on Save changes.
+ * Tags render as removable chips with an inline "add tag" input.
+ * ------------------------------------------------------------------------- */
+export function SeoCard({ f, setField }) {
+  const meta = (f.meta_description || "");
+  const count = meta.length;
+  const overCap = count > 160;
+  return (
+    <div className="card p-5" data-testid="product-seo-card">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="font-display font-bold flex items-center gap-2">
+          <Search size={14} className="text-indigo-500"/> SEO
+        </div>
+        <div className="text-[11px] font-mono uppercase tracking-widest text-slate-400">
+          Search engine visibility
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Field label="Meta title">
+          <input
+            className="input w-full px-3 py-2"
+            value={f.meta_title || ""}
+            onChange={(e) => setField("meta_title", e.target.value)}
+            placeholder="Shown in browser tabs and Google results"
+            maxLength={80}
+            data-testid="product-meta-title-input"
+          />
+        </Field>
+        <Field label="URL slug">
+          <input
+            className="input w-full px-3 py-2 font-mono text-sm"
+            value={f.url_slug || ""}
+            onChange={(e) => setField("url_slug", e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-"))}
+            placeholder="my-product-slug"
+            data-testid="product-url-slug-input"
+          />
+        </Field>
+        <div className="md:col-span-2">
+          <Field
+            label={
+              <span className="flex items-center gap-2">
+                <span>Meta description</span>
+                <span className={`text-[10px] font-mono ${overCap ? "text-red-600 font-bold" : count > 140 ? "text-amber-600" : "text-slate-400"}`} data-testid="product-meta-desc-counter">
+                  {count} / 160
+                </span>
+              </span>
+            }
+          >
+            <textarea
+              className="input w-full px-3 py-2 min-h-[80px] leading-relaxed"
+              value={meta}
+              onChange={(e) => setField("meta_description", e.target.value.slice(0, 160))}
+              placeholder="One-sentence summary that appears in Google search results"
+              data-testid="product-meta-desc-input"
+            />
+          </Field>
+        </div>
+        <div className="md:col-span-2">
+          <Field label="Image alt text">
+            <input
+              className="input w-full px-3 py-2"
+              value={f.image_alt_text || ""}
+              onChange={(e) => setField("image_alt_text", e.target.value)}
+              placeholder="Describes the product image for screen readers and Google Images"
+              data-testid="product-image-alt-input"
+            />
+          </Field>
+        </div>
+        <div className="md:col-span-2">
+          <TagsField
+            tags={Array.isArray(f.tags) ? f.tags : []}
+            onChange={(next) => setField("tags", next)}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ------------------------------- Tags field --------------------------------
+ *
+ * Chip-based tag editor. Admin can:
+ *   - Type a tag in the input + press Enter (or comma) to add
+ *   - Click × on any chip to remove it
+ *   - Backspace on the empty input removes the last chip
+ * Tags are lowercased + trimmed on entry and duplicates are silently
+ * dropped so the storage shape stays predictable.
+ * ------------------------------------------------------------------------- */
+export function TagsField({ tags, onChange }) {
+  const [draft, setDraft] = useState("");
+
+  const commit = (raw) => {
+    // Accept comma-separated bulk pastes in one go so the admin can bulk
+    // import from another source.
+    const parts = String(raw || "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    const next = [...tags];
+    for (const p of parts) {
+      if (!next.includes(p)) next.push(p);
+    }
+    onChange(next);
+    setDraft("");
+  };
+
+  const removeAt = (idx) => {
+    const next = tags.filter((_, i) => i !== idx);
+    onChange(next);
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      commit(draft);
+    } else if (e.key === "Backspace" && draft === "" && tags.length > 0) {
+      removeAt(tags.length - 1);
+    }
+  };
+
+  return (
+    <Field
+      label={
+        <span className="flex items-center gap-2">
+          <span>Tags</span>
+          <span className="text-[10px] font-mono text-slate-400" data-testid="product-tags-count">
+            {tags.length} tag{tags.length === 1 ? "" : "s"}
+          </span>
+        </span>
+      }
+    >
+      <div
+        className="flex flex-wrap gap-1.5 p-2 rounded-lg border hairline bg-white focus-within:border-indigo-400 focus-within:ring-1 focus-within:ring-indigo-100 transition-colors"
+        data-testid="product-tags-field"
+      >
+        {tags.length === 0 && draft === "" && (
+          <span className="text-xs text-slate-400 italic py-1 px-1">
+            No tags yet — auto-suggestions from the title and category will appear when the product is scraped.
+          </span>
+        )}
+        {tags.map((tag, i) => (
+          <span
+            key={`${tag}-${i}`}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium border border-indigo-100"
+            data-testid={`product-tag-chip-${i}`}
+          >
+            <span>{tag}</span>
+            <button
+              type="button"
+              onClick={() => removeAt(i)}
+              className="hover:text-red-600 transition-colors"
+              aria-label={`Remove tag ${tag}`}
+              data-testid={`product-tag-remove-${i}`}
+            >
+              <X size={11}/>
+            </button>
+          </span>
+        ))}
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={onKeyDown}
+          onBlur={() => draft.trim() && commit(draft)}
+          placeholder={tags.length === 0 ? "Add tag…" : "Add another"}
+          className="flex-1 min-w-[120px] px-1.5 py-1 text-sm bg-transparent outline-none"
+          data-testid="product-tags-input"
+        />
+      </div>
+      <div className="mt-1.5 text-[10px] text-slate-400">
+        Press Enter or comma to add · Backspace on empty input removes the last chip
+      </div>
+    </Field>
   );
 }
 

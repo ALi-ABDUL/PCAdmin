@@ -49,7 +49,7 @@ export function KpiCard({ label, value, sub, icon: Icon, tone, onExpand, testId 
           <button
             type="button"
             onClick={onExpand}
-            className="p-1.5 -m-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+            className="kpi-expand-arrow p-1.5 -m-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
             aria-label={`Expand ${label}`}
             data-testid={testId ? `${testId}-expand` : "kpi-expand"}
           >

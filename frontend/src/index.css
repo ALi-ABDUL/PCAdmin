@@ -179,6 +179,26 @@ body {
     -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none;
 }
 
+/* KPI expand arrow — subtle bounce on hover.
+ * The arrow lifts ~5px, tips slightly back to zero, then lifts once more
+ * for a spring-like feel before resting in its original position. Runs
+ * for 500ms with a snappy ease-out curve; kept short so repeated hovers
+ * don't feel sluggish. Uses `transform` only so the browser can offload
+ * to the compositor. */
+@keyframes kpi-arrow-bounce {
+    0%   { transform: translate(0, 0); }
+    30%  { transform: translate(1px, -5px); }
+    55%  { transform: translate(0, -1px); }
+    80%  { transform: translate(1px, -3px); }
+    100% { transform: translate(0, 0); }
+}
+.kpi-expand-arrow { transition: color 200ms ease, background-color 200ms ease; }
+.kpi-expand-arrow:hover svg { animation: kpi-arrow-bounce 500ms ease-out; }
+/* Respect users who ask the OS to reduce motion — skip the bounce entirely. */
+@media (prefers-reduced-motion: reduce) {
+    .kpi-expand-arrow:hover svg { animation: none; }
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }

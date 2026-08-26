@@ -157,10 +157,13 @@ async def scrape(req: ScrapeRequest) -> dict:
                     "detected_at": now_iso,
                     "notified": False,
                 })
-                # Mirror to product if linked (also stamp stock_status so the UI can show the right badge)
+                # Mirror to product if linked. In addition to archiving, we
+                # force `stock: 0` when the listing goes out of stock so the
+                # product surfaces in the Products › Out of Stock tab (which
+                # filters on `archived: True` or `stock == 0`).
                 await db.products.update_many(
                     {"source_item_id": data.get("item_id")},
-                    {"$set": {"active": False, "is_sold": True, "archived": True, "stock_status": new_status, "updated_at": now_iso}},
+                    {"$set": {"active": False, "is_sold": True, "archived": True, "stock": 0, "stock_status": new_status, "updated_at": now_iso}},
                 )
                 # Human-readable notification per status
                 status_titles = {"sold": "Sold on eBay", "ended": "Listing ended on eBay", "out_of_stock": "Out of stock on eBay"}
@@ -2132,17 +2135,24 @@ async def refresh_product_from_ebay(pid: str):
 
     new_status = data.get("stock_status") or ("sold" if data.get("is_sold") else "live")
     now = datetime.now(timezone.utc).isoformat()
+    is_dead = new_status != "live"
     update = {
         "title": data.get("title") or p.get("title"),
         "images": data.get("images") or p.get("images") or [],
         "variants": data.get("variants") or [],
         "cost": data.get("price_value") if data.get("price_value") is not None else p.get("cost"),
         "stock_status": new_status,
-        "is_sold": new_status != "live",
-        "active": p.get("active") if new_status == "live" else False,
+        "is_sold": is_dead,
+        "active": p.get("active") if not is_dead else False,
         "description": data.get("description") or p.get("description"),
         "updated_at": now,
     }
+    # When the listing has gone sold / ended / out-of-stock, force `stock: 0`
+    # and archive the product so it lands in Products › Out of Stock.
+    if is_dead:
+        update["stock"] = 0
+        update["archived"] = True
+        update["archived_at"] = now
     await db.products.update_one({"id": pid}, {"$set": update})
     return await db.products.find_one({"id": pid}, {"_id": 0})
 

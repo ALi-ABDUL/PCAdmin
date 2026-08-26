@@ -1253,7 +1253,36 @@ def parse_ebay_item(html: str, url: str) -> dict[str, Any]:
             if "discontinued" in val:
                 is_sold = True; stock_status = "ended"; break
 
-    # 3) Main product's JSON-LD offer.availability (schema.org). We look at the
+    # 3) Explicit DOM signals that eBay renders when the listing is out of
+    #    stock (as opposed to sold/ended). These sit right in the visible
+    #    availability/CTA area and are the source of truth for a
+    #    "currently unavailable" state:
+    #      a) <div class="x-quantity__availability"><span class="ux-textspans--BOLD ux-textspans--EMPHASIS">Out of stock</span></div>
+    #      b) The yellow status banner containing "This item is out of stock"
+    #      c) <span data-testid="ux-textual-display"><span class="ux-textspans">This item is out of stock.</span></span>
+    #    Any match immediately flips the product to `out_of_stock`.
+    if stock_status == "live":
+        oos_hit = False
+        # (a) Quantity-availability block
+        for node in soup.select("div.x-quantity__availability span.ux-textspans--BOLD.ux-textspans--EMPHASIS"):
+            if "out of stock" in _text(node).lower():
+                oos_hit = True; break
+        # (b) Yellow status banner (eBay renders it as .ux-message-container /
+        #     .x-status-message-view — we match text on any status banner so
+        #     minor DOM class swaps don't miss it).
+        if not oos_hit:
+            for node in soup.select(".ux-message-container, .x-status-message-view, [class*='status-message']"):
+                if "this item is out of stock" in _text(node).lower():
+                    oos_hit = True; break
+        # (c) ux-textual-display span (used in the buy-box area on some layouts)
+        if not oos_hit:
+            for node in soup.select('span[data-testid="ux-textual-display"] span.ux-textspans'):
+                if "this item is out of stock" in _text(node).lower():
+                    oos_hit = True; break
+        if oos_hit:
+            is_sold = True; stock_status = "out_of_stock"
+
+    # 4) Main product's JSON-LD offer.availability (schema.org). We look at the
     #    top-level Product node only (not variant `hasVariant` offers) so a
     #    single out-of-stock variant on a live listing does not flip the whole
     #    product to sold.

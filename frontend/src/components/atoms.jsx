@@ -33,7 +33,7 @@ export function StatusChip({ status }) {
   return <span className={`chip capitalize ${map[status] || "chip-neutral"}`}>{status}</span>;
 }
 
-export function KpiCard({ label, value, sub, icon: Icon, tone }) {
+export function KpiCard({ label, value, sub, icon: Icon, tone, onExpand, testId }) {
   const toneMap = {
     primary: "from-indigo-500 to-indigo-600",
     success: "from-emerald-500 to-emerald-600",
@@ -41,11 +41,23 @@ export function KpiCard({ label, value, sub, icon: Icon, tone }) {
     pink:    "from-pink-500 to-pink-600",
   };
   return (
-    <div className="card p-5 relative overflow-hidden">
+    <div className="card p-5 relative overflow-hidden" data-testid={testId}>
       <div className={`absolute -right-6 -top-6 w-24 h-24 rounded-full opacity-20 blur-2xl bg-gradient-to-br ${toneMap[tone]}`}/>
       <div className="flex items-center justify-between">
         <div className={`w-10 h-10 rounded-xl grid place-items-center text-white bg-gradient-to-br ${toneMap[tone]}`}><Icon size={18}/></div>
-        <ArrowUpRight className="text-slate-300" size={16}/>
+        {onExpand ? (
+          <button
+            type="button"
+            onClick={onExpand}
+            className="p-1.5 -m-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+            aria-label={`Expand ${label}`}
+            data-testid={testId ? `${testId}-expand` : "kpi-expand"}
+          >
+            <ArrowUpRight size={16}/>
+          </button>
+        ) : (
+          <ArrowUpRight className="text-slate-300" size={16}/>
+        )}
       </div>
       <div className="mt-4 font-display text-3xl font-bold tracking-tight">{value}</div>
       <div className="text-xs text-slate-500 mt-1">{label} · <span className="text-slate-400">{sub}</span></div>

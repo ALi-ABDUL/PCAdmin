@@ -1046,3 +1046,49 @@ Notification Bell deep-links) — zero regressions detected.
   entries. Runs serialised via `pytestmark = xdist_group("country_access")`
   because tests mutate the shared singleton.
 
+
+
+## Feb 25, 2026 — Revenue YTD deep-dive modal
+- **Backend**: new `GET /api/analytics/revenue-detail` returns everything
+  the Revenue YTD expand modal needs in one round-trip:
+  - `year`, `total_revenue`, `total_orders`, `avg_order_value`
+  - `monthly[]` — revenue + orders per month for the current year,
+    Jan → current month, zero-filled so the bar chart never has gaps
+  - `top_products[]` — top 5 YTD sellers with `product_id`, `title`,
+    `image` (first product image, may be null), `revenue`, `units`,
+    resolved via a `$lookup` on the products collection
+  - `orders_by_status[]` — every `ORDER_STATUSES` bucket represented
+    (including 0-count) with `{status, count, revenue}`
+  - `best_month` — the highest-revenue month so far (or null when no
+    sales)
+  - `last_year_comparison` — same-period-last-year `{revenue, orders,
+    delta_pct}` or null when no prior-year orders exist
+  - Cancelled orders excluded from every non-status total.
+- **Frontend — KpiCard** (`components/atoms.jsx`) now accepts an optional
+  `onExpand` callback. When set, the previously-decorative
+  `ArrowUpRight` in the top-right corner becomes a real button with
+  hover + `data-testid={testId}-expand`.
+- **Dashboard** wires `onExpand` on the Revenue YTD card to open
+  `<RevenueDetailModal/>` (defined in `pages/Dashboard.jsx`):
+  - Full-screen backdrop with `Escape` + click-outside + explicit Close
+  - `RevenueHighlightsRow` — Best month YTD (green trophy card), Avg
+    order value, vs same-period-last-year (indigo up-arrow / amber
+    down-arrow chip + prior-year revenue/orders footnote, or "No
+    prior-year data" when null)
+  - `RevenueMonthlyChart` — Recharts bar chart with rounded top
+    corners and $k tick formatter
+  - `RevenueTopProducts` — top-5 list with numbered rank badge, 44×44
+    product thumbnail served through `proxyImg(imgThumb(image))`,
+    title, units, revenue
+  - `RevenueStatusBreakdown` — non-zero statuses only, each with a
+    gradient progress bar showing the share of total non-cancelled
+    orders and a count + % tabular readout. Uses shared `StatusChip`
+    so styling stays in sync with the Orders table.
+  - Fully responsive: single-column stack on mobile, 2-column top
+    products + status split on `lg:` and up.
+- **Tests**: `/app/backend/tests/test_revenue_detail.py` — 7 pytest
+  cases (all pass) covering shape, monthly zero-fill/current-month
+  cap, every ORDER_STATUS present, top-5 cap + fields,
+  `avg_order_value` math, best_month = max(monthly), cancelled
+  exclusion.
+

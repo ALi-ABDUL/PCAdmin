@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowRight, CheckCircle2, DollarSign, Loader2, Percent, ShoppingBag, Sparkles, TrendingUp } from "lucide-react";
-import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, CheckCircle2, DollarSign, Loader2, Percent, ShoppingBag, Sparkles, Trophy, TrendingUp, X } from "lucide-react";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KpiCard, StatusChip } from "../components/atoms";
-import { API } from "../lib/api";
+import { API, proxyImg, imgThumb } from "../lib/api";
 import { fmtDate, fmtDay, moneyCents } from "../lib/format";
 import { loadDashboardLayout } from "../lib/dashboardLayout";
 import { Products } from "./ProductsList";
@@ -13,6 +13,8 @@ import { ProfitCalculator } from "./Store";
 export function Dashboard({ navigateTo }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Revenue-YTD deep-dive modal
+  const [revenueModalOpen, setRevenueModalOpen] = useState(false);
   // Widget-visibility preferences from Settings › Dashboard Layout.
   // Listen for changes so toggling in Settings live-updates the layout.
   const [layout, setLayout] = useState(loadDashboardLayout());
@@ -39,7 +41,7 @@ export function Dashboard({ navigateTo }) {
   if (loading || !data) return <div className="text-slate-500 flex items-center gap-2 py-24 justify-center"><Loader2 className="animate-spin" size={16}/> loading dashboard…</div>;
 
   const kpis = [
-    { label: "Revenue (YTD)",  value: moneyCents(data.ytd.revenue), sub: `${data.ytd.orders} orders`, icon: DollarSign, tone: "primary" },
+    { label: "Revenue (YTD)",  value: moneyCents(data.ytd.revenue), sub: `${data.ytd.orders} orders`, icon: DollarSign, tone: "primary", testId: "kpi-revenue-ytd", onExpand: () => setRevenueModalOpen(true) },
     { label: "Profit (YTD)",   value: moneyCents(data.ytd.profit),  sub: `${data.ytd.revenue ? ((data.ytd.profit / data.ytd.revenue) * 100).toFixed(1) : 0}% margin`, icon: TrendingUp, tone: "success" },
     { label: "Units sold",     value: (data.ytd.units || 0).toLocaleString("en-AU"), sub: "this year", icon: ShoppingBag, tone: "violet" },
     { label: "Avg order value",value: data.ytd.orders ? moneyCents(data.ytd.revenue / data.ytd.orders) : "—", sub: "YTD", icon: Percent, tone: "pink" },
@@ -159,8 +161,7 @@ export function Dashboard({ navigateTo }) {
 
       {/* Top products + recent orders */}
       {layout.top_recent && (
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <div className="card overflow-hidden">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6" data-testid="top-recent-row">        <div className="card overflow-hidden">
           <div className="p-5 border-b hairline flex items-center justify-between">
             <div>
               <div className="font-display font-bold text-lg">Top products</div>
@@ -211,6 +212,10 @@ export function Dashboard({ navigateTo }) {
           </div>
         </div>
       </div>
+      )}
+
+      {revenueModalOpen && (
+        <RevenueDetailModal onClose={() => setRevenueModalOpen(false)}/>
       )}
     </div>
   );
@@ -338,3 +343,244 @@ export function StuckOrdersWidget({ navigateTo }) {
     </div>
   );
 }
+
+
+/* --------------------------- Revenue detail modal --------------------------
+ *
+ * Opens when the admin clicks the expand arrow on the Revenue YTD KPI card.
+ * Shows monthly revenue bars, top-5 best sellers with product thumbnails,
+ * average order value, orders-by-status breakdown, the best month so far
+ * this year, and a same-period comparison to last year when data exists.
+ *
+ * Backend endpoint: `GET /api/analytics/revenue-detail` (aggregates everything
+ * server-side so the modal only makes one fetch on open).
+ * ------------------------------------------------------------------------- */
+
+export function RevenueDetailModal({ onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    axios.get(`${API}/analytics/revenue-detail`)
+      .then(r => { if (!cancelled) setData(r.data); })
+      .catch(e => { if (!cancelled) setErr(e?.response?.data?.detail || e.message); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Escape closes the modal — matches ImageLightbox / ProductEditModal ergonomics.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm overflow-y-auto"
+      onClick={onClose}
+      data-testid="revenue-detail-modal"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card max-w-5xl mx-auto my-4 sm:my-10 p-5 sm:p-8"
+        role="dialog"
+        aria-label="Revenue detail"
+      >
+        <div className="flex items-start justify-between gap-3 mb-6 flex-wrap">
+          <div>
+            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-400 mb-1">
+              Revenue Detail · {data?.year || new Date().getFullYear()}
+            </div>
+            <div className="font-display font-bold text-2xl sm:text-3xl tracking-tight">
+              {data ? moneyCents(data.total_revenue) : "…"}
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">
+              {data ? `${data.total_orders.toLocaleString("en-AU")} orders · ${moneyCents(data.avg_order_value)} average order value` : "loading…"}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="btn btn-ghost !p-2"
+            aria-label="Close"
+            data-testid="revenue-detail-close"
+          >
+            <X size={16}/>
+          </button>
+        </div>
+
+        {err && (
+          <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm">
+            Failed to load revenue detail: {err}
+          </div>
+        )}
+
+        {!data && !err && (
+          <div className="py-20 text-center text-slate-500 flex items-center justify-center gap-2">
+            <Loader2 className="animate-spin" size={16}/> loading revenue detail…
+          </div>
+        )}
+
+        {data && (
+          <div className="grid gap-6">
+            <RevenueHighlightsRow data={data}/>
+            <RevenueMonthlyChart data={data}/>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <RevenueTopProducts products={data.top_products}/>
+              <RevenueStatusBreakdown rows={data.orders_by_status}/>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end">
+          <button onClick={onClose} className="btn btn-primary" data-testid="revenue-detail-close-footer">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function RevenueHighlightsRow({ data }) {
+  const best = data.best_month;
+  const ly = data.last_year_comparison;
+  const up = ly && ly.delta_pct >= 0;
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="revenue-highlights">
+      <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50/60">
+        <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-emerald-700 mb-1">
+          <Trophy size={11}/> Best month YTD
+        </div>
+        {best ? (
+          <>
+            <div className="font-display font-bold text-lg">{best.month}</div>
+            <div className="font-mono text-emerald-700 text-sm">{moneyCents(best.revenue)}</div>
+          </>
+        ) : (
+          <div className="text-sm text-slate-400 italic">No sales yet</div>
+        )}
+      </div>
+      <div className="p-4 rounded-lg border hairline bg-slate-50/60">
+        <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1">Avg order value</div>
+        <div className="font-display font-bold text-lg">{moneyCents(data.avg_order_value)}</div>
+        <div className="text-xs text-slate-500">{data.total_orders.toLocaleString("en-AU")} orders</div>
+      </div>
+      <div className={`p-4 rounded-lg border ${ly ? (up ? "border-indigo-200 bg-indigo-50/50" : "border-amber-200 bg-amber-50/60") : "hairline bg-slate-50/60"}`}>
+        <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1">
+          vs same period last year
+        </div>
+        {ly ? (
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1 chip !text-[11px] ${up ? "chip-primary" : "chip-warning"}`}>
+              {up ? <ArrowUp size={11}/> : <ArrowDown size={11}/>}
+              {up ? "+" : ""}{ly.delta_pct}%
+            </span>
+            <span className="font-mono text-xs text-slate-500">{moneyCents(ly.revenue)} · {ly.orders} orders</span>
+          </div>
+        ) : (
+          <div className="text-sm text-slate-400 italic">No prior-year data</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function RevenueMonthlyChart({ data }) {
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="revenue-monthly-chart">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="font-display font-bold">Monthly revenue · {data.year}</div>
+          <div className="text-xs text-slate-500">Jan → current month</div>
+        </div>
+        <span className="chip chip-primary text-[10px]">AUD</span>
+      </div>
+      <div className="h-56 sm:h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data.monthly} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid stroke="#EEF0F5" strokeDasharray="3 3" vertical={false}/>
+            <XAxis dataKey="month" tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false}/>
+            <YAxis tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false} width={44}/>
+            <Tooltip
+              contentStyle={{ background: "#fff", border: "1px solid #EAEAF0", borderRadius: 10, fontSize: 12 }}
+              formatter={(v, name) => [moneyCents(v), name === "revenue" ? "Revenue" : name]}
+              labelFormatter={(l) => `${l} ${data.year}`}
+            />
+            <Bar dataKey="revenue" fill="#4F46E5" radius={[6, 6, 0, 0]}/>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+
+function RevenueTopProducts({ products }) {
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="revenue-top-products">
+      <div className="font-display font-bold mb-3">Top 5 products · YTD</div>
+      {products.length === 0 ? (
+        <div className="text-sm text-slate-400 italic py-8 text-center">No sales yet.</div>
+      ) : (
+        <div className="grid gap-2">
+          {products.map((p, i) => (
+            <div key={p.product_id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50" data-testid={`revenue-top-product-${i}`}>
+              <div className="w-6 h-6 grid place-items-center rounded-md font-display font-bold text-white text-xs shrink-0" style={{ background: `linear-gradient(135deg, #4F46E5, #EC4899)`, opacity: 1 - i * 0.14 }}>{i + 1}</div>
+              <div className="w-11 h-11 rounded-md bg-slate-100 border hairline overflow-hidden shrink-0">
+                {p.image ? (
+                  <img src={proxyImg(imgThumb(p.image))} alt="" className="w-full h-full object-cover" loading="lazy"/>
+                ) : (
+                  <div className="w-full h-full grid place-items-center text-[9px] text-slate-400 font-mono">no img</div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{p.title}</div>
+                <div className="text-xs text-slate-500">{p.units} units sold</div>
+              </div>
+              <div className="font-mono text-sm font-bold text-indigo-600 shrink-0">{moneyCents(p.revenue)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function RevenueStatusBreakdown({ rows }) {
+  const nonZero = rows.filter(r => r.count > 0);
+  const total = nonZero.reduce((sum, r) => sum + r.count, 0);
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="revenue-status-breakdown">
+      <div className="font-display font-bold mb-3">Orders by status · YTD</div>
+      {nonZero.length === 0 ? (
+        <div className="text-sm text-slate-400 italic py-8 text-center">No orders yet this year.</div>
+      ) : (
+        <div className="grid gap-2">
+          {nonZero.map((r) => {
+            const pct = total ? Math.round((r.count / total) * 100) : 0;
+            return (
+              <div key={r.status} className="flex items-center gap-3" data-testid={`revenue-status-${r.status}`}>
+                <div className="shrink-0 w-24"><StatusChip status={r.status}/></div>
+                <div className="flex-1 min-w-0">
+                  <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-pink-500"
+                      style={{ width: `${pct}%` }}
+                      aria-label={`${pct}%`}
+                    />
+                  </div>
+                </div>
+                <div className="shrink-0 font-mono text-sm text-slate-700 tabular-nums">
+                  {r.count.toLocaleString("en-AU")} <span className="text-slate-400 text-xs">({pct}%)</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+

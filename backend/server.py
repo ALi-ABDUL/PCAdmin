@@ -2470,6 +2470,166 @@ async def analytics_overview():
     }
 
 
+@api_router.get("/analytics/revenue-detail")
+async def analytics_revenue_detail():
+    """Powers the Revenue YTD expand modal on the dashboard.
+
+    Returns a bundle of "everything the admin needs to reason about their
+    YTD revenue" in a single round-trip:
+      • `monthly`             — revenue + orders for each month of the
+        current calendar year (Jan → current month, zero-filled).
+      • `top_products`        — up to 5 best sellers YTD, with title,
+        image (first product image), units + revenue.
+      • `orders_by_status`    — count of orders per status (all statuses
+        represented, even zero-count ones).
+      • `avg_order_value`     — YTD (excludes cancelled orders).
+      • `total_revenue`       — YTD (matches the KPI card).
+      • `total_orders`        — YTD (excludes cancelled).
+      • `best_month`          — {month, revenue} — highest month so far,
+        or None when there are no sales.
+      • `last_year_comparison`— {revenue, orders, delta_pct} comparing the
+        same Jan-1 → today-of-last-year window. `null` when no prior-year
+        orders exist so the frontend can hide the panel gracefully.
+    """
+    now = datetime.now(timezone.utc)
+    year = now.year
+    year_start = datetime(year, 1, 1, tzinfo=timezone.utc).isoformat()
+    now_iso = now.isoformat()
+
+    # --- Monthly bar chart (Jan → current month, zero-filled) ------------
+    monthly_pipeline = [
+        {"$match": {
+            "status": {"$ne": "cancelled"},
+            "created_at": {"$gte": year_start, "$lte": now_iso},
+        }},
+        {"$addFields": {"month": {"$substr": ["$created_at", 0, 7]}}},  # "YYYY-MM"
+        {"$group": {
+            "_id": "$month",
+            "revenue": {"$sum": "$total"},
+            "orders":  {"$sum": 1},
+        }},
+        {"$sort": {"_id": 1}},
+    ]
+    raw = await db.orders.aggregate(monthly_pipeline).to_list(24)
+    monthly_map = {r["_id"]: r for r in raw}
+    month_labels = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ]
+    monthly = []
+    for m in range(1, now.month + 1):
+        key = f"{year:04d}-{m:02d}"
+        row = monthly_map.get(key, {"revenue": 0, "orders": 0})
+        monthly.append({
+            "month": month_labels[m - 1],
+            "month_key": key,
+            "revenue": round(row.get("revenue", 0) or 0, 2),
+            "orders": row.get("orders", 0),
+        })
+
+    # --- Best month so far -------------------------------------------------
+    best_month = None
+    if monthly:
+        top = max(monthly, key=lambda r: r["revenue"])
+        if top["revenue"] > 0:
+            best_month = {"month": top["month"], "month_key": top["month_key"], "revenue": top["revenue"]}
+
+    # --- Top 5 products YTD (join for image) -------------------------------
+    top_pipeline = [
+        {"$match": {"status": {"$ne": "cancelled"}, "created_at": {"$gte": year_start}}},
+        {"$group": {
+            "_id": "$product_id",
+            "title":   {"$first": "$product_title"},
+            "revenue": {"$sum": "$total"},
+            "units":   {"$sum": "$quantity"},
+        }},
+        {"$sort": {"revenue": -1}},
+        {"$limit": 5},
+        {"$lookup": {"from": "products", "localField": "_id",
+                     "foreignField": "id", "as": "p"}},
+    ]
+    top_products = []
+    for t in await db.orders.aggregate(top_pipeline).to_list(5):
+        prod = (t.get("p") or [{}])[0]
+        images = prod.get("images") or []
+        top_products.append({
+            "product_id": t["_id"],
+            "title": t.get("title") or prod.get("title") or "Untitled",
+            "image": images[0] if images else None,
+            "revenue": round(t.get("revenue", 0) or 0, 2),
+            "units": t.get("units", 0),
+        })
+
+    # --- Orders by status (YTD, includes cancelled so admin sees the churn) -
+    status_pipeline = [
+        {"$match": {"created_at": {"$gte": year_start}}},
+        {"$group": {"_id": "$status", "count": {"$sum": 1}, "revenue": {"$sum": "$total"}}},
+    ]
+    status_raw = await db.orders.aggregate(status_pipeline).to_list(20)
+    status_map = {s["_id"]: s for s in status_raw}
+    orders_by_status = []
+    for st in ORDER_STATUSES:
+        row = status_map.get(st, {"count": 0, "revenue": 0})
+        orders_by_status.append({
+            "status": st,
+            "count": row.get("count", 0),
+            "revenue": round(row.get("revenue", 0) or 0, 2),
+        })
+
+    # --- YTD totals for AOV + banner -------------------------------------
+    ytd_totals = await db.orders.aggregate([
+        {"$match": {"status": {"$ne": "cancelled"}, "created_at": {"$gte": year_start}}},
+        {"$group": {"_id": None,
+                    "revenue": {"$sum": "$total"},
+                    "orders":  {"$sum": 1}}},
+    ]).to_list(1)
+    if ytd_totals:
+        total_revenue = round(ytd_totals[0].get("revenue", 0) or 0, 2)
+        total_orders  = ytd_totals[0].get("orders", 0)
+    else:
+        total_revenue = 0.0
+        total_orders  = 0
+    avg_order_value = round(total_revenue / total_orders, 2) if total_orders else 0.0
+
+    # --- Same-period last year comparison --------------------------------
+    ly_start = datetime(year - 1, 1, 1, tzinfo=timezone.utc).isoformat()
+    ly_now = datetime(year - 1, now.month, now.day,
+                      now.hour, now.minute, now.second,
+                      tzinfo=timezone.utc).isoformat()
+    ly_totals = await db.orders.aggregate([
+        {"$match": {
+            "status": {"$ne": "cancelled"},
+            "created_at": {"$gte": ly_start, "$lte": ly_now},
+        }},
+        {"$group": {"_id": None,
+                    "revenue": {"$sum": "$total"},
+                    "orders":  {"$sum": 1}}},
+    ]).to_list(1)
+    last_year_comparison = None
+    if ly_totals and (ly_totals[0].get("orders") or 0) > 0:
+        ly_rev = round(ly_totals[0].get("revenue", 0) or 0, 2)
+        ly_ord = ly_totals[0].get("orders", 0)
+        delta_pct = round(((total_revenue - ly_rev) / ly_rev) * 100, 1) if ly_rev > 0 else 0.0
+        last_year_comparison = {
+            "revenue": ly_rev,
+            "orders": ly_ord,
+            "delta_pct": delta_pct,
+        }
+
+    return {
+        "year": year,
+        "as_of": now_iso,
+        "total_revenue": total_revenue,
+        "total_orders": total_orders,
+        "avg_order_value": avg_order_value,
+        "monthly": monthly,
+        "top_products": top_products,
+        "orders_by_status": orders_by_status,
+        "best_month": best_month,
+        "last_year_comparison": last_year_comparison,
+    }
+
+
 @api_router.get("/analytics/report")
 async def analytics_report():
     """Deeper reporting: top sellers, margin trend, category perf, best margin products."""

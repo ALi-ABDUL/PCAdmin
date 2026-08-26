@@ -1053,6 +1053,22 @@ def _format_notification_html(n: dict) -> tuple[str, str, str]:
     elif t == "out_of_stock":
         rows += [("Product", n.get("product_title") or "—"),
                  ("eBay listing", n.get("ebay_url") or "—")]
+    elif t == "countdown_expired":
+        # Rows for the auto-inactivation email/Telegram. Prices + end
+        # timestamp let the admin decide whether to restore straight
+        # away or move on. Uses the same `.data` bag pattern as
+        # `new_order`.
+        d = n.get("data") or {}
+        rows += [
+            ("Product", n.get("product_title") or "—"),
+        ]
+        if d.get("sale_price") is not None:
+            rows.append(("Sale price", f"${float(d.get('sale_price') or 0):.2f}"))
+        if d.get("original_price") is not None:
+            rows.append(("Original price", f"${float(d.get('original_price') or 0):.2f}"))
+        if d.get("ended_at"):
+            rows.append(("Ended at", str(d.get("ended_at"))))
+        rows.append(("Status", "Auto-inactivated · moved to Products › Countdown"))
     elif t == "low_stock":
         d = n.get("data") or {}
         rows += [("Product", n.get("product_title") or "—"),

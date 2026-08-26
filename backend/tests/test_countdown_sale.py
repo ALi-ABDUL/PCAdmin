@@ -253,3 +253,81 @@ def test_default_list_hides_expired_products():
         assert p["id"] not in ids
     finally:
         _cleanup(p["id"])
+
+
+def test_expire_sweep_emits_countdown_expired_notification():
+    """When a product expires the sweep must fire a `countdown_expired`
+    notification so the admin gets an email/Telegram/in-app alert."""
+    p = _new_product(title=f"NotifTest {uuid.uuid4().hex[:6]}")
+    try:
+        past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        asyncio.get_event_loop().run_until_complete(db.products.update_one(
+            {"id": p["id"]},
+            {"$set": {
+                "countdown_enabled": True,
+                "countdown_expired": False,
+                "countdown_ends_at": past,
+                "countdown_sale_price": 49.99,
+                "active": True,
+            }},
+        ))
+        from server import _expire_countdowns
+        asyncio.get_event_loop().run_until_complete(_expire_countdowns())
+        # Verify a notification landed with the right type + product id.
+        # `_emit_notification` writes into the `notifications` collection.
+        docs = asyncio.get_event_loop().run_until_complete(
+            db.notifications.find({"type": "countdown_expired", "product_id": p["id"]}, {"_id": 0}).to_list(10)
+        )
+        assert len(docs) == 1, f"expected 1 countdown_expired notification, got {len(docs)}"
+        n = docs[0]
+        assert n["product_title"] == p["title"]
+        assert n.get("data", {}).get("sale_price") == 49.99
+        assert n.get("data", {}).get("auto_inactivated") is True
+    finally:
+        _cleanup(p["id"])
+        # Best-effort: prune the notification so the notifications table
+        # doesn't accumulate test rows between runs.
+        asyncio.get_event_loop().run_until_complete(
+            db.notifications.delete_many({"product_id": p["id"]})
+        )
+
+
+def test_expire_sweep_notification_marked_critical():
+    """`countdown_expired` is in PUSH_CRITICAL_TYPES so the sweep emits a
+    notification that the push filter treats as critical."""
+    from models import PUSH_CRITICAL_TYPES
+    assert "countdown_expired" in PUSH_CRITICAL_TYPES
+
+
+def test_expire_sweep_does_not_duplicate_notifications():
+    """Running the sweep twice on the same expired product must not
+    re-emit the notification — expired products are updated with
+    `$ne: True` so the second pass finds nothing to do."""
+    p = _new_product()
+    try:
+        past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        asyncio.get_event_loop().run_until_complete(db.products.update_one(
+            {"id": p["id"]},
+            {"$set": {
+                "countdown_enabled": True,
+                "countdown_expired": False,
+                "countdown_ends_at": past,
+                "active": True,
+            }},
+        ))
+        from server import _expire_countdowns
+        first = asyncio.get_event_loop().run_until_complete(_expire_countdowns())
+        second = asyncio.get_event_loop().run_until_complete(_expire_countdowns())
+        assert first >= 1
+        assert second == 0  # nothing left to expire
+        # And only one notification exists.
+        docs = asyncio.get_event_loop().run_until_complete(
+            db.notifications.find({"type": "countdown_expired", "product_id": p["id"]}).to_list(10)
+        )
+        assert len(docs) == 1
+    finally:
+        _cleanup(p["id"])
+        asyncio.get_event_loop().run_until_complete(
+            db.notifications.delete_many({"product_id": p["id"]})
+        )
+

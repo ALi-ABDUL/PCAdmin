@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Bell, BellOff, ChevronRight, DollarSign, HelpCircle, ImageIcon, LogIn, LogOut, Menu, Moon, PackageMinus, RefreshCw, Search, ShieldCheck, ShoppingBag, Store, Sun, TrendingDown, TrendingUp, UserCircle, UserPlus, XCircle } from "lucide-react";
+import { BadgeCheck, Ban, Bell, BellOff, ChevronRight, DollarSign, HelpCircle, ImageIcon, LogIn, LogOut, Menu, Moon, PackageMinus, RefreshCw, Search, ShieldCheck, ShoppingBag, Store, Sun, Timer, TrendingDown, TrendingUp, UserCircle, UserPlus, XCircle } from "lucide-react";
 import { API, proxyImg } from "../lib/api";
 import { applyTheme, getCachedTheme } from "../lib/theme";
 import { clearAdminSession, loadAdminSession, saveAdminSession } from "../lib/adminSession";
@@ -261,6 +261,7 @@ export const NOTIF_META = {
   low_stock:            { icon: PackageMinus, color: "#D97706", bg: "#FEF3C7" },
   cancellation_request: { icon: Ban,          color: "#DC2626", bg: "#FEE2E2" },
   new_customer:         { icon: UserPlus,     color: "#7C3AED", bg: "#EDE9FE" },
+  countdown_expired:    { icon: Timer,        color: "#E11D48", bg: "#FFE4E6" },
 };
 
 export function NotifRow({ n, onClick }) {

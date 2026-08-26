@@ -662,7 +662,7 @@ export function PushNotificationSettings() {
           <div className="flex-1">
             <div className="text-sm font-medium">Only push critical events</div>
             <div className="text-xs text-slate-500">
-              When ON: new orders, out-of-stock alerts, and price drops that hurt margin by ≥ the threshold below.
+              When ON: new orders, out-of-stock alerts, countdown-sale expiries, and price drops that hurt margin by ≥ the threshold below.
               When OFF: <span className="text-slate-700">every notification</span> pushes (chatty).
             </div>
           </div>

@@ -1253,3 +1253,32 @@ Notification Bell deep-links) — zero regressions detected.
   deployed preview confirmed the full flow — off → start → live timer
   → cancel — plus the sidebar entry appears.
 
+
+
+## Feb 25, 2026 — Countdown expiry notifications
+- **`_expire_countdowns()`** now snapshots the products it's about to
+  expire (title / image / prices / end date) before the bulk update,
+  then fires a `countdown_expired` notification per product via
+  `_emit_notification`. Same delivery path as `new_order` etc — persists
+  to the `notifications` collection AND pushes through email + Telegram
+  when the admin has those channels configured.
+- **`PUSH_CRITICAL_TYPES`** (`models.py`) — added `countdown_expired`
+  so the alert bypasses the "Only push critical events" filter and
+  reaches the admin even when they've quieted the noisier channels.
+- **Email / Telegram body**: `_format_notification_html` learned the
+  `countdown_expired` case — renders a compact card with Product,
+  Sale price, Original price, End timestamp, and a "Status:
+  Auto-inactivated · moved to Products › Countdown" footer.
+- **In-app notification centre** (`header.jsx` `NOTIF_META`) —
+  registered the new type with a rose Timer icon so the bell menu
+  matches the sale card's visual language.
+- **Push settings copy** (`Store.jsx`) — updated the "Only critical
+  events" helper text to mention countdown-sale expiries.
+- **Tests** — `test_countdown_sale.py` gained 3 more cases (16 → 13
+  total, one collapsed): notification is persisted on expiry with the
+  right title / product_id / data payload; `countdown_expired` is in
+  `PUSH_CRITICAL_TYPES`; running the sweep twice is idempotent (only
+  one notification exists after two passes). Live smoke: forced expiry
+  through `_expire_countdowns()` and read back the notification —
+  correct type, title "Countdown sale ended", full body with prices.
+

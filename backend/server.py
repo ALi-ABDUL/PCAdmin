@@ -2384,13 +2384,29 @@ async def _expire_countdowns() -> int:
     """Move every product whose countdown has elapsed into the expired
     state (auto-inactivate + flag). Returns the number of products
     updated. Called from the scheduler + opportunistically from
-    `list_products` so admins never see stale timers."""
-    now_iso = datetime.now(timezone.utc).isoformat()
+    `list_products` so admins never see stale timers.
+
+    Emits a `countdown_expired` notification per product so admins get an
+    email / Telegram alert the moment a sale ends. `_push_notification`
+    respects the admin's `push_settings` (channels + critical-only filter).
+    """
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
     query = {
         "countdown_enabled": True,
         "countdown_expired": {"$ne": True},
         "countdown_ends_at": {"$lte": now_iso},
     }
+    # Snapshot the docs BEFORE the update so we can build the notifications
+    # without another round-trip. Cheap because the sweep only ever hits
+    # products that just expired — usually a handful at most.
+    to_expire = await db.products.find(
+        query,
+        {"_id": 0, "id": 1, "title": 1, "images": 1,
+         "price": 1, "countdown_sale_price": 1, "countdown_ends_at": 1},
+    ).to_list(500)
+    if not to_expire:
+        return 0
     r = await db.products.update_many(
         query,
         {"$set": {
@@ -2401,6 +2417,31 @@ async def _expire_countdowns() -> int:
     )
     if r.modified_count:
         logger.info("Expired %d countdown product(s)", r.modified_count)
+    # Fire-and-forget notification per product. `_emit_notification`
+    # persists to the notifications collection + pushes via email /
+    # Telegram based on the admin's push_settings.
+    for p in to_expire:
+        title = p.get("title") or "Untitled product"
+        sale = p.get("countdown_sale_price")
+        original = p.get("price")
+        body = f"{title} — countdown ended and it has been auto-inactivated."
+        if sale is not None and original:
+            body += f" Sale price was ${sale:.2f} (was ${original:.2f})."
+        body += " Visit Products › Countdown to restore or delete it."
+        await _emit_notification(
+            type="countdown_expired",
+            title="Countdown sale ended",
+            body=body,
+            product_id=p.get("id"),
+            product_title=title,
+            image=(p.get("images") or [None])[0],
+            data={
+                "sale_price": sale,
+                "original_price": original,
+                "ended_at": p.get("countdown_ends_at"),
+                "auto_inactivated": True,
+            },
+        )
     return r.modified_count or 0
 
 

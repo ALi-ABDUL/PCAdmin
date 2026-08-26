@@ -17,6 +17,8 @@ export function Dashboard({ navigateTo }) {
   const [revenueModalOpen, setRevenueModalOpen] = useState(false);
   // Profit-YTD deep-dive modal
   const [profitModalOpen, setProfitModalOpen] = useState(false);
+  // Units-sold deep-dive modal
+  const [unitsModalOpen, setUnitsModalOpen] = useState(false);
   // Widget-visibility preferences from Settings › Dashboard Layout.
   // Listen for changes so toggling in Settings live-updates the layout.
   const [layout, setLayout] = useState(loadDashboardLayout());
@@ -45,7 +47,7 @@ export function Dashboard({ navigateTo }) {
   const kpis = [
     { label: "Revenue (YTD)",  value: moneyCents(data.ytd.revenue), sub: `${data.ytd.orders} orders`, icon: DollarSign, tone: "primary", testId: "kpi-revenue-ytd", onExpand: () => setRevenueModalOpen(true) },
     { label: "Profit (YTD)",   value: moneyCents(data.ytd.profit),  sub: `${data.ytd.revenue ? ((data.ytd.profit / data.ytd.revenue) * 100).toFixed(1) : 0}% margin`, icon: TrendingUp, tone: "success", testId: "kpi-profit-ytd", onExpand: () => setProfitModalOpen(true) },
-    { label: "Units sold",     value: (data.ytd.units || 0).toLocaleString("en-AU"), sub: "this year", icon: ShoppingBag, tone: "violet" },
+    { label: "Units sold",     value: (data.ytd.units || 0).toLocaleString("en-AU"), sub: "this year", icon: ShoppingBag, tone: "violet", testId: "kpi-units-ytd", onExpand: () => setUnitsModalOpen(true) },
     { label: "Avg order value",value: data.ytd.orders ? moneyCents(data.ytd.revenue / data.ytd.orders) : "—", sub: "YTD", icon: Percent, tone: "pink" },
   ];
 
@@ -222,6 +224,10 @@ export function Dashboard({ navigateTo }) {
 
       {profitModalOpen && (
         <ProfitDetailModal onClose={() => setProfitModalOpen(false)}/>
+      )}
+
+      {unitsModalOpen && (
+        <UnitsDetailModal onClose={() => setUnitsModalOpen(false)}/>
       )}
     </div>
   );
@@ -865,6 +871,254 @@ function ProfitCategoryMargins({ rows }) {
                 </div>
                 <div className="font-mono text-xs text-slate-700 tabular-nums w-14 text-right">
                   {r.margin_pct}%
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+/* ---------------------------- Units detail modal ---------------------------
+ *
+ * Opens when the admin clicks the expand arrow on the Units Sold KPI card.
+ * Shows monthly units bars, top-5 best-selling products by quantity with
+ * thumbnails, units broken down by category, avg per day + per month,
+ * best-selling month, and a same-period comparison to last year when
+ * data exists.
+ *
+ * Backend endpoint: `GET /api/analytics/units-detail` (one round-trip).
+ * ------------------------------------------------------------------------- */
+
+export function UnitsDetailModal({ onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    axios.get(`${API}/analytics/units-detail`)
+      .then(r => { if (!cancelled) setData(r.data); })
+      .catch(e => { if (!cancelled) setErr(e?.response?.data?.detail || e.message); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const fmt = (n) => (n || 0).toLocaleString("en-AU");
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm overflow-y-auto"
+      onClick={onClose}
+      data-testid="units-detail-modal"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card max-w-5xl mx-auto my-4 sm:my-10 p-5 sm:p-8"
+        role="dialog"
+        aria-label="Units sold detail"
+      >
+        <div className="flex items-start justify-between gap-3 mb-6 flex-wrap">
+          <div>
+            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-400 mb-1">
+              Units Sold Detail · {data?.year || new Date().getFullYear()}
+            </div>
+            <div className="font-display font-bold text-2xl sm:text-3xl tracking-tight">
+              {data ? fmt(data.total_units) : "…"}
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">
+              {data
+                ? <>{fmt(data.total_orders)} orders · {data.avg_per_order} units per order</>
+                : "loading…"}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="btn btn-ghost !p-2"
+            aria-label="Close"
+            data-testid="units-detail-close"
+          >
+            <X size={16}/>
+          </button>
+        </div>
+
+        {err && (
+          <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm">
+            Failed to load units detail: {err}
+          </div>
+        )}
+
+        {!data && !err && (
+          <div className="py-20 text-center text-slate-500 flex items-center justify-center gap-2">
+            <Loader2 className="animate-spin" size={16}/> loading units detail…
+          </div>
+        )}
+
+        {data && (
+          <div className="grid gap-6">
+            <UnitsHighlightsRow data={data} fmt={fmt}/>
+            <UnitsMonthlyBars monthly={data.monthly} year={data.year}/>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <UnitsTopProducts products={data.top_products} fmt={fmt}/>
+              <UnitsByCategory rows={data.by_category} fmt={fmt}/>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end">
+          <button onClick={onClose} className="btn btn-primary" data-testid="units-detail-close-footer">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function UnitsHighlightsRow({ data, fmt }) {
+  const best = data.best_month;
+  const ly = data.last_year_comparison;
+  const up = ly && ly.delta_pct >= 0;
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="units-highlights">
+      <div className="p-4 rounded-lg border border-violet-200 bg-violet-50/60">
+        <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-violet-800 mb-1">
+          <Trophy size={11}/> Best month
+        </div>
+        {best ? (
+          <>
+            <div className="font-display font-bold text-lg">{best.month}</div>
+            <div className="font-mono text-violet-800 text-sm">{fmt(best.units)} units</div>
+          </>
+        ) : (
+          <div className="text-sm text-slate-400 italic">No sales yet</div>
+        )}
+      </div>
+      <div className="p-4 rounded-lg border hairline bg-slate-50/60">
+        <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1">Avg per day</div>
+        <div className="font-display font-bold text-lg">{fmt(data.avg_per_day)}</div>
+        <div className="text-xs text-slate-500">units / day YTD</div>
+      </div>
+      <div className="p-4 rounded-lg border hairline bg-slate-50/60">
+        <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1">Avg per month</div>
+        <div className="font-display font-bold text-lg">{fmt(data.avg_per_month)}</div>
+        <div className="text-xs text-slate-500">units / month YTD</div>
+      </div>
+      <div className={`p-4 rounded-lg border ${ly ? (up ? "border-indigo-200 bg-indigo-50/50" : "border-amber-200 bg-amber-50/60") : "hairline bg-slate-50/60"}`}>
+        <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1">
+          vs last year
+        </div>
+        {ly ? (
+          <div className="flex flex-col gap-0.5">
+            <span className={`inline-flex items-center gap-1 chip !text-[11px] w-fit ${up ? "chip-primary" : "chip-warning"}`}>
+              {up ? <ArrowUp size={11}/> : <ArrowDown size={11}/>}
+              {up ? "+" : ""}{ly.delta_pct}%
+            </span>
+            <span className="font-mono text-[11px] text-slate-500">{fmt(ly.units)} units</span>
+          </div>
+        ) : (
+          <div className="text-sm text-slate-400 italic">No prior-year data</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function UnitsMonthlyBars({ monthly, year }) {
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="units-monthly-bars">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="font-display font-bold">Monthly units · {year}</div>
+          <div className="text-xs text-slate-500">Jan → current month</div>
+        </div>
+        <span className="chip chip-primary text-[10px]">units</span>
+      </div>
+      <div className="h-56 sm:h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={monthly} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid stroke="#EEF0F5" strokeDasharray="3 3" vertical={false}/>
+            <XAxis dataKey="month" tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false}/>
+            <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false} width={40}/>
+            <Tooltip
+              contentStyle={{ background: "#fff", border: "1px solid #EAEAF0", borderRadius: 10, fontSize: 12 }}
+              formatter={(v) => [(v || 0).toLocaleString("en-AU"), "Units"]}
+              labelFormatter={(l) => `${l} ${year}`}
+            />
+            <Bar dataKey="units" fill="#8B5CF6" radius={[6, 6, 0, 0]}/>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+
+function UnitsTopProducts({ products, fmt }) {
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="units-top-products">
+      <div className="font-display font-bold mb-3">Top 5 by units · YTD</div>
+      {products.length === 0 ? (
+        <div className="text-sm text-slate-400 italic py-8 text-center">No sales yet.</div>
+      ) : (
+        <div className="grid gap-2">
+          {products.map((p, i) => (
+            <div key={p.product_id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50" data-testid={`units-top-product-${i}`}>
+              <div className="w-6 h-6 grid place-items-center rounded-md font-display font-bold text-white text-xs shrink-0" style={{ background: `linear-gradient(135deg, #8B5CF6, #EC4899)`, opacity: 1 - i * 0.14 }}>{i + 1}</div>
+              <div className="w-11 h-11 rounded-md bg-slate-100 border hairline overflow-hidden shrink-0">
+                {p.image ? (
+                  <img src={proxyImg(imgThumb(p.image))} alt="" className="w-full h-full object-cover" loading="lazy"/>
+                ) : (
+                  <div className="w-full h-full grid place-items-center text-[9px] text-slate-400 font-mono">no img</div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{p.title}</div>
+                <div className="text-xs text-slate-500">{moneyCents(p.revenue)} revenue</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="font-mono text-sm font-bold text-violet-600">{fmt(p.units)}</div>
+                <div className="text-[10px] text-slate-400 font-mono">units</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function UnitsByCategory({ rows, fmt }) {
+  const max = rows.reduce((m, r) => Math.max(m, r.units), 0) || 1;
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="units-by-category">
+      <div className="font-display font-bold mb-3 flex items-center gap-2"><Layers size={14} className="text-slate-500"/> Units by category · YTD</div>
+      {rows.length === 0 ? (
+        <div className="text-sm text-slate-400 italic py-8 text-center">No sales yet.</div>
+      ) : (
+        <div className="grid gap-2 max-h-72 overflow-y-auto pr-1">
+          {rows.map((r) => {
+            const pct = Math.round((r.units / max) * 100);
+            return (
+              <div key={r.category} className="grid grid-cols-[minmax(90px,140px)_1fr_auto] items-center gap-3" data-testid={`units-category-${r.category}`}>
+                <div className="text-xs font-medium capitalize truncate" title={r.category}>{r.category}</div>
+                <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-violet-500 to-pink-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <div className="font-mono text-xs text-slate-700 tabular-nums w-14 text-right">
+                  {fmt(r.units)}
                 </div>
               </div>
             );

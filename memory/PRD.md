@@ -1159,3 +1159,40 @@ Notification Bell deep-links) — zero regressions detected.
   `[data-testid=profit-detail-modal]` visible with full data (bar chart,
   top products, status/category breakdowns, best/worst month cards).
 
+
+
+## Feb 25, 2026 — Units Sold deep-dive modal
+- **Backend**: new `GET /api/analytics/units-detail` returns:
+  - `total_units`, `total_orders`, `avg_per_order`
+  - `avg_per_day`, `avg_per_month` (days elapsed + months elapsed
+    computed from `now` so Jan 1 doesn't divide by zero)
+  - `monthly[]` — units + orders per month (Jan → current, zero-filled)
+  - `top_products[]` — up to 5 YTD by units with image / title / units /
+    revenue (units > 0 required)
+  - `by_category[]` — units + orders + revenue per category (units > 0
+    filter, sorted desc)
+  - `best_month` — highest-units month so far, or null
+  - `last_year_comparison` — same-period-last-year `{units, orders,
+    delta_pct}` or null when no prior-year sales
+  - Cancelled orders excluded from every aggregation.
+- **Frontend — UnitsDetailModal** (`pages/Dashboard.jsx`):
+  - Wired to the Units Sold KpiCard via `onExpand`.
+    `data-testid="kpi-units-ytd-expand"` on the trigger,
+    `units-detail-modal` on the dialog.
+  - **UnitsHighlightsRow** — 4-card grid (Best month · trophy violet /
+    Avg per day / Avg per month / vs last year up/down chip).
+  - **UnitsMonthlyBars** — Recharts BarChart with violet bars,
+    en-AU-formatted units in the tooltip.
+  - **UnitsTopProducts** — top-5 list with numbered rank chip, 44px
+    thumbnail, title + revenue subtitle, right-aligned units badge.
+  - **UnitsByCategory** — horizontal-bar visualisation (max-normalised
+    width) with violet-to-pink gradient bars, scrollable max-h-72.
+  - Responsive: 2-col highlights on mobile → 4-col on lg; single-column
+    stack for the split cards → 2-col lg. Escape / click-outside /
+    Close button / Close footer.
+- **Tests**: `/app/backend/tests/test_units_detail.py` — 8 pytest cases
+  (all pass) covering shape, monthly zero-fill, `avg_per_order` math,
+  positive avg_per_day/month when sales exist, best_month = max(monthly),
+  top-5 cap + units > 0 + sort, by_category filters + sort, monthly.units
+  sum equals total_units (cancelled excluded).
+

@@ -2797,6 +2797,179 @@ async def analytics_profit_detail():
     }
 
 
+@api_router.get("/analytics/units-detail")
+async def analytics_units_detail():
+    """Powers the Units Sold expand modal on the dashboard.
+
+    Returns everything the units deep-dive needs in one round-trip:
+      • `total_units`, `total_orders`, `avg_per_order`
+      • `avg_per_day`, `avg_per_month` — YTD averages (days elapsed +
+        months elapsed calculated from `now`)
+      • `monthly[]`             — units + orders per month (Jan → current
+        month, zero-filled) for the bar chart
+      • `top_products[]`        — top 5 YTD by units with image / title /
+        units / revenue
+      • `by_category[]`         — units per category (sorted desc) for
+        the horizontal-bar visualisation
+      • `best_month`            — highest-units month so far (or null
+        when no sales)
+      • `last_year_comparison`  — same-period-last-year `{units, orders,
+        delta_pct}` or null when no prior-year sales
+    """
+    now = datetime.now(timezone.utc)
+    year = now.year
+    year_start = datetime(year, 1, 1, tzinfo=timezone.utc).isoformat()
+    now_iso = now.isoformat()
+
+    # --- Monthly units series --------------------------------------------
+    monthly_pipeline = [
+        {"$match": {
+            "status": {"$ne": "cancelled"},
+            "created_at": {"$gte": year_start, "$lte": now_iso},
+        }},
+        {"$addFields": {"month": {"$substr": ["$created_at", 0, 7]}}},
+        {"$group": {
+            "_id": "$month",
+            "units":  {"$sum": "$quantity"},
+            "orders": {"$sum": 1},
+        }},
+        {"$sort": {"_id": 1}},
+    ]
+    raw = await db.orders.aggregate(monthly_pipeline).to_list(24)
+    monthly_map = {r["_id"]: r for r in raw}
+    month_labels = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ]
+    monthly = []
+    for m in range(1, now.month + 1):
+        key = f"{year:04d}-{m:02d}"
+        row = monthly_map.get(key, {"units": 0, "orders": 0})
+        monthly.append({
+            "month": month_labels[m - 1],
+            "month_key": key,
+            "units": row.get("units", 0) or 0,
+            "orders": row.get("orders", 0) or 0,
+        })
+
+    # --- Best month by units ---------------------------------------------
+    best_month = None
+    with_sales = [m for m in monthly if m["units"] > 0]
+    if with_sales:
+        b = max(with_sales, key=lambda m: m["units"])
+        best_month = {"month": b["month"], "month_key": b["month_key"],
+                      "units": b["units"], "orders": b["orders"]}
+
+    # --- Top 5 products by units ------------------------------------------
+    top_pipeline = [
+        {"$match": {"status": {"$ne": "cancelled"}, "created_at": {"$gte": year_start}}},
+        {"$group": {
+            "_id": "$product_id",
+            "title":   {"$first": "$product_title"},
+            "units":   {"$sum": "$quantity"},
+            "revenue": {"$sum": "$total"},
+        }},
+        {"$match": {"units": {"$gt": 0}}},
+        {"$sort": {"units": -1}},
+        {"$limit": 5},
+        {"$lookup": {"from": "products", "localField": "_id",
+                     "foreignField": "id", "as": "p"}},
+    ]
+    top_products = []
+    for t in await db.orders.aggregate(top_pipeline).to_list(5):
+        prod = (t.get("p") or [{}])[0]
+        images = prod.get("images") or []
+        top_products.append({
+            "product_id": t["_id"],
+            "title": t.get("title") or prod.get("title") or "Untitled",
+            "image": images[0] if images else None,
+            "units":   t.get("units", 0),
+            "revenue": round(t.get("revenue", 0) or 0, 2),
+        })
+
+    # --- Units by category -----------------------------------------------
+    cat_pipeline = [
+        {"$lookup": {"from": "products", "localField": "product_id",
+                     "foreignField": "id", "as": "p"}},
+        {"$unwind": "$p"},
+        {"$match": {"status": {"$ne": "cancelled"}, "created_at": {"$gte": year_start}}},
+        {"$group": {
+            "_id": "$p.category",
+            "units":   {"$sum": "$quantity"},
+            "revenue": {"$sum": "$total"},
+            "orders":  {"$sum": 1},
+        }},
+        {"$match": {"units": {"$gt": 0}}},
+        {"$sort": {"units": -1}},
+    ]
+    by_category = []
+    for c in await db.orders.aggregate(cat_pipeline).to_list(50):
+        by_category.append({
+            "category": c["_id"] or "other",
+            "units":   c.get("units", 0),
+            "orders":  c.get("orders", 0),
+            "revenue": round(c.get("revenue", 0) or 0, 2),
+        })
+
+    # --- YTD totals + per-day / per-month averages -----------------------
+    ytd_totals = await db.orders.aggregate([
+        {"$match": {"status": {"$ne": "cancelled"}, "created_at": {"$gte": year_start}}},
+        {"$group": {"_id": None,
+                    "units":  {"$sum": "$quantity"},
+                    "orders": {"$sum": 1}}},
+    ]).to_list(1)
+    total_units = ytd_totals[0].get("units", 0) if ytd_totals else 0
+    total_orders = ytd_totals[0].get("orders", 0) if ytd_totals else 0
+    avg_per_order = round(total_units / total_orders, 2) if total_orders else 0.0
+    # Days elapsed = full days since Jan 1 UTC (min 1 so we never divide
+    # by zero on Jan 1 itself). Months elapsed = current month number (Jan=1).
+    year_start_dt = datetime(year, 1, 1, tzinfo=timezone.utc)
+    days_elapsed = max(1, (now - year_start_dt).days + 1)
+    months_elapsed = max(1, now.month)
+    avg_per_day = round(total_units / days_elapsed, 2) if total_units else 0.0
+    avg_per_month = round(total_units / months_elapsed, 2) if total_units else 0.0
+
+    # --- Same-period last year comparison --------------------------------
+    ly_start = datetime(year - 1, 1, 1, tzinfo=timezone.utc).isoformat()
+    ly_now = datetime(year - 1, now.month, now.day,
+                      now.hour, now.minute, now.second,
+                      tzinfo=timezone.utc).isoformat()
+    ly_totals = await db.orders.aggregate([
+        {"$match": {
+            "status": {"$ne": "cancelled"},
+            "created_at": {"$gte": ly_start, "$lte": ly_now},
+        }},
+        {"$group": {"_id": None,
+                    "units":  {"$sum": "$quantity"},
+                    "orders": {"$sum": 1}}},
+    ]).to_list(1)
+    last_year_comparison = None
+    if ly_totals and (ly_totals[0].get("units") or 0) > 0:
+        ly_units = ly_totals[0].get("units", 0) or 0
+        ly_orders = ly_totals[0].get("orders", 0) or 0
+        delta_pct = round(((total_units - ly_units) / ly_units) * 100, 1) if ly_units > 0 else 0.0
+        last_year_comparison = {
+            "units": ly_units,
+            "orders": ly_orders,
+            "delta_pct": delta_pct,
+        }
+
+    return {
+        "year": year,
+        "as_of": now_iso,
+        "total_units": total_units,
+        "total_orders": total_orders,
+        "avg_per_order": avg_per_order,
+        "avg_per_day": avg_per_day,
+        "avg_per_month": avg_per_month,
+        "monthly": monthly,
+        "top_products": top_products,
+        "by_category": by_category,
+        "best_month": best_month,
+        "last_year_comparison": last_year_comparison,
+    }
+
+
 @api_router.get("/analytics/report")
 async def analytics_report():
     """Deeper reporting: top sellers, margin trend, category perf, best margin products."""

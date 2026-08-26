@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, CheckCircle2, DollarSign, Loader2, Percent, ShoppingBag, Sparkles, Trophy, TrendingUp, X } from "lucide-react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, CheckCircle2, DollarSign, Layers, Loader2, Percent, ShoppingBag, Sparkles, Trophy, TrendingDown, TrendingUp, X } from "lucide-react";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KpiCard, StatusChip } from "../components/atoms";
 import { API, proxyImg, imgThumb } from "../lib/api";
 import { fmtDate, fmtDay, moneyCents } from "../lib/format";
@@ -15,6 +15,8 @@ export function Dashboard({ navigateTo }) {
   const [loading, setLoading] = useState(true);
   // Revenue-YTD deep-dive modal
   const [revenueModalOpen, setRevenueModalOpen] = useState(false);
+  // Profit-YTD deep-dive modal
+  const [profitModalOpen, setProfitModalOpen] = useState(false);
   // Widget-visibility preferences from Settings › Dashboard Layout.
   // Listen for changes so toggling in Settings live-updates the layout.
   const [layout, setLayout] = useState(loadDashboardLayout());
@@ -42,7 +44,7 @@ export function Dashboard({ navigateTo }) {
 
   const kpis = [
     { label: "Revenue (YTD)",  value: moneyCents(data.ytd.revenue), sub: `${data.ytd.orders} orders`, icon: DollarSign, tone: "primary", testId: "kpi-revenue-ytd", onExpand: () => setRevenueModalOpen(true) },
-    { label: "Profit (YTD)",   value: moneyCents(data.ytd.profit),  sub: `${data.ytd.revenue ? ((data.ytd.profit / data.ytd.revenue) * 100).toFixed(1) : 0}% margin`, icon: TrendingUp, tone: "success" },
+    { label: "Profit (YTD)",   value: moneyCents(data.ytd.profit),  sub: `${data.ytd.revenue ? ((data.ytd.profit / data.ytd.revenue) * 100).toFixed(1) : 0}% margin`, icon: TrendingUp, tone: "success", testId: "kpi-profit-ytd", onExpand: () => setProfitModalOpen(true) },
     { label: "Units sold",     value: (data.ytd.units || 0).toLocaleString("en-AU"), sub: "this year", icon: ShoppingBag, tone: "violet" },
     { label: "Avg order value",value: data.ytd.orders ? moneyCents(data.ytd.revenue / data.ytd.orders) : "—", sub: "YTD", icon: Percent, tone: "pink" },
   ];
@@ -216,6 +218,10 @@ export function Dashboard({ navigateTo }) {
 
       {revenueModalOpen && (
         <RevenueDetailModal onClose={() => setRevenueModalOpen(false)}/>
+      )}
+
+      {profitModalOpen && (
+        <ProfitDetailModal onClose={() => setProfitModalOpen(false)}/>
       )}
     </div>
   );
@@ -574,6 +580,291 @@ function RevenueStatusBreakdown({ rows }) {
                 </div>
                 <div className="shrink-0 font-mono text-sm text-slate-700 tabular-nums">
                   {r.count.toLocaleString("en-AU")} <span className="text-slate-400 text-xs">({pct}%)</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+/* --------------------------- Profit detail modal ---------------------------
+ *
+ * Opens when the admin clicks the expand arrow on the Profit YTD KPI card.
+ * Shows monthly profit bars + margin-% line chart, top-5 highest-margin
+ * products with thumbnails, average margin per category, a side-by-side
+ * revenue / cost / profit summary panel, and the best + worst margin
+ * months this year.
+ *
+ * Backend endpoint: `GET /api/analytics/profit-detail` — one round-trip.
+ * ------------------------------------------------------------------------- */
+
+export function ProfitDetailModal({ onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    axios.get(`${API}/analytics/profit-detail`)
+      .then(r => { if (!cancelled) setData(r.data); })
+      .catch(e => { if (!cancelled) setErr(e?.response?.data?.detail || e.message); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm overflow-y-auto"
+      onClick={onClose}
+      data-testid="profit-detail-modal"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card max-w-5xl mx-auto my-4 sm:my-10 p-5 sm:p-8"
+        role="dialog"
+        aria-label="Profit detail"
+      >
+        <div className="flex items-start justify-between gap-3 mb-6 flex-wrap">
+          <div>
+            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-400 mb-1">
+              Profit Detail · {data?.year || new Date().getFullYear()}
+            </div>
+            <div className="font-display font-bold text-2xl sm:text-3xl tracking-tight">
+              {data ? moneyCents(data.totals.profit) : "…"}
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">
+              {data
+                ? <>
+                    <span className="font-mono text-emerald-600 font-bold">{data.totals.margin_pct}%</span> margin
+                    · {moneyCents(data.totals.revenue)} revenue on {moneyCents(data.totals.cost)} cost
+                  </>
+                : "loading…"}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="btn btn-ghost !p-2"
+            aria-label="Close"
+            data-testid="profit-detail-close"
+          >
+            <X size={16}/>
+          </button>
+        </div>
+
+        {err && (
+          <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm">
+            Failed to load profit detail: {err}
+          </div>
+        )}
+
+        {!data && !err && (
+          <div className="py-20 text-center text-slate-500 flex items-center justify-center gap-2">
+            <Loader2 className="animate-spin" size={16}/> loading profit detail…
+          </div>
+        )}
+
+        {data && (
+          <div className="grid gap-6">
+            <ProfitTotalsPanel totals={data.totals}/>
+            <ProfitMonthHighlights best={data.best_month} worst={data.worst_month}/>
+            <ProfitMonthlyBars monthly={data.monthly} year={data.year}/>
+            <ProfitMarginTrend monthly={data.monthly} year={data.year}/>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <ProfitTopProducts products={data.top_products}/>
+              <ProfitCategoryMargins rows={data.category_margins}/>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end">
+          <button onClick={onClose} className="btn btn-primary" data-testid="profit-detail-close-footer">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function ProfitTotalsPanel({ totals }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="profit-totals-panel">
+      <div className="p-4 rounded-lg border hairline bg-slate-50/60">
+        <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1">Revenue YTD</div>
+        <div className="font-display font-bold text-lg">{moneyCents(totals.revenue)}</div>
+      </div>
+      <div className="p-4 rounded-lg border border-amber-200 bg-amber-50/60">
+        <div className="text-[10px] font-mono uppercase tracking-widest text-amber-800 mb-1">Cost YTD</div>
+        <div className="font-display font-bold text-lg text-amber-900">{moneyCents(totals.cost)}</div>
+      </div>
+      <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50/60">
+        <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-800 mb-1 flex items-center gap-1"><TrendingUp size={11}/> Profit YTD</div>
+        <div className="font-display font-bold text-lg text-emerald-700">{moneyCents(totals.profit)}</div>
+        <div className="text-xs text-emerald-700 font-mono mt-0.5">{totals.margin_pct}% margin</div>
+      </div>
+    </div>
+  );
+}
+
+
+function ProfitMonthHighlights({ best, worst }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" data-testid="profit-month-highlights">
+      <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50/60">
+        <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-emerald-700 mb-1">
+          <Trophy size={11}/> Best margin month
+        </div>
+        {best ? (
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <div className="font-display font-bold text-lg">{best.month}</div>
+            <div className="font-mono text-emerald-700 font-bold">{best.margin_pct}%</div>
+            <div className="text-xs text-slate-500 font-mono">{moneyCents(best.profit)} profit</div>
+          </div>
+        ) : (
+          <div className="text-sm text-slate-400 italic">No sales yet</div>
+        )}
+      </div>
+      <div className="p-4 rounded-lg border border-amber-200 bg-amber-50/60">
+        <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-amber-800 mb-1">
+          <TrendingDown size={11}/> Worst margin month
+        </div>
+        {worst ? (
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <div className="font-display font-bold text-lg">{worst.month}</div>
+            <div className="font-mono text-amber-800 font-bold">{worst.margin_pct}%</div>
+            <div className="text-xs text-slate-500 font-mono">{moneyCents(worst.profit)} profit</div>
+          </div>
+        ) : (
+          <div className="text-sm text-slate-400 italic">No sales yet</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function ProfitMonthlyBars({ monthly, year }) {
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="profit-monthly-bars">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="font-display font-bold">Monthly profit · {year}</div>
+          <div className="text-xs text-slate-500">Absolute dollar profit per month</div>
+        </div>
+        <span className="chip chip-success text-[10px]">AUD</span>
+      </div>
+      <div className="h-56 sm:h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={monthly} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid stroke="#EEF0F5" strokeDasharray="3 3" vertical={false}/>
+            <XAxis dataKey="month" tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false}/>
+            <YAxis tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false} width={44}/>
+            <Tooltip
+              contentStyle={{ background: "#fff", border: "1px solid #EAEAF0", borderRadius: 10, fontSize: 12 }}
+              formatter={(v) => [moneyCents(v), "Profit"]}
+              labelFormatter={(l) => `${l} ${year}`}
+            />
+            <Bar dataKey="profit" fill="#10B981" radius={[6, 6, 0, 0]}/>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+
+function ProfitMarginTrend({ monthly, year }) {
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="profit-margin-trend">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="font-display font-bold">Margin % trend · {year}</div>
+          <div className="text-xs text-slate-500">Month-over-month profit-to-revenue ratio</div>
+        </div>
+        <span className="chip chip-primary text-[10px]">%</span>
+      </div>
+      <div className="h-56 sm:h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={monthly} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid stroke="#EEF0F5" strokeDasharray="3 3" vertical={false}/>
+            <XAxis dataKey="month" tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false}/>
+            <YAxis tickFormatter={(v) => `${v}%`} tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false} width={44} domain={[0, "auto"]}/>
+            <Tooltip
+              contentStyle={{ background: "#fff", border: "1px solid #EAEAF0", borderRadius: 10, fontSize: 12 }}
+              formatter={(v) => [`${v}%`, "Margin"]}
+              labelFormatter={(l) => `${l} ${year}`}
+            />
+            <Line type="monotone" dataKey="margin_pct" stroke="#4F46E5" strokeWidth={2.5} dot={{ r: 4, fill: "#4F46E5" }} activeDot={{ r: 6 }}/>
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+
+function ProfitTopProducts({ products }) {
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="profit-top-products">
+      <div className="font-display font-bold mb-3">Top 5 by margin · YTD</div>
+      {products.length === 0 ? (
+        <div className="text-sm text-slate-400 italic py-8 text-center">No sales yet.</div>
+      ) : (
+        <div className="grid gap-2">
+          {products.map((p, i) => (
+            <div key={p.product_id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50" data-testid={`profit-top-product-${i}`}>
+              <div className="w-6 h-6 grid place-items-center rounded-md font-display font-bold text-white text-xs shrink-0" style={{ background: `linear-gradient(135deg, #10B981, #4F46E5)`, opacity: 1 - i * 0.14 }}>{i + 1}</div>
+              <div className="w-11 h-11 rounded-md bg-slate-100 border hairline overflow-hidden shrink-0">
+                {p.image ? (
+                  <img src={proxyImg(imgThumb(p.image))} alt="" className="w-full h-full object-cover" loading="lazy"/>
+                ) : (
+                  <div className="w-full h-full grid place-items-center text-[9px] text-slate-400 font-mono">no img</div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{p.title}</div>
+                <div className="text-xs text-slate-500">{p.units} sold · {moneyCents(p.profit)} profit</div>
+              </div>
+              <div className="font-mono text-sm font-bold text-emerald-600 shrink-0">{p.margin_pct}%</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function ProfitCategoryMargins({ rows }) {
+  const max = rows.reduce((m, r) => Math.max(m, r.margin_pct), 0) || 1;
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="profit-category-margins">
+      <div className="font-display font-bold mb-3 flex items-center gap-2"><Layers size={14} className="text-slate-500"/> Margin by category · YTD</div>
+      {rows.length === 0 ? (
+        <div className="text-sm text-slate-400 italic py-8 text-center">No sales yet.</div>
+      ) : (
+        <div className="grid gap-2 max-h-72 overflow-y-auto pr-1">
+          {rows.map((r) => {
+            const pct = Math.round((r.margin_pct / max) * 100);
+            return (
+              <div key={r.category} className="grid grid-cols-[minmax(90px,140px)_1fr_auto] items-center gap-3" data-testid={`profit-category-${r.category}`}>
+                <div className="text-xs font-medium capitalize truncate" title={r.category}>{r.category}</div>
+                <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-indigo-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <div className="font-mono text-xs text-slate-700 tabular-nums w-14 text-right">
+                  {r.margin_pct}%
                 </div>
               </div>
             );

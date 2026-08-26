@@ -2630,6 +2630,173 @@ async def analytics_revenue_detail():
     }
 
 
+@api_router.get("/analytics/profit-detail")
+async def analytics_profit_detail():
+    """Powers the Profit YTD expand modal on the dashboard.
+
+    Returns everything the profit deep-dive needs in a single round-trip:
+      • `monthly[]`            — revenue + cost + profit + margin_pct per
+        month (Jan → current month, zero-filled) for the bar chart and
+        the line chart.
+      • `top_products[]`       — top 5 YTD by margin_pct with product
+        image, title, revenue, profit and margin_pct. Requires at least
+        1 unit sold + revenue > 0 so we don't surface a "100% margin on
+        $0 sold" row.
+      • `category_margins[]`   — avg margin per category YTD (revenue /
+        profit rolled up + margin_pct computed server-side).
+      • `totals`               — {revenue, cost, profit, margin_pct} for
+        the side-by-side summary panel.
+      • `best_month` / `worst_month` — highest / lowest margin_pct month
+        so far this year (only among months that actually had sales).
+        `null` when there are no sales yet.
+    """
+    now = datetime.now(timezone.utc)
+    year = now.year
+    year_start = datetime(year, 1, 1, tzinfo=timezone.utc).isoformat()
+    now_iso = now.isoformat()
+
+    # --- Monthly revenue / cost / profit / margin ------------------------
+    monthly_pipeline = [
+        {"$match": {
+            "status": {"$ne": "cancelled"},
+            "created_at": {"$gte": year_start, "$lte": now_iso},
+        }},
+        {"$addFields": {"month": {"$substr": ["$created_at", 0, 7]}}},
+        {"$group": {
+            "_id": "$month",
+            "revenue": {"$sum": "$total"},
+            "cost":    {"$sum": "$cost_total"},
+            "profit":  {"$sum": "$profit"},
+            "orders":  {"$sum": 1},
+        }},
+        {"$sort": {"_id": 1}},
+    ]
+    raw = await db.orders.aggregate(monthly_pipeline).to_list(24)
+    monthly_map = {r["_id"]: r for r in raw}
+    month_labels = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ]
+    monthly = []
+    for m in range(1, now.month + 1):
+        key = f"{year:04d}-{m:02d}"
+        row = monthly_map.get(key, {"revenue": 0, "cost": 0, "profit": 0, "orders": 0})
+        rev = row.get("revenue", 0) or 0
+        prof = row.get("profit", 0) or 0
+        margin_pct = round((prof / rev) * 100, 2) if rev > 0 else 0.0
+        monthly.append({
+            "month": month_labels[m - 1],
+            "month_key": key,
+            "revenue": round(rev, 2),
+            "cost":    round(row.get("cost", 0) or 0, 2),
+            "profit":  round(prof, 2),
+            "orders":  row.get("orders", 0),
+            "margin_pct": margin_pct,
+        })
+
+    # --- Best / worst margin month (only months with sales) --------------
+    with_sales = [m for m in monthly if m["orders"] > 0]
+    best_month = worst_month = None
+    if with_sales:
+        best = max(with_sales, key=lambda m: m["margin_pct"])
+        worst = min(with_sales, key=lambda m: m["margin_pct"])
+        best_month = {"month": best["month"], "month_key": best["month_key"],
+                      "margin_pct": best["margin_pct"], "profit": best["profit"]}
+        worst_month = {"month": worst["month"], "month_key": worst["month_key"],
+                       "margin_pct": worst["margin_pct"], "profit": worst["profit"]}
+
+    # --- Top 5 products by margin_pct YTD --------------------------------
+    top_pipeline = [
+        {"$match": {"status": {"$ne": "cancelled"}, "created_at": {"$gte": year_start}}},
+        {"$group": {
+            "_id": "$product_id",
+            "title":   {"$first": "$product_title"},
+            "revenue": {"$sum": "$total"},
+            "profit":  {"$sum": "$profit"},
+            "units":   {"$sum": "$quantity"},
+        }},
+        # Require real sales so a $0 revenue row doesn't slip in.
+        {"$match": {"revenue": {"$gt": 0}, "units": {"$gt": 0}}},
+        {"$addFields": {"margin_pct": {"$multiply": [{"$divide": ["$profit", "$revenue"]}, 100]}}},
+        {"$sort": {"margin_pct": -1}},
+        {"$limit": 5},
+        {"$lookup": {"from": "products", "localField": "_id",
+                     "foreignField": "id", "as": "p"}},
+    ]
+    top_products = []
+    for t in await db.orders.aggregate(top_pipeline).to_list(5):
+        prod = (t.get("p") or [{}])[0]
+        images = prod.get("images") or []
+        top_products.append({
+            "product_id": t["_id"],
+            "title": t.get("title") or prod.get("title") or "Untitled",
+            "image": images[0] if images else None,
+            "revenue": round(t.get("revenue", 0) or 0, 2),
+            "profit":  round(t.get("profit", 0) or 0, 2),
+            "units":   t.get("units", 0),
+            "margin_pct": round(t.get("margin_pct", 0) or 0, 2),
+        })
+
+    # --- Category margins YTD --------------------------------------------
+    cat_pipeline = [
+        {"$lookup": {"from": "products", "localField": "product_id",
+                     "foreignField": "id", "as": "p"}},
+        {"$unwind": "$p"},
+        {"$match": {"status": {"$ne": "cancelled"}, "created_at": {"$gte": year_start}}},
+        {"$group": {
+            "_id": "$p.category",
+            "revenue": {"$sum": "$total"},
+            "profit":  {"$sum": "$profit"},
+            "units":   {"$sum": "$quantity"},
+        }},
+        {"$match": {"revenue": {"$gt": 0}}},
+        {"$sort": {"profit": -1}},
+    ]
+    category_margins = []
+    for c in await db.orders.aggregate(cat_pipeline).to_list(50):
+        rev = c.get("revenue", 0) or 0
+        prof = c.get("profit", 0) or 0
+        category_margins.append({
+            "category": c["_id"] or "other",
+            "revenue": round(rev, 2),
+            "profit":  round(prof, 2),
+            "units":   c.get("units", 0),
+            "margin_pct": round((prof / rev) * 100, 2) if rev > 0 else 0.0,
+        })
+
+    # --- Totals for side-by-side summary panel ---------------------------
+    ytd_totals = await db.orders.aggregate([
+        {"$match": {"status": {"$ne": "cancelled"}, "created_at": {"$gte": year_start}}},
+        {"$group": {"_id": None,
+                    "revenue": {"$sum": "$total"},
+                    "cost":    {"$sum": "$cost_total"},
+                    "profit":  {"$sum": "$profit"}}},
+    ]).to_list(1)
+    if ytd_totals:
+        totals = {
+            "revenue": round(ytd_totals[0].get("revenue", 0) or 0, 2),
+            "cost":    round(ytd_totals[0].get("cost", 0) or 0, 2),
+            "profit":  round(ytd_totals[0].get("profit", 0) or 0, 2),
+        }
+    else:
+        totals = {"revenue": 0.0, "cost": 0.0, "profit": 0.0}
+    totals["margin_pct"] = (
+        round((totals["profit"] / totals["revenue"]) * 100, 2)
+        if totals["revenue"] > 0 else 0.0
+    )
+
+    return {
+        "year": year,
+        "as_of": now_iso,
+        "totals": totals,
+        "monthly": monthly,
+        "top_products": top_products,
+        "category_margins": category_margins,
+        "best_month": best_month,
+        "worst_month": worst_month,
+    }
+
+
 @api_router.get("/analytics/report")
 async def analytics_report():
     """Deeper reporting: top sellers, margin trend, category perf, best margin products."""

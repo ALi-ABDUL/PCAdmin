@@ -1092,3 +1092,50 @@ Notification Bell deep-links) — zero regressions detected.
   `avg_order_value` math, best_month = max(monthly), cancelled
   exclusion.
 
+
+
+## Feb 25, 2026 — Profit YTD deep-dive modal
+- **Backend**: new `GET /api/analytics/profit-detail` returns everything
+  the Profit expand modal needs in one round-trip:
+  - `totals` — `{revenue, cost, profit, margin_pct}` for the side-by-side
+    summary panel
+  - `monthly[]` — revenue + cost + profit + margin_pct + orders per
+    month (Jan → current month, zero-filled) — drives both the bar chart
+    and the margin-trend line chart
+  - `top_products[]` — up to 5 YTD by margin_pct with image/title/units/
+    revenue/profit; requires units > 0 AND revenue > 0 so a bogus "100%
+    margin on $0 sold" row can't sneak in
+  - `category_margins[]` — avg margin per category (only categories with
+    revenue > 0), sorted by profit desc
+  - `best_month` / `worst_month` — pulled from months with orders > 0 so
+    zero-sale months don't inflate the "worst" bucket
+  - Cancelled orders excluded from every non-status aggregation.
+- **Frontend — ProfitDetailModal** (`pages/Dashboard.jsx`):
+  - Wired to the Profit YTD KpiCard via `onExpand` (same UX pattern as
+    the Revenue modal). `data-testid="kpi-profit-ytd-expand"` for the
+    trigger and `profit-detail-modal` for the dialog.
+  - **ProfitTotalsPanel** — three side-by-side cards (Revenue / Cost /
+    Profit + margin %) with slate / amber / emerald tones so the eye
+    sorts them without reading.
+  - **ProfitMonthHighlights** — Best margin month (emerald trophy) +
+    Worst margin month (amber trending-down) chip cards.
+  - **ProfitMonthlyBars** — Recharts BarChart with emerald bars ($k tick
+    formatter).
+  - **ProfitMarginTrend** — Recharts LineChart of margin_pct with
+    indigo stroke + dots + custom tooltip.
+  - **ProfitTopProducts** — top-5 list with numbered rank chip, 44px
+    product image via `proxyImg(imgThumb(image))`, units + profit
+    subtitle, right-aligned margin % badge in emerald.
+  - **ProfitCategoryMargins** — horizontal-bar visualisation of margin
+    per category (max-normalised width, capped at 288px scroll
+    container) with a Layers icon header.
+  - Fully responsive: single-column stack on mobile, 2-column top
+    products + category split from `lg:` and up. `Escape` +
+    click-outside + explicit Close button + Close footer button.
+- **Tests**: `/app/backend/tests/test_profit_detail.py` — 7 pytest cases
+  (all pass) covering shape, totals.margin_pct math, monthly zero-fill
+  + per-month margin math, best/worst month selection from months with
+  sales, top-5 cap + revenue>0 requirement + margin desc sort,
+  category_margins revenue>0 filter + margin math, and
+  monthly-sum-equals-totals verification (cancelled excluded).
+

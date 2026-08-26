@@ -1277,6 +1277,32 @@ Notification Bell deep-links) — zero regressions detected.
 - **Tests** — `test_countdown_sale.py` gained 3 more cases (16 → 13
   total, one collapsed): notification is persisted on expiry with the
   right title / product_id / data payload; `countdown_expired` is in
+
+
+## Feb 25, 2026 — Product Countdown → Active + Expired sub-tabs
+- `CountdownProducts.jsx` split into a top-level `CountdownProducts`
+  shell that renders two tabs and a shared `CountdownList` child.
+  Uses simple local state (no URL param) — the sidebar link deep-links
+  to Active by default.
+- **Active tab** — passes `countdown_status=active` to the backend list
+  filter. Each product card gets a "N days left" rose pill (via
+  `extraActions`) plus a `Cancel` button that calls
+  `/products/{id}/countdown/stop`. Live H:M:S chip inside the card
+  already comes from the shared `<CountdownChip/>` in ProductGrid.
+- **Expired tab** — same `countdown_status=expired` behaviour as
+  before: Restore + Delete per row, empty state copy updated to match.
+- **Hint copy** in `Products.jsx` `hints.countdown` updated so the
+  sub-hero reads "Products running a limited-time sale plus expired
+  ones waiting to be restored or deleted." — the old copy only
+  mentioned expired products.
+- **`usePagePref`** — one per tab (`products-countdown-active`,
+  `products-countdown-expired`) so the admin's page-size preference
+  is remembered independently.
+- **Verified live**: Playwright screenshot on the deployed preview
+  shows both tabs render, the "10 days left" pill appears on the
+  running product, and switching to Expired shows the empty state
+  with "0 expired".
+
   `PUSH_CRITICAL_TYPES`; running the sweep twice is idempotent (only
   one notification exists after two passes). Live smoke: forced expiry
   through `_expire_countdowns()` and read back the notification —

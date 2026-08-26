@@ -32,7 +32,7 @@ export function ProductsModule({ section, setSection, deepLink, clearDeepLink, o
   const Icon = meta.icon;
   const hints = {
     all: "Every product in your store.",
-    countdown: "Products whose countdown sale expired. Restore or delete them from here.",
+    countdown: "Products running a limited-time sale plus expired ones waiting to be restored or deleted.",
     "low-stock": "Items with 1–3 units remaining. Restock soon.",
     "out-of-stock": "Items at 0 or below. Hidden from storefront.",
     archived: "Archived products are hidden from the main list. Restore them anytime.",

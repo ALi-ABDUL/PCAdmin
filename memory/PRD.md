@@ -1139,3 +1139,23 @@ Notification Bell deep-links) — zero regressions detected.
   category_margins revenue>0 filter + margin math, and
   monthly-sum-equals-totals verification (cancelled excluded).
 
+
+
+## Feb 25, 2026 — Fix: KPI expand arrows not clickable
+- **Bug**: The KPI card's decorative gradient blur circle
+  (`<div className="absolute -right-6 -top-6 w-24 h-24 rounded-full opacity-20 blur-2xl bg-gradient-to-br">`)
+  was sitting on top of the top-right corner of every card and, because
+  it lacked `pointer-events-none`, was intercepting clicks meant for the
+  new expand `<button>`. Result: users saw the arrow, hovered it, but
+  couldn't actually click through — both the Revenue and Profit modals
+  never opened.
+- **Fix**: Added `pointer-events-none` to the decoration in
+  `components/atoms.jsx` (one-word CSS change). Because the blur is a
+  strictly decorative visual, blocking pointer events on it has no other
+  side effects.
+- **Verified**: Playwright smoke-test on the live preview URL — login →
+  click Revenue expand → modal renders → close → click Profit expand →
+  modal renders. Both `[data-testid=revenue-detail-modal]` and
+  `[data-testid=profit-detail-modal]` visible with full data (bar chart,
+  top products, status/category breakdowns, best/worst month cards).
+

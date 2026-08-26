@@ -42,7 +42,7 @@ export function KpiCard({ label, value, sub, icon: Icon, tone, onExpand, testId 
   };
   return (
     <div className="card p-5 relative overflow-hidden" data-testid={testId}>
-      <div className={`absolute -right-6 -top-6 w-24 h-24 rounded-full opacity-20 blur-2xl bg-gradient-to-br ${toneMap[tone]}`}/>
+      <div className={`absolute -right-6 -top-6 w-24 h-24 rounded-full opacity-20 blur-2xl bg-gradient-to-br pointer-events-none ${toneMap[tone]}`}/>
       <div className="flex items-center justify-between">
         <div className={`w-10 h-10 rounded-xl grid place-items-center text-white bg-gradient-to-br ${toneMap[tone]}`}><Icon size={18}/></div>
         {onExpand ? (

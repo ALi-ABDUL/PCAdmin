@@ -1196,3 +1196,60 @@ Notification Bell deep-links) — zero regressions detected.
   top-5 cap + units > 0 + sort, by_category filters + sort, monthly.units
   sum equals total_units (cancelled excluded).
 
+
+
+## Feb 25, 2026 — Countdown Sale (limited-time product timer)
+- **Model** (`models.py` `ProductCreate`): six new fields —
+  `countdown_enabled: bool`, `countdown_sale_price`,
+  `countdown_duration_days`, `countdown_started_at`,
+  `countdown_ends_at`, `countdown_expired: bool`. Backwards-compatible
+  because everything defaults to False/None.
+- **`CountdownStart`** — POST body model with `duration_days: int` in
+  `[1, 365]` and `sale_price: float > 0`, validated by pydantic.
+- **Endpoints**
+  - `POST /api/products/{pid}/countdown/start` — sets every field,
+    computes `ends_at = now + days`, and flips `active=True` (so a
+    previously-expired product can be re-run immediately).
+  - `POST /api/products/{pid}/countdown/stop` — admin cancel: clears
+    every field, keeps `active=True`.
+  - `POST /api/products/{pid}/countdown/restore` — moves an expired
+    product back to the main list: clears every field + sets
+    `active=True`.
+  - `GET /api/products?countdown_status=(active|expired|any)` — new
+    filter param. Default hides expired products from the main list.
+- **Auto-expire sweep** — `_countdown_sweep_loop()` runs every 60 s
+  alongside the scraper scheduler. Any product whose `countdown_ends_at
+  <= now` gets `countdown_expired=True` + `active=False` set
+  atomically via `update_many`.
+- **Frontend — `CountdownSaleCard`** (in `ProductDetail.jsx`) — three
+  render states:
+  - **Off** — Duration + Sale price inputs with live discount %
+    preview and a "Start countdown" button. Sale price defaults to
+    20 % below current price for a nudge.
+  - **Running** — Big D · H · M · S live ticker (updates every 1 s
+    via `setInterval`) inside a rose-gradient card. Shows original
+    price (strikethrough) + sale price + discount % chip + "Cancel
+    countdown" button.
+  - **Expired** — Red banner with the end date and a "Restore
+    product" button.
+- **Frontend — `<CountdownChip/>`** in `ProductGrid.jsx` — small
+  rose chip embedded in each product card while its countdown is
+  running. Shows compact `Dd HHh MMm` (or `HH:MM:SS` when < 1 day
+  remains). Product card now shows sale price + strikethrough original
+  when running. Expired products get a small "Countdown expired" chip.
+- **Frontend — Sidebar** — added `Product Countdown` entry to
+  `PRODUCT_NAV` (Catalog group, Timer icon).
+  `pages/CountdownProducts.jsx` fetches
+  `GET /api/products?countdown_status=expired` and reuses
+  `<ProductGrid/>`. Per-row `Restore` + `Delete` buttons plumb into
+  the countdown/restore + delete endpoints.
+- **Tests** — `/app/backend/tests/test_countdown_sale.py` — 10 pytest
+  cases (all pass): default fields, start sets all fields + end_date
+  math, input validation (422 on invalid days / price), stop clears +
+  keeps active, start on expired reactivates, restore clears + reactivates,
+  auto-expire sweep flags past-due products, `countdown_status=active`
+  filter, `countdown_status=expired` filter excludes running products,
+  default list hides expired products. Playwright smoke test on the
+  deployed preview confirmed the full flow — off → start → live timer
+  → cancel — plus the sidebar entry appears.
+

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Pencil, Plus, RefreshCw, Rocket, Save, Search, Star as StarIcon, Trash2, Truck, X } from "lucide-react";
+import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
@@ -377,6 +377,11 @@ export function ProductDetailPage({ productId, onBack }) {
       {/* Product specifications — grouped labelled fields scraped from eBay item specifics.
           Displayed as its own section so the description above stays a clean overview. */}
       <ProductSpecsCard product={p} onUpdated={(fresh) => setP(fresh)}/>
+
+      {/* Countdown Sale — optional limited-time sale with a live timer.
+          Starts on activation, auto-inactivates + archives to
+          Products › Countdown when the timer hits zero. */}
+      <CountdownSaleCard product={p} onUpdated={(fresh) => setP(fresh)}/>
 
       {/* SEO — meta title / description / URL slug / image alt text. Every
           field is auto-populated on scrape/create from the title +
@@ -1131,3 +1136,255 @@ export function ProductSpecsCard({ product, onUpdated }) {
     </div>
   );
 }
+
+
+/* ------------------------------ Countdown Sale card -----------------------
+ *
+ * Optional per-product limited-time sale.
+ *   • Off state → shows sale-price + duration inputs and a "Start
+ *     countdown" button.
+ *   • Running state → shows the live D · H · M · S timer, the sale
+ *     price, and a "Cancel countdown" button. Timer ticks every second
+ *     via a `setInterval` — no useMemo needed because the interval is
+ *     the source of truth.
+ *   • Expired state → shows a red "Expired" banner + "Restore product"
+ *     button. Restoring re-activates the product and clears every
+ *     countdown field.
+ *
+ * All state changes go through the backend endpoints
+ * `/api/products/{pid}/countdown/{start,stop,restore}` so a change from
+ * one browser propagates to every other admin session on the next
+ * fetch.
+ * ------------------------------------------------------------------------- */
+
+function CountdownSaleCard({ product, onUpdated }) {
+  const [busy, setBusy] = useState(false);
+  const [days, setDays] = useState(7);
+  const [salePrice, setSalePrice] = useState(
+    product.countdown_sale_price != null
+      ? product.countdown_sale_price
+      : Math.max(1, Math.round(((product.price || 0) * 0.8) * 100) / 100)
+  );
+  const [now, setNow] = useState(Date.now());
+
+  // Tick every second while a countdown is running so the D·H·M·S
+  // display updates. Skipped entirely when nothing is counting down.
+  const running = !!product.countdown_enabled && !product.countdown_expired && !!product.countdown_ends_at;
+  useEffect(() => {
+    if (!running) return undefined;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+
+  const start = async () => {
+    if (!salePrice || Number(salePrice) <= 0) {
+      toast.error("Enter a sale price greater than $0");
+      return;
+    }
+    if (!days || Number(days) < 1) {
+      toast.error("Duration must be at least 1 day");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/products/${product.id}/countdown/start`, {
+        duration_days: Number(days),
+        sale_price: Number(salePrice),
+      });
+      onUpdated(data);
+      toast.success(`Countdown started · ends in ${days} day${days === 1 ? "" : "s"}`);
+    } catch (e) {
+      toast.error("Failed to start countdown", { description: e?.response?.data?.detail || e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stop = async () => {
+    if (!window.confirm("Cancel the countdown? The sale price will be cleared.")) return;
+    setBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/products/${product.id}/countdown/stop`);
+      onUpdated(data);
+      toast.success("Countdown cancelled");
+    } catch (e) {
+      toast.error("Failed to cancel", { description: e?.response?.data?.detail || e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restore = async () => {
+    setBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/products/${product.id}/countdown/restore`);
+      onUpdated(data);
+      toast.success("Product restored to active");
+    } catch (e) {
+      toast.error("Failed to restore", { description: e?.response?.data?.detail || e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // --- Render branches ------------------------------------------------
+
+  const expired = !!product.countdown_expired;
+  const off = !product.countdown_enabled;
+
+  // Off state: setup form.
+  if (off && !expired) {
+    return (
+      <div className="card p-5" data-testid="countdown-sale-card">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div>
+            <div className="font-display font-bold flex items-center gap-2">
+              <Timer size={14} className="text-rose-500"/> Countdown Sale
+              <span className="chip chip-neutral !text-[10px]">Optional</span>
+            </div>
+            <div className="text-xs text-slate-500 mt-1 max-w-2xl">
+              Run a limited-time sale on this product. When the countdown hits zero the product is auto-inactivated and moved to Products › Countdown until you restore or delete it.
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+          <Field label="Duration (days)">
+            <input
+              type="number"
+              min={1} max={365}
+              value={days}
+              onChange={(e) => setDays(e.target.value)}
+              className="input w-full px-3 py-2"
+              data-testid="countdown-duration-input"
+            />
+          </Field>
+          <Field label="Sale price">
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={salePrice}
+                onChange={(e) => setSalePrice(e.target.value)}
+                className="input w-full pl-7 pr-3 py-2"
+                data-testid="countdown-sale-price-input"
+              />
+            </div>
+          </Field>
+        </div>
+        <div className="mt-4 flex items-center gap-3 flex-wrap">
+          <button
+            onClick={start}
+            disabled={busy}
+            className="btn btn-primary"
+            data-testid="countdown-start-btn"
+          >
+            <Play size={14}/> Start countdown
+          </button>
+          {product.price > 0 && salePrice > 0 && Number(salePrice) < product.price && (
+            <span className="text-xs text-slate-500 font-mono">
+              <span className="line-through">{moneyCents(product.price)}</span>
+              <span className="mx-1">→</span>
+              <span className="text-emerald-600 font-bold">{moneyCents(Number(salePrice))}</span>
+              <span className="ml-1 text-slate-400">({Math.round((1 - Number(salePrice) / product.price) * 100)}% off)</span>
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Expired state: banner + restore.
+  if (expired) {
+    return (
+      <div className="card p-5 border-2 border-red-200 bg-red-50/50" data-testid="countdown-sale-card">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="font-display font-bold flex items-center gap-2 text-red-800">
+              <Timer size={14}/> Countdown Sale · <span className="text-red-600">Expired</span>
+            </div>
+            <div className="text-xs text-red-700 mt-1 max-w-2xl">
+              This product's countdown ran out. It has been auto-inactivated and moved to <span className="font-medium">Products › Countdown</span>. Restore it to bring it back to the main Products list, or delete it entirely.
+            </div>
+            {product.countdown_ends_at && (
+              <div className="text-[11px] text-red-600/70 font-mono mt-1">
+                Ended {fmtDate(product.countdown_ends_at)}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={restore}
+            disabled={busy}
+            className="btn btn-primary"
+            data-testid="countdown-restore-btn"
+          >
+            <RotateCcw size={14}/> Restore product
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Running state: live timer.
+  const remaining = Math.max(0, new Date(product.countdown_ends_at).getTime() - now);
+  const d = Math.floor(remaining / 86_400_000);
+  const h = Math.floor((remaining % 86_400_000) / 3_600_000);
+  const m = Math.floor((remaining % 3_600_000) / 60_000);
+  const s = Math.floor((remaining % 60_000) / 1000);
+  const discount = product.price > 0
+    ? Math.round((1 - product.countdown_sale_price / product.price) * 100)
+    : 0;
+
+  return (
+    <div className="card p-5 border-2 border-rose-200 bg-gradient-to-br from-rose-50/70 to-pink-50/40" data-testid="countdown-sale-card">
+      <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+        <div>
+          <div className="font-display font-bold flex items-center gap-2 text-rose-800">
+            <Timer size={14} className="animate-pulse"/> Countdown Sale · <span className="text-rose-600">Running</span>
+          </div>
+          <div className="text-xs text-slate-500 mt-1">
+            Auto-inactivates when the timer hits zero · started {product.countdown_started_at ? fmtDate(product.countdown_started_at) : "just now"}
+          </div>
+        </div>
+        <button
+          onClick={stop}
+          disabled={busy}
+          className="btn btn-ghost text-rose-700 hover:bg-rose-100"
+          data-testid="countdown-stop-btn"
+        >
+          <Square size={13}/> Cancel countdown
+        </button>
+      </div>
+      <div className="grid grid-cols-4 gap-2 sm:gap-3" data-testid="countdown-timer">
+        {[
+          { label: "Days",    value: d },
+          { label: "Hours",   value: h },
+          { label: "Minutes", value: m },
+          { label: "Seconds", value: s },
+        ].map(cell => (
+          <div key={cell.label} className="p-3 sm:p-4 rounded-lg bg-white border border-rose-200 text-center">
+            <div className="font-display font-bold text-2xl sm:text-4xl tracking-tight tabular-nums text-rose-700">
+              {String(cell.value).padStart(2, "0")}
+            </div>
+            <div className="text-[10px] font-mono uppercase tracking-widest text-slate-400 mt-1">
+              {cell.label}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 p-3 rounded-lg bg-white/70 border hairline flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-2 text-sm">
+          <Tag size={13} className="text-emerald-600"/>
+          <span className="text-slate-500 line-through font-mono text-xs">{moneyCents(product.price)}</span>
+          <span className="font-mono font-bold text-emerald-600">{moneyCents(product.countdown_sale_price)}</span>
+          {discount > 0 && <span className="chip chip-success !text-[10px]">{discount}% off</span>}
+        </div>
+        <div className="text-xs text-slate-500 font-mono">
+          Ends {product.countdown_ends_at ? fmtDate(product.countdown_ends_at) : ""}
+        </div>
+      </div>
+    </div>
+  );
+}
+

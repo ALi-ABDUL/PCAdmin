@@ -1,4 +1,4 @@
-import { ExternalLink, ImageIcon } from "lucide-react";
+import { ExternalLink, ImageIcon, Timer } from "lucide-react";
 import { statusBadge } from "./atoms";
 import { CatIcon } from "./icons";
 import { proxyImg } from "../lib/api";
@@ -170,8 +170,15 @@ function ProductCard({
         </div>
 
         <div className="flex items-center justify-between gap-2">
-          <div className="font-mono font-bold text-indigo-600 text-base" data-testid={`product-card-price-${p.id}`}>
-            {moneyCents(p.price)}
+          <div className="font-mono font-bold text-base" data-testid={`product-card-price-${p.id}`}>
+            {p.countdown_enabled && !p.countdown_expired && p.countdown_sale_price != null ? (
+              <span className="flex items-baseline gap-1.5">
+                <span className="text-emerald-600">{moneyCents(p.countdown_sale_price)}</span>
+                <span className="text-slate-400 line-through text-[11px] font-normal">{moneyCents(p.price)}</span>
+              </span>
+            ) : (
+              <span className="text-indigo-600">{moneyCents(p.price)}</span>
+            )}
           </div>
           <div
             className={`text-[11px] font-mono ${stockClass}`}
@@ -182,6 +189,18 @@ function ProductCard({
               : `${p.stock} in stock`}
           </div>
         </div>
+
+        {/* Countdown timer chip — visible while a sale is running. Uses
+            hydration timestamps only (no ticking clock here to keep the
+            grid render cheap — ProductDetail hosts the live ticker). */}
+        {p.countdown_enabled && !p.countdown_expired && p.countdown_ends_at && (
+          <CountdownChip endsAt={p.countdown_ends_at} pid={p.id}/>
+        )}
+        {p.countdown_expired && (
+          <span className="chip !bg-red-50 !text-red-700 !border !border-red-200 inline-flex items-center gap-1 w-fit !text-[10px]" data-testid={`product-card-countdown-expired-${p.id}`}>
+            <Timer size={10}/> Countdown expired
+          </span>
+        )}
 
         <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
@@ -222,3 +241,40 @@ function ProductCard({
     </div>
   );
 }
+
+
+/* --------------------------- CountdownChip ---------------------------------
+ *
+ * Tiny live-ticking chip embedded in each product card while its
+ * limited-time sale is running. Uses a light 1-second interval per chip —
+ * cheap because the JSX inside is one line and React only re-renders the
+ * inner span, but we import the hook lazily via `useState`+`useEffect`
+ * from React so this component stays self-contained.
+ * ------------------------------------------------------------------------- */
+import { useEffect as _cUseEffect, useState as _cUseState } from "react";
+
+export function CountdownChip({ endsAt, pid }) {
+  const [now, setNow] = _cUseState(Date.now());
+  _cUseEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const remaining = Math.max(0, new Date(endsAt).getTime() - now);
+  const d = Math.floor(remaining / 86_400_000);
+  const h = Math.floor((remaining % 86_400_000) / 3_600_000);
+  const m = Math.floor((remaining % 3_600_000) / 60_000);
+  const s = Math.floor((remaining % 60_000) / 1000);
+  const parts = d > 0
+    ? `${d}d ${String(h).padStart(2, "0")}h ${String(m).padStart(2, "0")}m`
+    : `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return (
+    <span
+      className="chip !bg-rose-50 !text-rose-700 !border !border-rose-200 inline-flex items-center gap-1 w-fit !text-[10px] font-mono"
+      data-testid={`product-card-countdown-${pid}`}
+    >
+      <Timer size={10} className="animate-pulse"/>
+      {parts}
+    </span>
+  );
+}
+

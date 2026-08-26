@@ -155,6 +155,20 @@ class ProductCreate(BaseModel):
     # scrape/create time (see `_suggest_tags()` in helpers.py) but always
     # editable in the ProductDetail SEO card as removable chips.
     tags: List[str] = Field(default_factory=list)
+    # ---------------------------- Countdown sale ----------------------------
+    # Optional per-product limited-time sale. The admin picks a duration
+    # (days) + a sale price; the backend stamps `countdown_started_at`
+    # and `countdown_ends_at` on start. When `now >= countdown_ends_at`
+    # the periodic sweep (`_expire_countdowns()`) auto-flags the product
+    # with `countdown_expired=True`, sets `active=False`, and stops
+    # further countdown updates. The admin can then either "Restore" the
+    # product (clears the countdown fields + re-activates) or delete it.
+    countdown_enabled: bool = False
+    countdown_sale_price: Optional[float] = None
+    countdown_duration_days: Optional[int] = None
+    countdown_started_at: Optional[str] = None
+    countdown_ends_at: Optional[str] = None
+    countdown_expired: bool = False
 
 
 class Product(ProductCreate):
@@ -191,6 +205,19 @@ class ProductUpdate(BaseModel):
     url_slug: Optional[str] = None
     image_alt_text: Optional[str] = None
     tags: Optional[List[str]] = None
+
+
+class CountdownStart(BaseModel):
+    """POST body for `/api/products/{id}/countdown/start`.
+
+    `duration_days` — number of days from `now` until the sale ends.
+        Must be >= 1 and <= 365. Fractional days are floored.
+    `sale_price`    — the temporary sale price shown while the countdown
+        is running. Must be > 0. Original `price` is preserved so the
+        admin can restore it later.
+    """
+    duration_days: int = Field(..., ge=1, le=365)
+    sale_price: float = Field(..., gt=0)
 
 
 # AU address generator used by the demo seed + backfill for existing orders without addresses.

@@ -9,6 +9,7 @@ import { API, proxyImg } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 import { PRODUCT_NAV } from "../lib/nav";
 import { ArchivedProducts } from "./ArchivedProducts";
+import { CountdownProducts } from "./CountdownProducts";
 import { Orders } from "./Orders";
 import { ProductDetailPage } from "./ProductDetail";
 import { Products } from "./ProductsList";
@@ -31,6 +32,7 @@ export function ProductsModule({ section, setSection, deepLink, clearDeepLink, o
   const Icon = meta.icon;
   const hints = {
     all: "Every product in your store.",
+    countdown: "Products whose countdown sale expired. Restore or delete them from here.",
     "low-stock": "Items with 1–3 units remaining. Restock soon.",
     "out-of-stock": "Items at 0 or below. Hidden from storefront.",
     archived: "Archived products are hidden from the main list. Restore them anytime.",
@@ -41,6 +43,7 @@ export function ProductsModule({ section, setSection, deepLink, clearDeepLink, o
     <div className="grid gap-6">
       <SubHero icon={Icon} group={meta.group} label={meta.label} hint={hints[section]}/>
       {section === "all"           && <Products deepLink={deepLink} clearDeepLink={clearDeepLink} openProductDetail={openProductDetail} sectionKey="products-all"/>}
+      {section === "countdown"     && <CountdownProducts openProductDetail={openProductDetail}/>}
       {section === "low-stock"     && <Products openProductDetail={openProductDetail} stock="low" sectionKey="products-low"/>}
       {section === "out-of-stock"  && <Products openProductDetail={openProductDetail} stock="out" sectionKey="products-out"/>}
       {section === "archived"      && <ArchivedProducts openProductDetail={openProductDetail}/>}

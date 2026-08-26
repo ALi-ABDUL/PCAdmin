@@ -39,6 +39,7 @@ from models import (
     DeliverySettingsUpdate,
     ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
+    CountdownStart,
 )
 from countries import COUNTRIES, COUNTRY_CODES
 from helpers import (
@@ -528,6 +529,7 @@ async def _start_scheduler():
     except Exception as e:
         logger.warning(f"index setup: {e}")
     asyncio.create_task(_scheduler_loop())
+    asyncio.create_task(_countdown_sweep_loop())
 
 
 # ---------------------------------------------------------------------------
@@ -2027,6 +2029,7 @@ async def list_products(
     active: Optional[bool] = None,
     archived: Optional[bool] = None,     # None → exclude archived; True → only archived; False → only unarchived
     stock: Optional[str] = None,         # None → any; "low" → 1..3; "out" → <=0
+    countdown_status: Optional[str] = None,  # None → hide expired; "active" → running; "expired" → in Countdown section; "any" → include all
     sort: str = "created_at_desc",
     limit: int = Query(200, le=1000),
     skip: int = Query(0, ge=0),
@@ -2051,6 +2054,19 @@ async def list_products(
         query["stock"] = {"$gt": 0, "$lte": 3}
     elif stock == "out":
         query["stock"] = {"$lte": 0}
+    # Countdown filter — default hides expired-countdown products from the
+    # main Products list. The "Product Countdown" sidebar page passes
+    # `countdown_status=expired`. Pass `any` to include everything.
+    if countdown_status == "expired":
+        query["countdown_expired"] = True
+    elif countdown_status == "active":
+        query["countdown_enabled"] = True
+        query["countdown_expired"] = {"$ne": True}
+    elif countdown_status == "any":
+        pass  # no filter
+    else:
+        # Default: keep expired-countdown products out of the main list.
+        query["countdown_expired"] = {"$ne": True}
     sort_map = {
         "created_at_desc": [("created_at", -1)],
         "created_at_asc": [("created_at", 1)],
@@ -2279,6 +2295,126 @@ async def delete_product(pid: str):
         raise HTTPException(status_code=404, detail="Product not found")
     removed_categories = await _delete_categories_if_empty([(existing or {}).get("category")])
     return {"deleted": True, "removed_categories": removed_categories}
+
+
+# ---------------------------------------------------------------------------
+# Countdown sale — optional, per-product limited-time sale.
+# ---------------------------------------------------------------------------
+# Start:   POST /api/products/{pid}/countdown/start  {duration_days, sale_price}
+# Stop:    POST /api/products/{pid}/countdown/stop   (admin cancellation)
+# Expire:  automatic — the periodic sweep in `_expire_countdowns()` runs
+#          every 60s and flips `countdown_expired=True` + `active=False`
+#          on any product whose `countdown_ends_at <= now`.
+# Restore: POST /api/products/{pid}/countdown/restore
+#          clears every countdown field + re-activates the product so it
+#          reappears in the main Products list.
+
+@api_router.post("/products/{pid}/countdown/start")
+async def countdown_start(pid: str, body: CountdownStart):
+    """Kick off a limited-time sale. Overwrites any existing countdown
+    (starting a new one on the same product is idempotent)."""
+    p = await db.products.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+    now = datetime.now(timezone.utc)
+    ends = now + timedelta(days=body.duration_days)
+    patch = {
+        "countdown_enabled": True,
+        "countdown_sale_price": round(float(body.sale_price), 2),
+        "countdown_duration_days": int(body.duration_days),
+        "countdown_started_at": now.isoformat(),
+        "countdown_ends_at": ends.isoformat(),
+        "countdown_expired": False,
+        # If the product was previously auto-inactivated by an earlier
+        # countdown, re-activate it now so the sale is actually visible.
+        "active": True,
+        "updated_at": now.isoformat(),
+    }
+    await db.products.update_one({"id": pid}, {"$set": patch})
+    fresh = await db.products.find_one({"id": pid}, {"_id": 0})
+    return fresh
+
+
+@api_router.post("/products/{pid}/countdown/stop")
+async def countdown_stop(pid: str):
+    """Admin-initiated cancellation. Clears the countdown but keeps the
+    product active — the "sale price" was never a persisted price."""
+    p = await db.products.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+    patch = {
+        "countdown_enabled": False,
+        "countdown_sale_price": None,
+        "countdown_duration_days": None,
+        "countdown_started_at": None,
+        "countdown_ends_at": None,
+        "countdown_expired": False,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.products.update_one({"id": pid}, {"$set": patch})
+    fresh = await db.products.find_one({"id": pid}, {"_id": 0})
+    return fresh
+
+
+@api_router.post("/products/{pid}/countdown/restore")
+async def countdown_restore(pid: str):
+    """Move an expired-countdown product back into the main Products list.
+    Clears every countdown field + sets `active=True` so it reappears
+    everywhere. Idempotent: calling on a non-expired product simply resets
+    the fields with no other side effect."""
+    p = await db.products.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+    patch = {
+        "countdown_enabled": False,
+        "countdown_sale_price": None,
+        "countdown_duration_days": None,
+        "countdown_started_at": None,
+        "countdown_ends_at": None,
+        "countdown_expired": False,
+        "active": True,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.products.update_one({"id": pid}, {"$set": patch})
+    fresh = await db.products.find_one({"id": pid}, {"_id": 0})
+    return fresh
+
+
+async def _expire_countdowns() -> int:
+    """Move every product whose countdown has elapsed into the expired
+    state (auto-inactivate + flag). Returns the number of products
+    updated. Called from the scheduler + opportunistically from
+    `list_products` so admins never see stale timers."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    query = {
+        "countdown_enabled": True,
+        "countdown_expired": {"$ne": True},
+        "countdown_ends_at": {"$lte": now_iso},
+    }
+    r = await db.products.update_many(
+        query,
+        {"$set": {
+            "countdown_expired": True,
+            "active": False,
+            "updated_at": now_iso,
+        }},
+    )
+    if r.modified_count:
+        logger.info("Expired %d countdown product(s)", r.modified_count)
+    return r.modified_count or 0
+
+
+async def _countdown_sweep_loop():
+    """Sixty-second background sweep that expires elapsed countdowns.
+    Runs alongside the existing scraper scheduler. Kept simple — no
+    exponential backoff or crash recovery because a missed sweep just
+    means the expiry lands on the next cycle."""
+    while True:
+        try:
+            await _expire_countdowns()
+        except Exception:
+            logger.exception("countdown sweep failed")
+        await asyncio.sleep(60)
 
 
 # ---------------------------------------------------------------------------

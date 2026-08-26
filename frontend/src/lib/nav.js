@@ -1,4 +1,4 @@
-import { Activity, Award, Ban, Bell, Building2, Cable, ClipboardList, CreditCard, FileText, Globe, Heart, History, List, Lock, Mail, MapPinned, Menu, MessageCircle, MessageSquare, Package, PackageMinus, PackageSearch, PackageX, Percent, Receipt, RefreshCw, ShieldCheck, ShoppingCart, Star as StarIcon, StickyNote, Store, Ticket, TrendingDown as TrendingDownIcon, Truck, Undo2, Upload, UserCheck, User as UserIcon, UserPlus, Users, Warehouse } from "lucide-react";
+import { Activity, Award, Ban, Bell, Building2, Cable, ClipboardList, CreditCard, FileText, Globe, Heart, History, List, Lock, Mail, MapPinned, Menu, MessageCircle, MessageSquare, Package, PackageMinus, PackageSearch, PackageX, Percent, Receipt, RefreshCw, ShieldCheck, ShoppingCart, Star as StarIcon, StickyNote, Store, Ticket, Timer, TrendingDown as TrendingDownIcon, Truck, Undo2, Upload, UserCheck, User as UserIcon, UserPlus, Users, Warehouse } from "lucide-react";
 import { Analytics } from "../pages/Analytics";
 import { Orders } from "../pages/Orders";
 import { Products } from "../pages/ProductsList";
@@ -63,6 +63,7 @@ export const CUSTOMER_NAV = [
 
 export const PRODUCT_NAV = [
   { id: "all",            label: "All Products",       icon: Package,         group: "Catalog" },
+  { id: "countdown",      label: "Product Countdown",  icon: Timer,           group: "Catalog" },
   { id: "low-stock",      label: "Low Stock",          icon: PackageMinus,    group: "Inventory" },
   { id: "out-of-stock",   label: "Out of Stock",       icon: PackageX,        group: "Inventory" },
   { id: "archived",       label: "Archived",           icon: Warehouse,       group: "Inventory" },

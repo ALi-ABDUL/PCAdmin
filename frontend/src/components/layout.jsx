@@ -31,6 +31,12 @@ export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomer
     { id: "payments",  label: "Payments",   icon: CreditCard,     group: "Operations", hasSub: true },
     { id: "customers", label: "Customers",  icon: Users,          group: "Operations", hasSub: true, count: unreadCustomerCount, onBadgeClick: onCustomersBadgeClick },
     { id: "analytics", label: "Analytics",  icon: BarChart3,      group: "Insights" },
+    // Mobile-only shortcut: on desktop, admins reach Settings via the bottom
+    // "Admin Settings" CTA card. On mobile that CTA slot is taken by the
+    // Product Sourcing box, so we surface Settings here instead.
+    // `mobileOnly` flips a lg:hidden class on the button below. Managers
+    // still get filtered out by `canAccess()`.
+    { id: "settings",  label: "Admin Settings", icon: Settings2, group: "System", mobileOnly: true },
   ].filter(n => canAccess(role, n.id));
   const grouped = nav.reduce((acc, n) => { (acc[n.group] = acc[n.group] || []).push(n); return acc; }, {});
 
@@ -45,14 +51,18 @@ export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomer
         <button className="ml-auto lg:hidden btn btn-ghost !p-1.5" onClick={() => setMobileOpen && setMobileOpen(false)}><X size={16}/></button>
       </div>
       <div className="px-3 pb-4 overflow-y-auto flex-1">
-        {Object.entries(grouped).map(([g, items]) => (
-          <div key={g} className="mb-4">
+        {Object.entries(grouped).map(([g, items]) => {
+          // Groups whose entire membership is `mobileOnly` should collapse
+          // on desktop so the "SYSTEM" heading doesn't hover above nothing.
+          const groupAllMobile = items.every(n => n.mobileOnly);
+          return (
+          <div key={g} className={`mb-4 ${groupAllMobile ? "lg:hidden" : ""}`}>
             <div className="text-[10px] font-mono uppercase tracking-widest text-[color:var(--dim)] px-2 pb-1.5">{g}</div>
             <nav className="flex flex-col gap-0.5">
               {items.map((n) => {
                 const Icon = n.icon; const active = tab === n.id;
                 return (
-                  <button key={n.id} data-testid={`nav-${n.id}`} onClick={() => setTab(n.id)} className={`sidebar-link ${active ? "active" : ""}`}>
+                  <button key={n.id} data-testid={`nav-${n.id}`} onClick={() => setTab(n.id)} className={`sidebar-link ${active ? "active" : ""} ${n.mobileOnly ? "lg:hidden" : ""}`}>
                     <span className="relative shrink-0">
                       <Icon size={16} className="sidebar-icon" />
                       {n.count > 0 && (
@@ -78,7 +88,8 @@ export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomer
               })}
             </nav>
           </div>
-        ))}
+          );
+        })}
       </div>
       <div className="p-4 border-t hairline">
         {/* Mobile variant (< 768px): quick access to the eBay sourcing flow. */}

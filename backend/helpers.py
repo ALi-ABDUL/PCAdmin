@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded']
+__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses']
 
 
 import bcrypt
@@ -1337,3 +1337,106 @@ async def _load_pricing_rules() -> list[dict]:
     cursor = db.pricing_rules.find({"active": True}, {"_id": 0}).sort("sort_order", 1)
     return await cursor.to_list(500)
 
+
+
+# ---------------------------------------------------------------------------
+# Country access control
+# ---------------------------------------------------------------------------
+
+import secrets  # noqa: E402  – kept next to the helpers that use it
+
+from models import _DEFAULT_COUNTRY_ACCESS, BYPASS_SESSION_TTL_SECONDS  # noqa: E402
+
+
+def _generate_bypass_token(nbytes: int = 32) -> str:
+    """Cryptographically-random URL-safe token used as the emergency bypass URL segment."""
+    return secrets.token_urlsafe(nbytes)
+
+
+async def _ensure_country_access_seeded() -> None:
+    """Seed the singleton `country_access_settings` document with AU + MA
+    allowed and a fresh bypass token. No-op after the first run."""
+    if await db.country_access_settings.count_documents({}) > 0:
+        return
+    doc = {
+        **_DEFAULT_COUNTRY_ACCESS,
+        "bypass_token": _generate_bypass_token(),
+        "updated_at": _now_iso(),
+    }
+    await db.country_access_settings.insert_one(doc)
+    logger.info("Seeded country_access_settings (allowed=%s)", doc["allowed_country_codes"])
+
+
+async def _get_country_access() -> dict:
+    """Fetch the singleton, seeding it lazily if the startup task hasn't run
+    yet (defensive — matters mostly during unit tests)."""
+    doc = await db.country_access_settings.find_one({"_id": "singleton"}, {"_id": 0})
+    if not doc:
+        await _ensure_country_access_seeded()
+        doc = await db.country_access_settings.find_one({"_id": "singleton"}, {"_id": 0})
+    return doc or {"allowed_country_codes": [], "bypass_token": ""}
+
+
+def _client_country(request) -> Optional[str]:
+    """Return the ISO alpha-2 country code that Cloudflare tagged on the
+    request. Falls back to `None` when the header is missing (e.g. direct
+    origin hit during local dev)."""
+    v = request.headers.get("CF-IPCountry") or request.headers.get("cf-ipcountry")
+    if not v:
+        return None
+    v = v.strip().upper()
+    # Cloudflare uses "XX" for anonymised requests and "T1" for Tor exit
+    # nodes — we treat both as "unknown" so the admin can decide whether to
+    # allow them via the toggle list.
+    if v in ("", "XX", "T1"):
+        return None
+    return v
+
+
+def _client_ip(request) -> str:
+    """Best-effort client IP resolution. Cloudflare sets `CF-Connecting-IP`;
+    generic proxies use `X-Forwarded-For` (first hop wins). Falls back to
+    the socket peer."""
+    cf = request.headers.get("CF-Connecting-IP") or request.headers.get("cf-connecting-ip")
+    if cf:
+        return cf.strip()
+    xff = request.headers.get("X-Forwarded-For") or request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    client = getattr(request, "client", None)
+    return getattr(client, "host", None) or ""
+
+
+async def _bypass_active_for_ip(ip: str) -> Optional[dict]:
+    """Return the active bypass session for the given IP, or None."""
+    if not ip:
+        return None
+    now = datetime.now(timezone.utc).isoformat()
+    return await db.bypass_sessions.find_one(
+        {"ip": ip, "expires_at": {"$gt": now}}, {"_id": 0}
+    )
+
+
+async def _grant_bypass(ip: str, country: Optional[str]) -> dict:
+    """Create (or refresh) a 24-hour bypass session for `ip`. Idempotent —
+    calling twice within the same day just refreshes `expires_at`."""
+    now = datetime.now(timezone.utc)
+    session = {
+        "ip": ip,
+        "country": country or "",
+        "granted_at": now.isoformat(),
+        "expires_at": (now + timedelta(seconds=BYPASS_SESSION_TTL_SECONDS)).isoformat(),
+    }
+    await db.bypass_sessions.update_one(
+        {"ip": ip}, {"$set": session}, upsert=True
+    )
+    return session
+
+
+async def _purge_expired_bypasses() -> int:
+    """Delete every expired bypass session and return the count removed.
+    Called opportunistically from the country-access GET endpoint so the
+    admin's Security tab always shows a clean list."""
+    now = datetime.now(timezone.utc).isoformat()
+    r = await db.bypass_sessions.delete_many({"expires_at": {"$lte": now}})
+    return r.deleted_count or 0

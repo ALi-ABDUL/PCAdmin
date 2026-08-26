@@ -996,3 +996,53 @@ Notification Bell deep-links) — zero regressions detected.
   every admin route now inherits these headers.
 - Verified live: origin `/robots.txt` serves the full disallow ruleset
   and the SPA shell HTML contains all 10 meta robots directives.
+
+
+## Feb 25, 2026 — IP-based Country Access Control + Emergency Bypass
+- **Middleware** (`server.py`, `country_access_middleware`) reads
+  Cloudflare's `CF-IPCountry` header on every `/api/*` request. Requests
+  from countries NOT in the allow-list get a plain
+  `403 {"code":"country_blocked","detail":"Access Denied"}` response.
+  Fails-open when the header is missing (local dev / direct-origin hits)
+  so admins can't lock themselves out during a Cloudflare misconfig.
+- **Exempt paths** (never blocked): `/api/security/bypass/{token}`,
+  `/api/security/status`, `/api/image-proxy`, `/docs`, `/openapi.json`,
+  `/redoc`, and every OPTIONS preflight.
+- **Singleton doc** `country_access_settings` (`_ensure_country_access_seeded`)
+  seeded with `["AU", "MA"]` + a fresh `secrets.token_urlsafe(32)` bypass
+  token.
+- **Bypass URL** — visiting `GET /api/security/bypass/{token}` from any
+  IP grants that IP 24 hours of unrestricted access (stored in a new
+  `bypass_sessions` collection keyed by IP). Redirects the browser back
+  to the dashboard root with `X-Bypass-Granted: 1`. Token rotation via
+  `POST /api/security/country-access/regenerate-token`.
+- **Endpoints**:
+  - `GET  /api/security/status` — public: `{allowed, country, ip, bypass_active, bypass_expires_at, cloudflare_detected}`
+  - `GET  /api/security/countries` — full ISO 3166-1 alpha-2 list
+  - `GET  /api/security/country-access` — settings + bypass URL + active sessions
+  - `PATCH /api/security/country-access` — replace allow-list
+  - `POST /api/security/country-access/regenerate-token` — rotate bypass token
+  - `DELETE /api/security/bypass-sessions/{ip}` — revoke a session
+- **`_public_base_url()`** — builds the copy-paste-able bypass URL from
+  `X-Forwarded-Proto` / `X-Forwarded-Host` so admins get the public HTTPS
+  host instead of the internal cluster address.
+- **Frontend — Access Denied page**
+  (`/app/frontend/src/pages/AccessDenied.jsx`): plain "403 · Access
+  Denied" with zero dashboard chrome. Wired via a global axios response
+  interceptor in `App.js` — any 403 with `code:"country_blocked"` swaps
+  the entire shell for `<AccessDenied/>`.
+- **Frontend — Security tab** (`SettingsPage` → new tab beside Accounts):
+  - **Status strip**: your detected country + IP + Cloudflare presence
+  - **Emergency bypass card**: masked URL with reveal/copy/regenerate
+    buttons + table of active bypass sessions with per-row Revoke.
+  - **Countries card**: searchable list of every ISO country with an
+    Allow / Block toggle per row. Filter chip "Only allowed".
+    Toggling PATCHes instantly (optimistic UI) and toasts on save.
+- **Tests**: `/app/backend/tests/test_country_access.py` — 14 pytest
+  cases (all pass): fail-open, plain-403 shape, allowed passes, OPTIONS
+  never blocked, exempt paths, PATCH normalisation, empty allow-list,
+  token rotation invalidates old URL, bypass grants correct IP, other IPs
+  still blocked, revoke, status reflects bypass, ISO list contains ≥ 240
+  entries. Runs serialised via `pytestmark = xdist_group("country_access")`
+  because tests mutate the shared singleton.
+

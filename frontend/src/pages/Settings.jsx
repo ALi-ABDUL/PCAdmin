@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, BadgeCheck, Database, Download, LayoutGrid, LogIn, Moon, Palette, Pencil, Plus, RotateCcw, ShieldCheck, Sun, Trash2, Upload, UserPlus, X } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Copy, Database, Download, Globe2, KeyRound, LayoutGrid, LogIn, Lock, Moon, Palette, Pencil, Plus, RefreshCw, RotateCcw, Search, ShieldCheck, Sun, Trash2, Upload, UserPlus, X } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API, KEYS, loadKeys } from "../lib/api";
 import { applyTheme } from "../lib/theme";
@@ -11,6 +11,7 @@ import { DASHBOARD_WIDGETS, loadDashboardLayout, resetDashboardLayout, saveDashb
 const TABS = [
   { id: "theme",     label: "Theme",            icon: Palette },
   { id: "accounts",  label: "Accounts",         icon: ShieldCheck },
+  { id: "security",  label: "Security",         icon: Lock },
   { id: "layout",    label: "Dashboard Layout", icon: LayoutGrid },
   { id: "cache",     label: "Cache",            icon: RotateCcw },
   { id: "backup",    label: "Backup",           icon: Database },
@@ -53,6 +54,7 @@ export function SettingsPage() {
 
       {activeTab === "theme"    && <ThemeCard/>}
       {activeTab === "accounts" && <AccountsCard/>}
+      {activeTab === "security" && <SecurityCard/>}
       {activeTab === "layout"   && <DashboardLayoutCard/>}
       {activeTab === "cache"    && <CacheCard/>}
       {activeTab === "backup"   && <BackupCard/>}
@@ -516,3 +518,260 @@ export function AccountsCard() {
 }
 
 /* -------------------------------- Item modal ------------------------------ */
+
+
+/* ------------------------------ Security tab ------------------------------
+ *
+ * IP-based country access control + emergency bypass URL. Renders three
+ * cards inside the Security tab:
+ *   1. Status strip: shows what Cloudflare currently detects (country/IP)
+ *   2. Country toggle list with a search filter — toggling saves instantly
+ *   3. Emergency bypass URL (copy + regenerate + list of active sessions)
+ *
+ * All state is driven by the backend `/api/security/*` endpoints so a
+ * change from one browser propagates to every other admin session on
+ * the next fetch.
+ * ------------------------------------------------------------------------- */
+
+function SecurityCard() {
+  const [status, setStatus] = useState(null);
+  const [countries, setCountries] = useState([]);
+  const [settings, setSettings] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [onlyAllowed, setOnlyAllowed] = useState(false);
+  const [savingCode, setSavingCode] = useState(null);
+  const [showBypass, setShowBypass] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [s, c, ac] = await Promise.all([
+        axios.get(`${API}/security/status`).then(r => r.data),
+        axios.get(`${API}/security/countries`).then(r => r.data.countries || []),
+        axios.get(`${API}/security/country-access`).then(r => r.data),
+      ]);
+      setStatus(s);
+      setCountries(c);
+      setSettings(ac);
+    } catch (e) {
+      toast.error("Failed to load security settings", { description: e?.response?.data?.detail || e.message });
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const allowedSet = new Set(settings?.allowed_country_codes || []);
+
+  const toggleCountry = async (code) => {
+    if (savingCode) return;
+    const isCurrentlyAllowed = allowedSet.has(code);
+    const next = isCurrentlyAllowed
+      ? (settings.allowed_country_codes || []).filter(c => c !== code)
+      : [...(settings.allowed_country_codes || []), code];
+    setSavingCode(code);
+    // Optimistic: reflect the toggle immediately, then reconcile from server.
+    setSettings(prev => ({ ...prev, allowed_country_codes: next }));
+    try {
+      const { data } = await axios.patch(`${API}/security/country-access`, { allowed_country_codes: next });
+      setSettings(prev => ({ ...prev, ...data }));
+      toast.success(isCurrentlyAllowed ? `${code} blocked` : `${code} allowed`);
+    } catch (e) {
+      toast.error("Save failed — reverting", { description: e?.response?.data?.detail || e.message });
+      await load();
+    } finally {
+      setSavingCode(null);
+    }
+  };
+
+  const regenerate = async () => {
+    if (!window.confirm("Regenerate the bypass URL? The current URL will stop working immediately.")) return;
+    setBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/security/country-access/regenerate-token`);
+      setSettings(prev => ({ ...prev, ...data }));
+      toast.success("Bypass URL rotated");
+    } catch (e) {
+      toast.error("Rotate failed", { description: e?.response?.data?.detail || e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyBypass = async () => {
+    try {
+      await navigator.clipboard.writeText(settings?.bypass_url || "");
+      toast.success("Bypass URL copied");
+    } catch { toast.error("Clipboard blocked"); }
+  };
+
+  const revokeSession = async (ip) => {
+    if (!window.confirm(`Revoke bypass access for ${ip}?`)) return;
+    try {
+      await axios.delete(`${API}/security/bypass-sessions/${encodeURIComponent(ip)}`);
+      toast.success(`Revoked ${ip}`);
+      load();
+    } catch (e) {
+      toast.error("Revoke failed", { description: e?.response?.data?.detail || e.message });
+    }
+  };
+
+  const filtered = countries.filter(({ code, name }) => {
+    if (onlyAllowed && !allowedSet.has(code)) return false;
+    if (!query.trim()) return true;
+    const q = query.trim().toLowerCase();
+    return code.toLowerCase().includes(q) || name.toLowerCase().includes(q);
+  });
+
+  if (!settings || !status) {
+    return <div className="card p-6 text-slate-500 text-sm">Loading security settings…</div>;
+  }
+
+  return (
+    <div className="grid gap-4" data-testid="security-card">
+      {/* Status strip */}
+      <div className="card p-5" data-testid="security-status-strip">
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <div className="font-display font-bold text-lg mb-1 flex items-center gap-2">
+              <Lock size={18} className="text-indigo-600"/> Country Access Control
+            </div>
+            <div className="text-xs text-slate-500 max-w-2xl">
+              Block or allow admin dashboard access by country. Detection uses Cloudflare's IP → country tagging (<span className="font-mono">CF-IPCountry</span>). Every change saves instantly and takes effect on the very next request — no restart needed.
+            </div>
+          </div>
+          <button onClick={load} className="btn btn-ghost text-xs" title="Refresh"><RefreshCw size={12}/> Refresh</button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+          <div className="p-3 rounded-lg border hairline bg-slate-50/60">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1">Your country</div>
+            <div className="font-mono text-sm" data-testid="security-your-country">
+              {status.country ? <span className="font-bold text-emerald-600">{status.country}</span> : <span className="text-slate-400 italic">Not detected (local dev)</span>}
+            </div>
+          </div>
+          <div className="p-3 rounded-lg border hairline bg-slate-50/60">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1">Your IP</div>
+            <div className="font-mono text-sm break-all" data-testid="security-your-ip">{status.ip || "unknown"}</div>
+          </div>
+          <div className="p-3 rounded-lg border hairline bg-slate-50/60">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-1">Cloudflare</div>
+            <div className="font-mono text-sm">
+              {status.cloudflare_detected
+                ? <span className="chip chip-success text-[10px]"><BadgeCheck size={10}/> Active</span>
+                : <span className="chip chip-warning text-[10px]"><AlertTriangle size={10}/> Header missing</span>}
+            </div>
+          </div>
+        </div>
+        {!status.cloudflare_detected && (
+          <div className="mt-3 p-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800 flex items-start gap-2">
+            <AlertTriangle size={13} className="shrink-0 mt-0.5"/>
+            <span>Cloudflare's <span className="font-mono">CF-IPCountry</span> header wasn't detected on this request. When the header is missing (e.g. hitting the origin directly) the middleware fails-open and lets requests through so you don't lock yourself out during a misconfiguration.</span>
+          </div>
+        )}
+      </div>
+
+      {/* Emergency bypass URL */}
+      <div className="card p-5" data-testid="security-bypass-card">
+        <div className="flex items-start justify-between flex-wrap gap-3 mb-3">
+          <div>
+            <div className="font-display font-bold flex items-center gap-2"><KeyRound size={16} className="text-indigo-600"/> Emergency bypass URL</div>
+            <div className="text-xs text-slate-500 max-w-2xl mt-1">
+              Visit this URL from a blocked location to grant that IP <span className="font-medium">24 hours</span> of unrestricted access. Rotate it if it leaks — the old URL stops working immediately.
+            </div>
+          </div>
+          <button onClick={regenerate} disabled={busy} className="btn btn-ghost text-xs" data-testid="security-regen-btn">
+            <RotateCcw size={12}/> Regenerate
+          </button>
+        </div>
+        <div className="flex items-center gap-2 p-3 rounded-lg border hairline bg-slate-50/60 font-mono text-xs break-all" data-testid="security-bypass-url-strip">
+          <span className="flex-1">
+            {showBypass ? settings.bypass_url : "•".repeat(Math.min(60, (settings.bypass_url || "").length))}
+          </span>
+          <button onClick={() => setShowBypass(v => !v)} className="btn btn-ghost !p-2" title={showBypass ? "Hide" : "Reveal"} data-testid="security-bypass-toggle">
+            {showBypass ? <X size={12}/> : <Search size={12}/>}
+          </button>
+          <button onClick={copyBypass} className="btn btn-ghost !p-2" title="Copy to clipboard" data-testid="security-bypass-copy">
+            <Copy size={12}/>
+          </button>
+        </div>
+        {(settings.active_bypass_sessions || []).length > 0 && (
+          <div className="mt-4">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2">Active bypass sessions</div>
+            <div className="border hairline rounded-lg overflow-hidden">
+              <table className="tbl">
+                <thead><tr><th>IP</th><th>Country</th><th>Granted</th><th>Expires</th><th className="text-right"></th></tr></thead>
+                <tbody>
+                  {settings.active_bypass_sessions.map(s => (
+                    <tr key={s.ip} data-testid={`security-bypass-session-${s.ip}`}>
+                      <td className="font-mono text-xs">{s.ip}</td>
+                      <td className="font-mono text-xs">{s.country || "—"}</td>
+                      <td className="text-xs text-slate-500">{new Date(s.granted_at).toLocaleString()}</td>
+                      <td className="text-xs text-slate-500">{new Date(s.expires_at).toLocaleString()}</td>
+                      <td className="text-right">
+                        <button onClick={() => revokeSession(s.ip)} className="btn btn-danger text-xs !py-1 !px-2" data-testid={`security-revoke-${s.ip}`}>
+                          <Trash2 size={11}/> Revoke
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Country toggle list */}
+      <div className="card p-5" data-testid="security-countries-card">
+        <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
+          <div>
+            <div className="font-display font-bold flex items-center gap-2"><Globe2 size={16} className="text-indigo-600"/> Countries · <span className="text-slate-400 font-mono text-sm">{allowedSet.size} allowed</span></div>
+            <div className="text-xs text-slate-500 max-w-2xl mt-1">
+              Toggle a country to allow or block it. By default every country is blocked except the ones you've explicitly allowed.
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search country…"
+                className="input pl-7 pr-3 py-1.5 text-sm w-56"
+                data-testid="security-country-search"
+              />
+            </div>
+            <label className="inline-flex items-center gap-2 text-xs text-slate-500 select-none">
+              <input type="checkbox" checked={onlyAllowed} onChange={(e) => setOnlyAllowed(e.target.checked)} className="accent-indigo-600" data-testid="security-only-allowed"/>
+              <span>Only allowed</span>
+            </label>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-[520px] overflow-y-auto pr-1" data-testid="security-country-list">
+          {filtered.length === 0 && (
+            <div className="col-span-full text-center text-slate-400 text-sm py-8 italic">No countries match your search.</div>
+          )}
+          {filtered.map(({ code, name }) => {
+            const allowed = allowedSet.has(code);
+            const saving = savingCode === code;
+            return (
+              <button
+                key={code}
+                onClick={() => toggleCountry(code)}
+                disabled={saving}
+                className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border transition-all text-left ${allowed ? "bg-emerald-50 border-emerald-200 hover:bg-emerald-100" : "bg-white hairline hover:bg-slate-50"} ${saving ? "opacity-60" : ""}`}
+                data-testid={`security-country-${code}`}
+                aria-pressed={allowed}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`font-mono text-[11px] w-8 shrink-0 font-bold ${allowed ? "text-emerald-700" : "text-slate-400"}`}>{code}</span>
+                  <span className="text-sm truncate">{name}</span>
+                </div>
+                <span className={`chip !text-[10px] shrink-0 ${allowed ? "chip-success" : "chip-neutral"}`}>{allowed ? "Allowed" : "Blocked"}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+

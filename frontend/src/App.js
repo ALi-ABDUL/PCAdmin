@@ -23,6 +23,7 @@ import { Products } from "./pages/ProductsList";
 import { ScraperPage } from "./pages/Scraper";
 import { SettingsPage } from "./pages/Settings";
 import { AdminLoginScreen } from "./pages/AdminLogin";
+import { AccessDenied } from "./pages/AccessDenied";
 import { StoreManagement } from "./pages/Store";
 import { Suppliers } from "./pages/Suppliers";
 
@@ -47,6 +48,22 @@ export default function App() {
   // session which fires `adminsessionchange` → this state flips back to
   // false and the login screen mounts.
   const [signedIn, setSignedIn] = useState(hasAdminSession());
+  // Country-blocked state: when any backend call returns 403 with
+  // `code: "country_blocked"`, we swap the entire shell for the plain
+  // AccessDenied page so nothing else about the dashboard leaks.
+  const [accessDenied, setAccessDenied] = useState(false);
+  useEffect(() => {
+    const interceptor = axios.interceptors.response.use(
+      (r) => r,
+      (err) => {
+        if (err?.response?.status === 403 && err?.response?.data?.code === "country_blocked") {
+          setAccessDenied(true);
+        }
+        return Promise.reject(err);
+      },
+    );
+    return () => axios.interceptors.response.eject(interceptor);
+  }, []);
   useEffect(() => {
     const on = () => setSignedIn(hasAdminSession());
     window.addEventListener("adminsessionchange", on);
@@ -191,6 +208,12 @@ export default function App() {
   const inOrders    = tab === "orders";
   const inPayments  = tab === "payments";
   const subKey = inStore ? `store-${storeSection}` : inSuppliers ? `sup-${supplierSection}` : inCustomers ? `cus-${customerSection}` : inProducts ? `prd-${productSection}` : inOrders ? `ord-${ordersSection}` : inPayments ? `pay-${paymentsSection}` : tab;
+
+  // Country-blocked gate: takes precedence over the login screen so the
+  // full dashboard never even flashes.
+  if (accessDenied) {
+    return <AccessDenied/>;
+  }
 
   // Session gate: no session → render the login screen and nothing else.
   if (!signedIn) {

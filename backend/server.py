@@ -1,12 +1,13 @@
 """FastAPI endpoints for the Admin Dashboard API.
 Deps: app/router/db/logger from deps.py — Pydantic models from models.py — helpers from helpers.py.
 Refactored Feb 2026."""
-from fastapi import HTTPException, Query, Depends, Header, Body
-from fastapi.responses import Response
+from fastapi import HTTPException, Query, Depends, Header, Body, Request
+from fastapi.responses import Response, JSONResponse, RedirectResponse
 from starlette.middleware.cors import CORSMiddleware
 import os
 import re
 import random
+import secrets
 import asyncio
 import httpx
 import uuid
@@ -37,7 +38,9 @@ from models import (
     PostagePresetBase, PostagePreset, PostagePresetUpdate, POSTAGE_PRESET_KINDS,
     DeliverySettingsUpdate,
     ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
+    CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
 )
+from countries import COUNTRIES, COUNTRY_CODES
 from helpers import (
     _rand_au_address, _slug, _product_code_base, _generate_unique_product_code, 
     _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _refresh_all_items, 
@@ -54,6 +57,8 @@ from helpers import (
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
     _customer_email_html,
+    _ensure_country_access_seeded, _get_country_access, _client_country, _client_ip,
+    _bypass_active_for_ip, _grant_bypass, _purge_expired_bypasses,
 )
 
 
@@ -503,6 +508,7 @@ async def _start_scheduler():
     await _ensure_pricing_rules_seeded()
     await _ensure_postage_presets_seeded()
     await _ensure_main_admin_seeded()
+    await _ensure_country_access_seeded()
     if await db.customers.count_documents({}) == 0:
         await _rebuild_customers_from_orders()
     # One-shot migration: the customer-group feature was removed — strip legacy
@@ -2680,6 +2686,225 @@ async def image_proxy(url: str):
     if r.status_code != 200:
         raise HTTPException(status_code=r.status_code, detail="Image fetch failed")
     return Response(content=r.content, media_type=r.headers.get("content-type", "image/jpeg"))
+
+
+# ---------------------------------------------------------------------------
+# Country Access Control (IP → country gating)
+# ---------------------------------------------------------------------------
+# Uses Cloudflare's `CF-IPCountry` header as the source of truth. When the
+# header is missing (e.g. hitting the origin directly during local dev)
+# we treat the request as allowed so the platform stays usable.
+# The middleware runs on every request; a small allow-list of paths is
+# always exempt so the frontend can render the 403 page and the emergency
+# bypass URL can grant access even when the caller's country is blocked.
+
+# Paths (relative to the app root) that the country middleware NEVER blocks.
+# Anything starting with these prefixes is passed through untouched.
+COUNTRY_MIDDLEWARE_EXEMPT_PREFIXES = (
+    "/api/security/bypass/",     # emergency bypass URL — must always be reachable
+    "/api/security/status",      # public status endpoint feeding the 403 page
+    "/api/image-proxy",          # eBay CDN pass-through (used from customer emails)
+    "/docs", "/openapi.json", "/redoc",  # framework internals
+)
+
+
+def _public_base_url(request: Request) -> str:
+    """Compose the public https://host base URL from forwarded headers.
+
+    Behind Kubernetes + Cloudflare the FastAPI `request.base_url` reports
+    the internal cluster hostname (`ebay-au-harvester.cluster-7…`) which is
+    not what an admin should copy into their browser. We prefer the
+    `X-Forwarded-Proto` + `X-Forwarded-Host` headers set by the ingress
+    (or `Host` as a last resort) so the URL always resolves publicly.
+    """
+    proto = (request.headers.get("x-forwarded-proto") or "https").split(",")[0].strip()
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or request.url.hostname
+        or ""
+    ).split(",")[0].strip()
+    return f"{proto}://{host}"
+
+
+@app.middleware("http")
+async def country_access_middleware(request: Request, call_next):
+    # OPTIONS preflights must never be blocked or CORS breaks completely.
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    path = request.url.path or ""
+    if any(path.startswith(p) for p in COUNTRY_MIDDLEWARE_EXEMPT_PREFIXES):
+        return await call_next(request)
+
+    # Only guard /api/*. Static frontend assets live outside this app.
+    if not path.startswith("/api"):
+        return await call_next(request)
+
+    country = _client_country(request)
+    # No Cloudflare header → assume local dev / direct origin hit → allow.
+    # Production Cloudflare deployment always sets this header.
+    if country is None:
+        return await call_next(request)
+
+    ip = _client_ip(request)
+
+    # Bypass session check (fast path — one indexed query).
+    if await _bypass_active_for_ip(ip):
+        return await call_next(request)
+
+    settings = await _get_country_access()
+    allowed = set(settings.get("allowed_country_codes") or [])
+    if country in allowed:
+        return await call_next(request)
+
+    # Blocked. Return a minimal JSON response so the frontend can render the
+    # plain 403 page without leaking dashboard details.
+    return JSONResponse(
+        status_code=403,
+        content={
+            "code": "country_blocked",
+            "detail": "Access Denied",
+            "country": country,
+            "ip": ip,
+        },
+    )
+
+
+# --- Security endpoints ------------------------------------------------------
+
+@api_router.get("/security/status")
+async def security_status(request: Request):
+    """Public — reachable even when the caller's country is blocked so the
+    frontend can render the 403 page with a friendly country label.
+    Returns `{allowed, country, ip, bypass_active, bypass_expires_at}`."""
+    country = _client_country(request)
+    ip = _client_ip(request)
+    settings = await _get_country_access()
+    allowed_codes = set(settings.get("allowed_country_codes") or [])
+    bypass = await _bypass_active_for_ip(ip)
+    allowed = (
+        country is None                 # local dev — always allowed
+        or (bypass is not None)
+        or (country in allowed_codes)
+    )
+    return {
+        "allowed": allowed,
+        "country": country,
+        "ip": ip,
+        "bypass_active": bypass is not None,
+        "bypass_expires_at": (bypass or {}).get("expires_at"),
+        "cloudflare_detected": country is not None,
+    }
+
+
+@api_router.get("/security/countries")
+async def list_countries():
+    """The full ISO 3166-1 alpha-2 list shipped by the backend. Frontend uses
+    this to render the toggle list so the two sides never drift."""
+    return {"countries": [{"code": c, "name": n} for c, n in COUNTRIES]}
+
+
+@api_router.get("/security/country-access")
+async def get_country_access(request: Request):
+    """Admin-view: full settings including the bypass URL and the list of
+    currently-active bypass sessions."""
+    await _purge_expired_bypasses()
+    settings = await _get_country_access()
+    sessions = await db.bypass_sessions.find({}, {"_id": 0}).sort("granted_at", -1).to_list(100)
+    # Compose the full URL from forwarded headers (Cloudflare + ingress set
+    # `X-Forwarded-Proto` / `X-Forwarded-Host`) so the admin can copy-paste
+    # a URL that actually resolves publicly — `request.base_url` sees the
+    # internal proxy address behind Kubernetes.
+    bypass_url = f"{_public_base_url(request)}/api/security/bypass/{settings.get('bypass_token', '')}"
+    return {
+        "allowed_country_codes": settings.get("allowed_country_codes") or [],
+        "bypass_token": settings.get("bypass_token", ""),
+        "bypass_url": bypass_url,
+        "bypass_session_ttl_seconds": BYPASS_SESSION_TTL_SECONDS,
+        "updated_at": settings.get("updated_at"),
+        "active_bypass_sessions": sessions,
+    }
+
+
+@api_router.patch("/security/country-access")
+async def patch_country_access(body: CountryAccessUpdate):
+    """Replace the allow-list. Codes not present in the ISO list are
+    silently dropped; codes are upper-cased and de-duplicated."""
+    cleaned: list = []
+    seen: set = set()
+    for raw in body.allowed_country_codes:
+        code = str(raw or "").strip().upper()
+        if not code or code in seen:
+            continue
+        if code not in COUNTRY_CODES:
+            continue
+        seen.add(code)
+        cleaned.append(code)
+    now = datetime.now(timezone.utc).isoformat()
+    await db.country_access_settings.update_one(
+        {"_id": "singleton"},
+        {"$set": {"allowed_country_codes": cleaned, "updated_at": now}},
+        upsert=True,
+    )
+    return {"allowed_country_codes": cleaned, "updated_at": now}
+
+
+@api_router.post("/security/country-access/regenerate-token")
+async def regenerate_bypass_token(request: Request):
+    """Rotate the bypass token. The previous URL stops working immediately."""
+    from helpers import _generate_bypass_token
+    token = _generate_bypass_token()
+    now = datetime.now(timezone.utc).isoformat()
+    await db.country_access_settings.update_one(
+        {"_id": "singleton"},
+        {"$set": {"bypass_token": token, "updated_at": now}},
+        upsert=True,
+    )
+    base = _public_base_url(request)
+    return {
+        "bypass_token": token,
+        "bypass_url": f"{base}/api/security/bypass/{token}",
+        "updated_at": now,
+    }
+
+
+@api_router.delete("/security/bypass-sessions/{ip}")
+async def revoke_bypass_session(ip: str):
+    """Revoke an individual bypass session (e.g. accidentally-granted IP)."""
+    r = await db.bypass_sessions.delete_one({"ip": ip})
+    return {"deleted": r.deleted_count}
+
+
+@api_router.get("/security/bypass/{token}")
+async def use_bypass_token(token: str, request: Request):
+    """Emergency access. Visiting this URL from any IP in any country
+    grants that IP 24 hours of unrestricted access. Redirects the browser
+    to the dashboard root so the admin doesn't stare at a JSON blob."""
+    settings = await _get_country_access()
+    expected = settings.get("bypass_token") or ""
+    if not expected or not token or not secrets.compare_digest(token, expected):
+        # Deliberately vague — don't confirm or deny the token exists.
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+    ip = _client_ip(request)
+    country = _client_country(request)
+    session = await _grant_bypass(ip, country)
+    # Redirect to the SPA root. `303 See Other` guarantees the browser
+    # switches to GET even if the caller used another verb.
+    frontend_url = os.environ.get("FRONTEND_URL")
+    if frontend_url:
+        target = frontend_url.rstrip("/") + "/"
+    else:
+        # Best effort — use the forwarded-header base URL so the browser
+        # lands on the same public host it was already visiting.
+        target = _public_base_url(request).rstrip("/") + "/"
+    resp = RedirectResponse(url=target, status_code=303)
+    resp.headers["X-Bypass-Granted"] = "1"
+    resp.headers["X-Bypass-Expires"] = session["expires_at"]
+    return resp
+
+
+# --- End security endpoints --------------------------------------------------
 
 
 app.include_router(api_router)

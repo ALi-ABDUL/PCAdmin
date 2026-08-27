@@ -1387,3 +1387,25 @@ Notification Bell deep-links) — zero regressions detected.
   with a "P" gradient monogram, welcome toast reads "Welcome back,
   PCAdmin", 7/7 branding pytest cases pass.
 
+
+
+## Feb 25, 2026 — Favicon + tab title auto-sync with Branding
+- **`lib/branding.js`** learned an `_applyBrandingToDocument()` helper
+  that:
+  1. Sets `document.title = _cache.name` (defaults to "PCAdmin").
+  2. Removes every existing `<link rel~="icon">` / `rel="shortcut icon"`
+     from `<head>` and appends a fresh one pointing at the uploaded
+     data-URL. The MIME type is parsed from the `data:...;base64,` prefix
+     so Safari (which is strict about `link.type`) renders it.
+  3. Falls back to `/favicon.ico` when the admin clears the logo.
+- Called after every cache write (`refreshBranding()` +
+  `saveBranding()`), so **any code path that changes branding — boot,
+  Save button, or Reset-to-default — updates the tab title and
+  favicon automatically without further plumbing**.
+- Wrapped in try/catch as a defensive SSR / non-browser safety net.
+- Verified live: Playwright snapshot on the deployed preview reads
+  `Title after boot: PCAdmin`, then after uploading a 1×1 PNG and
+  saving, `Title after save: Contoso HQ` and the favicon href now
+  starts with `data:image/png;base64,` with `type=image/png`. Sidebar
+  updates in lockstep.
+

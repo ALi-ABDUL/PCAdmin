@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, BadgeCheck, Copy, Database, Download, Globe2, Image as ImageIcon, KeyRound, LayoutGrid, LogIn, Lock, Moon, Palette, Pencil, Plus, RefreshCw, RotateCcw, Search, ShieldCheck, Sparkles, Sun, Trash2, Upload, UserPlus, X } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Copy, Database, Download, Globe2, Image as ImageIcon, KeyRound, LayoutGrid, LogIn, Lock, Mail, MailX, Moon, Palette, Pencil, Plus, RefreshCw, RotateCcw, Search, ShieldCheck, Sparkles, Sun, Trash2, Upload, UserPlus, X } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API, KEYS, loadKeys } from "../lib/api";
 import { applyTheme } from "../lib/theme";
@@ -774,6 +774,192 @@ function SecurityCard() {
           })}
         </div>
       </div>
+
+      {/* Disposable / temporary email blocklist */}
+      <DisposableDomainsCard/>
+    </div>
+  );
+}
+
+
+
+/* ------------------------- Disposable email blocklist ---------------------
+ *
+ * Admin-editable list of disposable / temporary email providers that are
+ * blocked on `POST /api/portal/register`. Backed by
+ * `GET/PATCH /api/security/disposable-domains` — the entire list is sent on
+ * every save, matching the country-access pattern above so the two feel
+ * consistent to the admin.
+ * ------------------------------------------------------------------------- */
+
+function DisposableDomainsCard() {
+  const [domains, setDomains] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [input, setInput] = useState("");
+  const [query, setQuery] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${API}/security/disposable-domains`);
+      setDomains(data.domains || []);
+    } catch (e) {
+      toast.error("Failed to load blocklist", { description: e?.response?.data?.detail || e.message });
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (next) => {
+    setBusy(true);
+    try {
+      const { data } = await axios.patch(`${API}/security/disposable-domains`, { domains: next });
+      setDomains(data.domains || []);
+      return data.domains || [];
+    } catch (e) {
+      toast.error("Save failed", { description: e?.response?.data?.detail || e.message });
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Split by commas / whitespace / newlines so admins can paste a chunky
+  // list in one go. Empty pieces and duplicates are dropped server-side too.
+  const parseInput = (raw) => {
+    return String(raw || "")
+      .split(/[\s,;\n]+/)
+      .map(s => s.trim().toLowerCase().replace(/^@/, "").replace(/^.*@/, ""))
+      .filter(Boolean);
+  };
+
+  const addDomains = async () => {
+    const pieces = parseInput(input);
+    if (!pieces.length) return;
+    const existing = new Set(domains || []);
+    const merged = [...(domains || [])];
+    let added = 0;
+    for (const p of pieces) {
+      if (!existing.has(p)) { merged.push(p); existing.add(p); added += 1; }
+    }
+    if (!added) {
+      toast.info("Nothing new to add — all domains already blocked.");
+      setInput("");
+      return;
+    }
+    const saved = await save(merged);
+    if (saved) {
+      toast.success(added === 1 ? `Blocked ${pieces[0]}` : `Blocked ${added} new domains`);
+      setInput("");
+    }
+  };
+
+  const removeDomain = async (d) => {
+    if (!window.confirm(`Remove ${d} from the blocklist? Sign-ups from ${d} will be allowed again.`)) return;
+    const next = (domains || []).filter(x => x !== d);
+    const saved = await save(next);
+    if (saved) toast.success(`Removed ${d}`);
+  };
+
+  const filtered = (domains || []).filter(d => {
+    if (!query.trim()) return true;
+    return d.toLowerCase().includes(query.trim().toLowerCase());
+  });
+
+  if (domains === null) {
+    return <div className="card p-6 text-slate-500 text-sm" data-testid="disposable-domains-loading">Loading disposable-email blocklist…</div>;
+  }
+
+  return (
+    <div className="card p-5" data-testid="disposable-domains-card">
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <div className="font-display font-bold flex items-center gap-2">
+            <MailX size={16} className="text-rose-600"/>
+            Disposable email blocklist
+            <span className="text-slate-400 font-mono text-sm">· {domains.length} blocked</span>
+          </div>
+          <div className="text-xs text-slate-500 max-w-2xl mt-1">
+            Sign-ups from these domains are rejected on the customer registration form with a "Please use a valid email address" error. Sub-domains are matched too — blocking <span className="font-mono">mail.tm</span> also blocks <span className="font-mono">foo.mail.tm</span>.
+          </div>
+        </div>
+        <button onClick={load} className="btn btn-ghost text-xs" title="Refresh" data-testid="disposable-refresh">
+          <RefreshCw size={12}/> Refresh
+        </button>
+      </div>
+
+      {/* Add row */}
+      <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-2" data-testid="disposable-add-row">
+        <div className="relative flex-1">
+          <Mail size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/>
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addDomains(); } }}
+            placeholder="Add domain(s) — e.g. tempmail.io, mailinator.com"
+            className="input pl-7 pr-3 py-2 text-sm w-full font-mono"
+            disabled={busy}
+            data-testid="disposable-add-input"
+          />
+        </div>
+        <button
+          onClick={addDomains}
+          disabled={busy || !input.trim()}
+          className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          data-testid="disposable-add-btn"
+        >
+          <Plus size={14}/> Add to blocklist
+        </button>
+      </div>
+
+      {/* Search + list */}
+      {domains.length > 0 && (
+        <>
+          <div className="mt-4 flex items-center gap-2">
+            <div className="relative flex-1 max-w-xs">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Filter blocklist…"
+                className="input pl-7 pr-3 py-1.5 text-sm w-full"
+                data-testid="disposable-search"
+              />
+            </div>
+            <span className="text-[11px] text-slate-400 font-mono">{filtered.length}/{domains.length}</span>
+          </div>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-72 overflow-y-auto pr-1" data-testid="disposable-list">
+            {filtered.length === 0 ? (
+              <div className="col-span-full text-center text-slate-400 text-sm py-6 italic">No domains match your search.</div>
+            ) : (
+              filtered.map(d => (
+                <div
+                  key={d}
+                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-rose-100 bg-rose-50/50 hover:bg-rose-50 transition"
+                  data-testid={`disposable-row-${d}`}
+                >
+                  <span className="font-mono text-xs truncate text-rose-800" title={d}>{d}</span>
+                  <button
+                    onClick={() => removeDomain(d)}
+                    disabled={busy}
+                    className="btn btn-ghost !p-1.5 text-rose-600 hover:!bg-rose-100 disabled:opacity-50"
+                    title={`Remove ${d}`}
+                    data-testid={`disposable-remove-${d}`}
+                    aria-label={`Remove ${d}`}
+                  >
+                    <Trash2 size={12}/>
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
+
+      {domains.length === 0 && (
+        <div className="mt-4 p-4 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800 flex items-start gap-2" data-testid="disposable-empty">
+          <AlertTriangle size={13} className="shrink-0 mt-0.5"/>
+          <span>The blocklist is empty — every domain is currently allowed to register. Add at least one domain (e.g. <span className="font-mono">yopmail.com</span>) to enable the check.</span>
+        </div>
+      )}
     </div>
   );
 }

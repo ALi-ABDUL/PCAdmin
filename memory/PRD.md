@@ -1507,3 +1507,47 @@ Notification Bell deep-links) — zero regressions detected.
   images, dates visible on every row, no horizontal scroll.
 
 
+
+## Disposable Email Blocklist for Customer Sign-Up (2026-02-27)
+- **Backend**: New singleton mock-DB collection
+  `disposable_email_domains` seeded with the 35 provider domains
+  the user requested (`yopmail.com`, `10minutemail.com`, `mail.tm`,
+  `mailinator.com`, `guerrillamail.com`, `simplelogin.io`, etc.).
+  Seeded from `models._DEFAULT_DISPOSABLE_DOMAINS` in the startup
+  hook alongside `country_access`.
+- **Register block**: `POST /api/portal/register` now returns
+  `400 {"detail": DISPOSABLE_EMAIL_ERROR}` — the exact user-facing
+  string requested: *"Please use a valid email address. Temporary
+  or disposable emails are not accepted."* The check runs after
+  the email-format check but BEFORE the password/order gates so
+  the user sees the clearest error first. Sub-domain matching is
+  supported (`sub.mail.tm` blocked by the `mail.tm` rule) via a
+  dot-boundary suffix test (`notyopmail.com` is NOT blocked).
+- **Admin endpoints**:
+  - `GET /api/security/disposable-domains` → `{ domains, total }`
+  - `PATCH /api/security/disposable-domains` — full replacement;
+    normalises (lower-case, `@`-strip, whitespace-trim), de-dupes,
+    sorts, and accepts the empty list (which disables the check).
+- **Admin UI** (`SecurityCard` in `/app/frontend/src/pages/Settings.jsx`):
+  new `DisposableDomainsCard` sub-card renders below the country
+  toggle grid. Features:
+  - Add-domain row that parses commas / whitespace / newlines so
+    an admin can paste a chunky list in one go
+  - Search filter over the current blocklist
+  - Rose-tinted chip grid (1/2/3 columns responsive) with a bin
+    icon per row — remove is guarded by a `window.confirm()`
+  - Empty-list warning banner when everything is allowed
+- **Test coverage**: `/app/backend/tests/test_disposable_domains.py`
+  — 45 tests including a parametrised check that every one of the
+  35 seeded domains blocks registration with the exact error
+  string, sub-domain match, similar-domain false-positive guard,
+  admin add/remove round-trips, normalise+dedupe, empty-list
+  disables check, and error-precedence rules. All tests in one
+  class so pytest-xdist `loadscope` runs them serially (shared
+  singleton state). Full customer-portal + security suite still
+  green (83 tests).
+- **Verified live**: Playwright end-to-end — new card renders
+  with 35 chips, add-then-remove flow works, filter counter
+  updates. Curl smoke-tested the register block, sub-domain
+  match, and pass-through for non-disposable emails.
+

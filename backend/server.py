@@ -39,6 +39,7 @@ from models import (
     DeliverySettingsUpdate,
     ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
+    DisposableDomainsUpdate, DISPOSABLE_EMAIL_ERROR,
     CountdownStart, BrandingUpdate,
 )
 from countries import COUNTRIES, COUNTRY_CODES
@@ -60,6 +61,8 @@ from helpers import (
     _customer_email_html,
     _ensure_country_access_seeded, _get_country_access, _client_country, _client_ip,
     _bypass_active_for_ip, _grant_bypass, _purge_expired_bypasses,
+    _ensure_disposable_domains_seeded, _get_disposable_domains, _is_disposable_email,
+    _normalise_domain,
 )
 
 
@@ -510,6 +513,7 @@ async def _start_scheduler():
     await _ensure_postage_presets_seeded()
     await _ensure_main_admin_seeded()
     await _ensure_country_access_seeded()
+    await _ensure_disposable_domains_seeded()
     if await db.customers.count_documents({}) == 0:
         await _rebuild_customers_from_orders()
     # One-shot migration: the customer-group feature was removed — strip legacy
@@ -1242,6 +1246,10 @@ async def portal_register(body: PortalRegisterBody):
     email = (body.email or "").strip().lower()
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="Please enter a valid email address")
+    # Block disposable / temporary inbox providers up front — the list is
+    # admin-editable via `PATCH /api/security/disposable-domains`.
+    if await _is_disposable_email(email):
+        raise HTTPException(status_code=400, detail=DISPOSABLE_EMAIL_ERROR)
     if len(body.password or "") < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     existing = await db.customer_accounts.find_one({"email": email})
@@ -3766,6 +3774,37 @@ async def use_bypass_token(token: str, request: Request):
 
 
 # --- End security endpoints --------------------------------------------------
+
+
+@api_router.get("/security/disposable-domains")
+async def get_disposable_domains():
+    """Return the current disposable-email blocklist. Rendered by the
+    **Settings → Security** tab so admins can inspect what's blocked."""
+    domains = await _get_disposable_domains()
+    return {"domains": sorted(domains), "total": len(domains)}
+
+
+@api_router.patch("/security/disposable-domains")
+async def patch_disposable_domains(body: DisposableDomainsUpdate):
+    """Replace the disposable-email blocklist wholesale. Domains are
+    normalised (lower-cased, `@`-stripped, whitespace-trimmed) and
+    de-duplicated. Sending an empty list disables the check entirely."""
+    cleaned: list = []
+    seen: set = set()
+    for raw in body.domains:
+        d = _normalise_domain(raw)
+        if not d or d in seen:
+            continue
+        seen.add(d)
+        cleaned.append(d)
+    cleaned.sort()
+    now = datetime.now(timezone.utc).isoformat()
+    await db.disposable_email_domains.update_one(
+        {"_id": "singleton"},
+        {"$set": {"domains": cleaned, "updated_at": now}},
+        upsert=True,
+    )
+    return {"domains": cleaned, "total": len(cleaned), "updated_at": now}
 
 
 # ---------------------------------------------------------------------------

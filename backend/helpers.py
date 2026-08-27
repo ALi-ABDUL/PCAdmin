@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses']
+__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
 
 
 import bcrypt
@@ -1456,3 +1456,78 @@ async def _purge_expired_bypasses() -> int:
     now = datetime.now(timezone.utc).isoformat()
     r = await db.bypass_sessions.delete_many({"expires_at": {"$lte": now}})
     return r.deleted_count or 0
+
+
+
+# --- Disposable / temporary email blocklist ---------------------------------
+#
+# Singleton document `disposable_email_domains` (id `singleton`) with:
+#   { "domains": ["yopmail.com", "10minutemail.com", ...], "updated_at": iso }
+#
+# Seeded from `_DEFAULT_DISPOSABLE_DOMAINS`. The `_is_disposable_email` helper
+# is cheap enough to call on every registration attempt (one indexed find on a
+# tiny singleton doc).
+
+from models import _DEFAULT_DISPOSABLE_DOMAINS  # noqa: E402
+
+
+def _normalise_domain(raw: str) -> str:
+    """Return the lower-cased, `@`-stripped, whitespace-trimmed domain.
+    Returns an empty string for unusable input so callers can just skip."""
+    if not raw:
+        return ""
+    v = str(raw).strip().lower()
+    if not v:
+        return ""
+    # Accept full addresses ("user@host") too and pluck the domain.
+    if "@" in v:
+        v = v.rsplit("@", 1)[-1].strip()
+    return v
+
+
+async def _ensure_disposable_domains_seeded() -> None:
+    """Seed the singleton `disposable_email_domains` document. No-op after
+    the first run — admins can freely edit the list without it being
+    re-seeded on restart."""
+    if await db.disposable_email_domains.count_documents({}) > 0:
+        return
+    doc = {
+        "_id": "singleton",
+        "domains": sorted({_normalise_domain(d) for d in _DEFAULT_DISPOSABLE_DOMAINS if _normalise_domain(d)}),
+        "updated_at": _now_iso(),
+    }
+    await db.disposable_email_domains.insert_one(doc)
+    logger.info("Seeded disposable_email_domains (%d entries)", len(doc["domains"]))
+
+
+async def _get_disposable_domains() -> list[str]:
+    """Fetch the current blocklist, seeding lazily if the startup task
+    hasn't run yet. Returns an empty list on a bare install so we never
+    accidentally block legitimate sign-ups."""
+    doc = await db.disposable_email_domains.find_one({"_id": "singleton"}, {"_id": 0})
+    if not doc:
+        await _ensure_disposable_domains_seeded()
+        doc = await db.disposable_email_domains.find_one({"_id": "singleton"}, {"_id": 0})
+    return list((doc or {}).get("domains") or [])
+
+
+async def _is_disposable_email(email: str) -> bool:
+    """True if the email's domain (or any parent domain — e.g. blocking
+    `mail.tm` also blocks `foo.mail.tm`) matches the current blocklist."""
+    domain = _normalise_domain(email)
+    if not domain:
+        return False
+    blocked = await _get_disposable_domains()
+    if not blocked:
+        return False
+    blocked_set = {d for d in blocked if d}
+    # Exact match first (fast path).
+    if domain in blocked_set:
+        return True
+    # Suffix match — protects against sub-domain workarounds like
+    # `foo.yopmail.com`. Only trigger on a real dot boundary so
+    # `notyopmail.com` doesn't get caught by `yopmail.com`.
+    for b in blocked_set:
+        if domain.endswith("." + b):
+            return True
+    return False

@@ -662,10 +662,26 @@ async def stuck_orders():
                 "days_stuck": days,
                 "sla_days": sla,
                 "since": since_iso,
+                "created_at": o.get("created_at"),
                 "total": o.get("total"),
             })
     # Most-stuck first — helps admins triage.
     stuck.sort(key=lambda r: r["days_stuck"], reverse=True)
+    # Attach a product thumbnail (first image) so the widget can render a
+    # small preview next to each row. One bulk read keeps this O(1) extra
+    # queries regardless of how many stuck orders exist.
+    pids = {r["product_id"] for r in stuck if r.get("product_id")}
+    images: dict[str, str] = {}
+    if pids:
+        async for p in db.products.find(
+            {"id": {"$in": list(pids)}},
+            {"_id": 0, "id": 1, "images": 1},
+        ):
+            imgs = p.get("images") or []
+            if imgs:
+                images[p["id"]] = imgs[0]
+    for r in stuck:
+        r["image"] = images.get(r.get("product_id"))
     return {"stuck": stuck, "total": len(stuck), "sla": SLA_DAYS}
 
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, CheckCircle2, DollarSign, Layers, Loader2, Percent, ShoppingBag, Sparkles, Trophy, TrendingDown, TrendingUp, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, CheckCircle2, ChevronLeft, ChevronRight, DollarSign, Layers, Loader2, Percent, ShoppingBag, Sparkles, Trophy, TrendingDown, TrendingUp, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { KpiCard, StatusChip } from "../components/atoms";
 import { API, proxyImg, imgThumb } from "../lib/api";
@@ -266,6 +266,9 @@ export function Dashboard({ navigateTo }) {
  */
 export function StuckOrdersWidget({ navigateTo }) {
   const [rows, setRows] = useState(null);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+
   const load = useCallback(async () => {
     try {
       const { data } = await axios.get(`${API}/orders/stuck`);
@@ -281,19 +284,27 @@ export function StuckOrdersWidget({ navigateTo }) {
   }, [load]);
 
   const isEmpty = rows && rows.length === 0;
+  const totalPages = rows ? Math.max(1, Math.ceil(rows.length / PAGE_SIZE)) : 1;
+  // Auto-clamp the current page if the underlying data shrinks (e.g. an
+  // order is resolved and the poller refreshes below the current window).
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+  const start = (page - 1) * PAGE_SIZE;
+  const paged = rows ? rows.slice(start, start + PAGE_SIZE) : [];
 
   return (
     <div className="card overflow-hidden" data-testid="stuck-orders-widget">
-      <div className="p-5 border-b hairline flex items-center justify-between flex-wrap gap-3">
+      <div className="p-4 sm:p-5 border-b hairline flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2">
-          <AlertTriangle size={16} className="text-amber-500"/>
+          <AlertTriangle size={16} className="text-amber-500 shrink-0"/>
           <div>
-            <div className="font-display font-bold text-lg">Stuck orders</div>
-            <div className="text-xs text-slate-500">Past SLA for their current status · refreshes every minute</div>
+            <div className="font-display font-bold text-base sm:text-lg">Stuck orders</div>
+            <div className="text-[11px] sm:text-xs text-slate-500">Past SLA for their current status · refreshes every minute</div>
           </div>
         </div>
         {rows && rows.length > 0 && (
-          <span className="chip !bg-red-50 !text-red-700 !border-red-200 font-mono" data-testid="stuck-orders-count">
+          <span className="chip !bg-red-50 !text-red-700 !border-red-200 font-mono text-[11px]" data-testid="stuck-orders-count">
             {rows.length} needs attention
           </span>
         )}
@@ -305,78 +316,151 @@ export function StuckOrdersWidget({ navigateTo }) {
         </div>
       ) : isEmpty ? (
         <div
-          className="p-8 flex items-center justify-center gap-3 bg-emerald-50 text-emerald-700"
+          className="p-6 sm:p-8 flex items-center justify-center gap-3 bg-emerald-50 text-emerald-700"
           data-testid="stuck-orders-empty"
         >
-          <CheckCircle2 size={20}/>
+          <CheckCircle2 size={20} className="shrink-0"/>
           <div>
             <div className="font-display font-bold">All orders on track</div>
             <div className="text-xs opacity-80">Every open order is within its SLA window.</div>
           </div>
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>Reference</th>
-                <th>Product</th>
-                <th>Status</th>
-                <th>Days stuck</th>
-                <th className="w-0"/>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice(0, 25).map((o) => {
-                const over = o.days_stuck - o.sla_days;
-                const tone = over >= 7 ? "!bg-red-50 !text-red-700 !border-red-200"
-                  : over >= 3 ? "!bg-amber-50 !text-amber-700 !border-amber-200"
-                  : "!bg-slate-100 !text-slate-600 !border-slate-200";
-                return (
-                  <tr key={o.id} data-testid="stuck-order-row">
-                    <td>
-                      <button
-                        onClick={() => navigateTo?.({ tab: "orders", section: "all", filter: { orderId: o.id } })}
-                        className="font-mono text-indigo-600 font-bold hover:text-indigo-800 hover:underline"
-                        data-testid={`stuck-ref-${o.id}`}
-                      >
-                        {o.reference || o.id.slice(0, 8)}
-                      </button>
-                    </td>
-                    <td>
-                      <div className="text-sm font-medium truncate max-w-[320px]" title={o.product_title}>{o.product_title || "—"}</div>
-                      {o.customer_name && (
-                        <div className="text-[11px] text-slate-500 truncate">{o.customer_name}</div>
-                      )}
-                    </td>
-                    <td><StatusChip status={o.status}/></td>
-                    <td>
-                      <span className={`chip ${tone} !text-[11px] font-mono`}>
-                        {o.days_stuck} day{o.days_stuck === 1 ? "" : "s"}
-                        <span className="opacity-60 ml-1">(SLA {o.sla_days}d)</span>
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        onClick={() => navigateTo?.({ tab: "orders", section: "all", filter: { orderId: o.id } })}
-                        className="btn btn-ghost text-xs whitespace-nowrap"
-                        data-testid={`stuck-open-${o.id}`}
-                      >
-                        Open <ArrowRight size={11}/>
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {rows.length > 25 && (
-            <div className="p-3 text-center text-xs text-slate-500 border-t hairline">
-              Showing 25 of {rows.length}
-            </div>
+        <>
+          <ul className="divide-y hairline" data-testid="stuck-orders-list">
+            {paged.map((o) => <StuckOrderRow key={o.id} order={o} navigateTo={navigateTo}/>)}
+          </ul>
+          {totalPages > 1 && (
+            <StuckOrdersPagination
+              page={page}
+              totalPages={totalPages}
+              total={rows.length}
+              pageSize={PAGE_SIZE}
+              onPage={setPage}
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+
+function StuckOrderRow({ order, navigateTo }) {
+  const o = order;
+  const over = o.days_stuck - o.sla_days;
+  const tone = over >= 7 ? "!bg-red-50 !text-red-700 !border-red-200"
+    : over >= 3 ? "!bg-amber-50 !text-amber-700 !border-amber-200"
+    : "!bg-slate-100 !text-slate-600 !border-slate-200";
+  const open = () => navigateTo?.({ tab: "orders", section: "all", filter: { orderId: o.id } });
+  return (
+    <li className="p-3 sm:p-4 hover:bg-slate-50/60 transition" data-testid="stuck-order-row">
+      <div className="flex items-start gap-3">
+        {/* Product thumbnail — small on mobile, slightly larger on desktop */}
+        <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-md bg-slate-100 border hairline overflow-hidden shrink-0">
+          {o.image ? (
+            <img
+              src={proxyImg(imgThumb(o.image))}
+              alt=""
+              className="w-full h-full object-cover"
+              loading="lazy"
+              data-testid={`stuck-thumb-${o.id}`}
+            />
+          ) : (
+            <div className="w-full h-full grid place-items-center text-[9px] text-slate-400 font-mono">no img</div>
           )}
         </div>
-      )}
+
+        {/* Main body */}
+        <div className="flex-1 min-w-0">
+          {/* Row 1: reference + status chip */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={open}
+              className="font-mono text-indigo-600 font-bold hover:text-indigo-800 hover:underline text-xs sm:text-sm"
+              data-testid={`stuck-ref-${o.id}`}
+            >
+              {o.reference || o.id.slice(0, 8)}
+            </button>
+            <StatusChip status={o.status}/>
+          </div>
+
+          {/* Row 2: product title */}
+          <div className="mt-1 text-sm font-medium text-slate-800 line-clamp-2 break-words" title={o.product_title}>
+            {o.product_title || "—"}
+          </div>
+
+          {/* Row 3: metadata — customer · date · stuck-chip. Wraps on mobile. */}
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] sm:text-xs text-slate-500">
+            {o.customer_name && (
+              <span className="truncate max-w-full" data-testid={`stuck-customer-${o.id}`}>
+                {o.customer_name}
+              </span>
+            )}
+            {(o.created_at || o.since) && (
+              <span className="font-mono" data-testid={`stuck-date-${o.id}`}>
+                {fmtDate(o.created_at || o.since)}
+              </span>
+            )}
+            <span className={`chip ${tone} !text-[10px] sm:!text-[11px] font-mono`}>
+              {o.days_stuck} day{o.days_stuck === 1 ? "" : "s"}
+              <span className="opacity-60 ml-1">(SLA {o.sla_days}d)</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Open — always visible, tap-friendly. Icon-only on tiny screens. */}
+        <button
+          onClick={open}
+          className="btn btn-ghost text-xs whitespace-nowrap shrink-0 self-center !px-2 sm:!px-3"
+          data-testid={`stuck-open-${o.id}`}
+          aria-label={`Open order ${o.reference || o.id.slice(0, 8)}`}
+        >
+          <span className="hidden sm:inline">Open</span>
+          <ArrowRight size={12}/>
+        </button>
+      </div>
+    </li>
+  );
+}
+
+
+function StuckOrdersPagination({ page, totalPages, total, pageSize, onPage }) {
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+  return (
+    <div
+      className="p-3 sm:p-4 flex items-center justify-between gap-3 border-t hairline flex-wrap"
+      data-testid="stuck-orders-pagination"
+    >
+      <div className="text-[11px] sm:text-xs text-slate-500 font-mono">
+        Showing <span className="text-slate-700 font-bold">{from}</span>–<span className="text-slate-700 font-bold">{to}</span> of {total}
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => onPage(page - 1)}
+          disabled={page <= 1}
+          className="btn btn-ghost text-xs !px-2 disabled:opacity-40 disabled:cursor-not-allowed"
+          data-testid="stuck-orders-prev"
+          aria-label="Previous page"
+        >
+          <ChevronLeft size={14}/>
+          <span className="hidden sm:inline ml-1">Prev</span>
+        </button>
+        <span className="text-[11px] sm:text-xs font-mono text-slate-600 tabular-nums" data-testid="stuck-orders-page-label">
+          {page} / {totalPages}
+        </span>
+        <button
+          onClick={() => onPage(page + 1)}
+          disabled={page >= totalPages}
+          className="btn btn-ghost text-xs !px-2 disabled:opacity-40 disabled:cursor-not-allowed"
+          data-testid="stuck-orders-next"
+          aria-label="Next page"
+        >
+          <span className="hidden sm:inline mr-1">Next</span>
+          <ChevronRight size={14}/>
+        </button>
+      </div>
     </div>
   );
 }

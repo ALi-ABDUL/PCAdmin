@@ -1474,3 +1474,36 @@ Notification Bell deep-links) — zero regressions detected.
   - Low stock count (4) click → Low Stock section with the 3 stocked
     items (Resident Evil 4 PS5, Kogan EasyClean R40, Kogan 45L Air Fryer).
 
+
+## Stuck Orders Widget — pagination + thumbnails + mobile (2026-02-27)
+- Rebuilt `/app/frontend/src/pages/Dashboard.jsx` `StuckOrdersWidget`
+  from a table into a responsive card list with dedicated
+  `StuckOrderRow` and `StuckOrdersPagination` sub-components.
+- **10 rows per page** via client-side pagination (widget already
+  fetches all stuck orders in one call). Prev/Next buttons with page
+  label (`1 / N`) and "Showing X–Y of Z" counter. Auto-clamps the
+  page when the underlying data shrinks between refreshes.
+- **Product thumbnail** rendered next to each row — 48 px on mobile,
+  56 px on ≥sm. Falls back to a "no img" placeholder when the
+  product has no images. Uses the existing `proxyImg` / `imgThumb`
+  helpers.
+- **Order date always visible** as its own metadata pill under the
+  reference/title, formatted via `fmtDate` (was previously buried
+  under the reference button as a small timestamp).
+- **Mobile-friendly layout**: flex row with thumb → content → Open
+  action; metadata wraps (customer · date · days-stuck chip) so
+  everything stays readable at 390 px width. Open button collapses
+  to icon-only on very narrow screens. Widget header text scales
+  (`text-base sm:text-lg`), reduced padding on mobile.
+- **Backend**: `GET /api/orders/stuck` now bulk-loads product
+  images via one `products.find({id:{$in: […]}})` read and attaches
+  `image` (first product image URL) plus `created_at` to each row.
+- **Tests**: `/app/backend/tests/test_stuck_orders.py` — added
+  `test_image_field_populated_for_known_product` and asserted the
+  new `image` / `created_at` fields are present in the shape check.
+  All 11 tests pass.
+- **Verified live**: Playwright shows 10 rows per page, pagination
+  navigates 1/80 → 2/80, thumbnails render for products with
+  images, dates visible on every row, no horizontal scroll.
+
+

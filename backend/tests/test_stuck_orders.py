@@ -36,8 +36,21 @@ class TestStuckOrdersShape:
             pytest.skip("no stuck rows to inspect")
         row = stuck_payload["stuck"][0]
         for key in ["id", "reference", "status", "product_title", "product_id",
-                    "customer_name", "days_stuck", "sla_days", "since", "total"]:
+                    "customer_name", "days_stuck", "sla_days", "since", "total",
+                    "created_at", "image"]:
             assert key in row, f"missing field {key}"
+
+    def test_image_field_populated_for_known_product(self, stuck_payload):
+        """When a stuck order references a product with images, the endpoint
+        must attach the first image URL so the dashboard widget can render
+        a thumbnail without a second network call."""
+        rows_with_pid = [r for r in stuck_payload["stuck"] if r.get("product_id")]
+        if not rows_with_pid:
+            pytest.skip("no stuck rows with product_id")
+        # At least one stuck row should have an image populated (seed data
+        # gives every seeded product at least one image).
+        assert any(r.get("image") for r in rows_with_pid), \
+            "expected at least one stuck row to have a thumbnail image"
 
     def test_sorted_days_stuck_desc(self, stuck_payload):
         days = [r["days_stuck"] for r in stuck_payload["stuck"]]

@@ -19,6 +19,8 @@ export function Dashboard({ navigateTo }) {
   const [profitModalOpen, setProfitModalOpen] = useState(false);
   // Units-sold deep-dive modal
   const [unitsModalOpen, setUnitsModalOpen] = useState(false);
+  // Avg Order Value deep-dive modal
+  const [aovModalOpen, setAovModalOpen] = useState(false);
   // Widget-visibility preferences from Settings › Dashboard Layout.
   // Listen for changes so toggling in Settings live-updates the layout.
   const [layout, setLayout] = useState(loadDashboardLayout());
@@ -48,7 +50,7 @@ export function Dashboard({ navigateTo }) {
     { label: "Revenue (YTD)",  value: moneyCents(data.ytd.revenue), sub: `${data.ytd.orders} orders`, icon: DollarSign, tone: "primary", testId: "kpi-revenue-ytd", onExpand: () => setRevenueModalOpen(true) },
     { label: "Profit (YTD)",   value: moneyCents(data.ytd.profit),  sub: `${data.ytd.revenue ? ((data.ytd.profit / data.ytd.revenue) * 100).toFixed(1) : 0}% margin`, icon: TrendingUp, tone: "success", testId: "kpi-profit-ytd", onExpand: () => setProfitModalOpen(true) },
     { label: "Units sold",     value: (data.ytd.units || 0).toLocaleString("en-AU"), sub: "this year", icon: ShoppingBag, tone: "violet", testId: "kpi-units-ytd", onExpand: () => setUnitsModalOpen(true) },
-    { label: "Avg order value",value: data.ytd.orders ? moneyCents(data.ytd.revenue / data.ytd.orders) : "—", sub: "YTD", icon: Percent, tone: "pink" },
+    { label: "Avg order value",value: data.ytd.orders ? moneyCents(data.ytd.revenue / data.ytd.orders) : "—", sub: "YTD", icon: Percent, tone: "pink", testId: "kpi-aov-ytd", onExpand: () => setAovModalOpen(true) },
   ];
 
   const kpi2 = [
@@ -228,6 +230,10 @@ export function Dashboard({ navigateTo }) {
 
       {unitsModalOpen && (
         <UnitsDetailModal onClose={() => setUnitsModalOpen(false)}/>
+      )}
+
+      {aovModalOpen && (
+        <AovDetailModal onClose={() => setAovModalOpen(false)}/>
       )}
     </div>
   );
@@ -1123,6 +1129,265 @@ function UnitsByCategory({ rows, fmt }) {
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+/* --------------------------- AOV detail modal -----------------------------
+ *
+ * Opens when the admin clicks the expand arrow on the Avg Order Value KPI
+ * card. Shows the AOV trend line chart, order-size distribution buckets,
+ * top-5 highest-value orders, AOV per category, and best/worst AOV month.
+ *
+ * Backend endpoint: `GET /api/analytics/aov-detail` (one round-trip).
+ * ------------------------------------------------------------------------- */
+
+export function AovDetailModal({ onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    axios.get(`${API}/analytics/aov-detail`)
+      .then(r => { if (!cancelled) setData(r.data); })
+      .catch(e => { if (!cancelled) setErr(e?.response?.data?.detail || e.message); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm overflow-y-auto"
+      onClick={onClose}
+      data-testid="aov-detail-modal"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card max-w-5xl mx-auto my-4 sm:my-10 p-5 sm:p-8"
+        role="dialog"
+        aria-label="AOV detail"
+      >
+        <div className="flex items-start justify-between gap-3 mb-6 flex-wrap">
+          <div>
+            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-400 mb-1">
+              AOV Detail · {data?.year || new Date().getFullYear()}
+            </div>
+            <div className="font-display font-bold text-2xl sm:text-3xl tracking-tight">
+              {data ? moneyCents(data.avg_order_value) : "…"}
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">
+              {data
+                ? <>{data.total_orders.toLocaleString("en-AU")} orders · {moneyCents(data.total_revenue)} revenue</>
+                : "loading…"}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="btn btn-ghost !p-2"
+            aria-label="Close"
+            data-testid="aov-detail-close"
+          >
+            <X size={16}/>
+          </button>
+        </div>
+
+        {err && (
+          <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm">
+            Failed to load AOV detail: {err}
+          </div>
+        )}
+
+        {!data && !err && (
+          <div className="py-20 text-center text-slate-500 flex items-center justify-center gap-2">
+            <Loader2 className="animate-spin" size={16}/> loading AOV detail…
+          </div>
+        )}
+
+        {data && (
+          <div className="grid gap-6">
+            <AovHighlightsRow data={data}/>
+            <AovMonthlyTrend monthly={data.monthly} year={data.year}/>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <AovDistribution rows={data.distribution}/>
+              <AovByCategory rows={data.by_category}/>
+            </div>
+            <AovTopOrders orders={data.top_orders}/>
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end">
+          <button onClick={onClose} className="btn btn-primary" data-testid="aov-detail-close-footer">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function AovHighlightsRow({ data }) {
+  const best = data.best_month;
+  const worst = data.worst_month;
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="aov-highlights">
+      <div className="p-4 rounded-lg border border-pink-200 bg-pink-50/60">
+        <div className="text-[10px] font-mono uppercase tracking-widest text-pink-800 mb-1">Avg order value</div>
+        <div className="font-display font-bold text-lg text-pink-900">{moneyCents(data.avg_order_value)}</div>
+        <div className="text-xs text-slate-500 font-mono">{data.total_orders.toLocaleString("en-AU")} orders YTD</div>
+      </div>
+      <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50/60">
+        <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-emerald-700 mb-1">
+          <Trophy size={11}/> Best AOV month
+        </div>
+        {best ? (
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <div className="font-display font-bold text-lg">{best.month}</div>
+            <div className="font-mono text-emerald-700 font-bold">{moneyCents(best.aov)}</div>
+            <div className="text-xs text-slate-500 font-mono">{best.orders} orders</div>
+          </div>
+        ) : <div className="text-sm text-slate-400 italic">No sales yet</div>}
+      </div>
+      <div className="p-4 rounded-lg border border-amber-200 bg-amber-50/60">
+        <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-amber-800 mb-1">
+          <TrendingDown size={11}/> Worst AOV month
+        </div>
+        {worst ? (
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <div className="font-display font-bold text-lg">{worst.month}</div>
+            <div className="font-mono text-amber-800 font-bold">{moneyCents(worst.aov)}</div>
+            <div className="text-xs text-slate-500 font-mono">{worst.orders} orders</div>
+          </div>
+        ) : <div className="text-sm text-slate-400 italic">No sales yet</div>}
+      </div>
+    </div>
+  );
+}
+
+
+function AovMonthlyTrend({ monthly, year }) {
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="aov-monthly-trend">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="font-display font-bold">AOV trend · {year}</div>
+          <div className="text-xs text-slate-500">Month-over-month average order value</div>
+        </div>
+        <span className="chip chip-primary text-[10px]">AUD</span>
+      </div>
+      <div className="h-56 sm:h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={monthly} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid stroke="#EEF0F5" strokeDasharray="3 3" vertical={false}/>
+            <XAxis dataKey="month" tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false}/>
+            <YAxis tickFormatter={(v) => `$${(v).toFixed(0)}`} tick={{ fill: "#94A3B8", fontSize: 11 }} tickLine={false} axisLine={false} width={50}/>
+            <Tooltip
+              contentStyle={{ background: "#fff", border: "1px solid #EAEAF0", borderRadius: 10, fontSize: 12 }}
+              formatter={(v) => [moneyCents(v), "AOV"]}
+              labelFormatter={(l) => `${l} ${year}`}
+            />
+            <Line type="monotone" dataKey="aov" stroke="#EC4899" strokeWidth={2.5} dot={{ r: 4, fill: "#EC4899" }} activeDot={{ r: 6 }}/>
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+
+function AovDistribution({ rows }) {
+  const totalCount = rows.reduce((sum, r) => sum + r.count, 0);
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="aov-distribution">
+      <div className="font-display font-bold mb-3">Order size distribution · YTD</div>
+      {totalCount === 0 ? (
+        <div className="text-sm text-slate-400 italic py-8 text-center">No orders yet.</div>
+      ) : (
+        <div className="grid gap-2">
+          {rows.map((r) => {
+            const pct = totalCount > 0 ? Math.round((r.count / totalCount) * 100) : 0;
+            return (
+              <div key={r.label} className="grid grid-cols-[minmax(90px,120px)_1fr_auto] items-center gap-3" data-testid={`aov-bucket-${r.label}`}>
+                <div className="text-xs font-medium font-mono">{r.label}</div>
+                <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-pink-500 to-indigo-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <div className="font-mono text-xs text-slate-700 tabular-nums w-20 text-right">
+                  {r.count.toLocaleString("en-AU")} <span className="text-slate-400">({pct}%)</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function AovByCategory({ rows }) {
+  const max = rows.reduce((m, r) => Math.max(m, r.aov), 0) || 1;
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="aov-by-category">
+      <div className="font-display font-bold mb-3 flex items-center gap-2"><Layers size={14} className="text-slate-500"/> AOV by category · YTD</div>
+      {rows.length === 0 ? (
+        <div className="text-sm text-slate-400 italic py-8 text-center">No sales yet.</div>
+      ) : (
+        <div className="grid gap-2 max-h-72 overflow-y-auto pr-1">
+          {rows.map((r) => {
+            const pct = Math.round((r.aov / max) * 100);
+            return (
+              <div key={r.category} className="grid grid-cols-[minmax(90px,140px)_1fr_auto] items-center gap-3" data-testid={`aov-category-${r.category}`}>
+                <div className="text-xs font-medium capitalize truncate" title={r.category}>{r.category}</div>
+                <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-pink-500 to-indigo-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <div className="font-mono text-xs text-slate-700 tabular-nums w-20 text-right">
+                  {moneyCents(r.aov)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function AovTopOrders({ orders }) {
+  return (
+    <div className="rounded-lg border hairline p-4" data-testid="aov-top-orders">
+      <div className="font-display font-bold mb-3">Top 5 highest-value orders · YTD</div>
+      {orders.length === 0 ? (
+        <div className="text-sm text-slate-400 italic py-8 text-center">No orders yet.</div>
+      ) : (
+        <div className="grid gap-2">
+          {orders.map((o, i) => (
+            <div key={o.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50" data-testid={`aov-top-order-${i}`}>
+              <div className="w-6 h-6 grid place-items-center rounded-md font-display font-bold text-white text-xs shrink-0" style={{ background: `linear-gradient(135deg, #EC4899, #4F46E5)`, opacity: 1 - i * 0.14 }}>{i + 1}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate" title={o.product_title}>{o.product_title}</div>
+                <div className="text-xs text-slate-500 truncate">
+                  {o.customer_name}{o.created_at ? ` · ${fmtDate(o.created_at)}` : ""}
+                </div>
+              </div>
+              <div className="font-mono text-sm font-bold text-pink-600 shrink-0">{moneyCents(o.total)}</div>
+            </div>
+          ))}
         </div>
       )}
     </div>

@@ -3147,6 +3147,174 @@ async def analytics_units_detail():
     }
 
 
+@api_router.get("/analytics/aov-detail")
+async def analytics_aov_detail():
+    """Powers the Avg Order Value expand modal on the dashboard.
+
+    Returns everything the AOV deep-dive needs in one round-trip:
+      • `total_revenue`, `total_orders`, `avg_order_value`
+      • `monthly[]`             — AOV + revenue + orders per month (Jan
+        → current, zero-filled). Margin math for the line chart is done
+        server-side (`revenue / orders`).
+      • `distribution[]`        — buckets `$0–50 / $50–100 / $100–250 /
+        $250–500 / $500+` with count + revenue per bucket.
+      • `top_orders[]`          — top 5 highest-total orders YTD with
+        `id`, `product_title`, `customer_name`, `total`, `created_at`.
+      • `by_category[]`         — AOV per category (revenue / orders),
+        sorted by AOV desc.
+      • `best_month` / `worst_month` — highest / lowest AOV month (only
+        months with orders). `null` when there are no sales yet.
+    """
+    now = datetime.now(timezone.utc)
+    year = now.year
+    year_start = datetime(year, 1, 1, tzinfo=timezone.utc).isoformat()
+    now_iso = now.isoformat()
+
+    # --- Monthly AOV series ----------------------------------------------
+    monthly_pipeline = [
+        {"$match": {
+            "status": {"$ne": "cancelled"},
+            "created_at": {"$gte": year_start, "$lte": now_iso},
+        }},
+        {"$addFields": {"month": {"$substr": ["$created_at", 0, 7]}}},
+        {"$group": {
+            "_id": "$month",
+            "revenue": {"$sum": "$total"},
+            "orders":  {"$sum": 1},
+        }},
+        {"$sort": {"_id": 1}},
+    ]
+    raw = await db.orders.aggregate(monthly_pipeline).to_list(24)
+    monthly_map = {r["_id"]: r for r in raw}
+    month_labels = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ]
+    monthly = []
+    for m in range(1, now.month + 1):
+        key = f"{year:04d}-{m:02d}"
+        row = monthly_map.get(key, {"revenue": 0, "orders": 0})
+        orders = row.get("orders", 0) or 0
+        revenue = row.get("revenue", 0) or 0
+        aov = round(revenue / orders, 2) if orders > 0 else 0.0
+        monthly.append({
+            "month": month_labels[m - 1],
+            "month_key": key,
+            "revenue": round(revenue, 2),
+            "orders": orders,
+            "aov": aov,
+        })
+
+    # --- Best / worst AOV month (only months with orders) ----------------
+    best_month = worst_month = None
+    with_sales = [m for m in monthly if m["orders"] > 0]
+    if with_sales:
+        b = max(with_sales, key=lambda m: m["aov"])
+        w = min(with_sales, key=lambda m: m["aov"])
+        best_month = {"month": b["month"], "month_key": b["month_key"], "aov": b["aov"], "orders": b["orders"]}
+        worst_month = {"month": w["month"], "month_key": w["month_key"], "aov": w["aov"], "orders": w["orders"]}
+
+    # --- Order-size distribution -----------------------------------------
+    # Buckets are inclusive of the lower bound, exclusive of the upper.
+    # The $500+ bucket is open-ended.
+    BUCKETS = [
+        ("$0 – $50",     0,   50),
+        ("$50 – $100",   50,  100),
+        ("$100 – $250",  100, 250),
+        ("$250 – $500",  250, 500),
+        ("$500+",        500, None),
+    ]
+    distribution = []
+    for label, lo, hi in BUCKETS:
+        rng = {"$gte": lo}
+        if hi is not None:
+            rng["$lt"] = hi
+        agg = await db.orders.aggregate([
+            {"$match": {
+                "status": {"$ne": "cancelled"},
+                "created_at": {"$gte": year_start},
+                "total": rng,
+            }},
+            {"$group": {"_id": None, "count": {"$sum": 1},
+                        "revenue": {"$sum": "$total"}}},
+        ]).to_list(1)
+        row = agg[0] if agg else {"count": 0, "revenue": 0}
+        distribution.append({
+            "label": label,
+            "min": lo,
+            "max": hi,
+            "count": row.get("count", 0),
+            "revenue": round(row.get("revenue", 0) or 0, 2),
+        })
+
+    # --- Top 5 highest-total orders --------------------------------------
+    top_orders_raw = await db.orders.find(
+        {"status": {"$ne": "cancelled"}, "created_at": {"$gte": year_start}},
+        {"_id": 0, "id": 1, "product_title": 1, "customer_name": 1,
+         "total": 1, "created_at": 1, "product_id": 1},
+    ).sort("total", -1).limit(5).to_list(5)
+    top_orders = [
+        {
+            "id": o.get("id"),
+            "product_id": o.get("product_id"),
+            "product_title": o.get("product_title") or "Untitled",
+            "customer_name": o.get("customer_name") or "—",
+            "total": round(o.get("total", 0) or 0, 2),
+            "created_at": o.get("created_at"),
+        }
+        for o in top_orders_raw
+    ]
+
+    # --- AOV per category ------------------------------------------------
+    cat_pipeline = [
+        {"$lookup": {"from": "products", "localField": "product_id",
+                     "foreignField": "id", "as": "p"}},
+        {"$unwind": "$p"},
+        {"$match": {"status": {"$ne": "cancelled"}, "created_at": {"$gte": year_start}}},
+        {"$group": {
+            "_id": "$p.category",
+            "revenue": {"$sum": "$total"},
+            "orders":  {"$sum": 1},
+        }},
+        {"$match": {"orders": {"$gt": 0}}},
+        {"$addFields": {"aov": {"$divide": ["$revenue", "$orders"]}}},
+        {"$sort": {"aov": -1}},
+    ]
+    by_category = []
+    for c in await db.orders.aggregate(cat_pipeline).to_list(50):
+        by_category.append({
+            "category": c["_id"] or "other",
+            "revenue": round(c.get("revenue", 0) or 0, 2),
+            "orders":  c.get("orders", 0),
+            "aov": round(c.get("aov", 0) or 0, 2),
+        })
+
+    # --- YTD totals -------------------------------------------------------
+    ytd_totals = await db.orders.aggregate([
+        {"$match": {"status": {"$ne": "cancelled"}, "created_at": {"$gte": year_start}}},
+        {"$group": {"_id": None,
+                    "revenue": {"$sum": "$total"},
+                    "orders":  {"$sum": 1}}},
+    ]).to_list(1)
+    total_revenue = round(ytd_totals[0].get("revenue", 0) or 0, 2) if ytd_totals else 0.0
+    total_orders  = ytd_totals[0].get("orders", 0) if ytd_totals else 0
+    avg_order_value = round(total_revenue / total_orders, 2) if total_orders else 0.0
+
+    return {
+        "year": year,
+        "as_of": now_iso,
+        "total_revenue": total_revenue,
+        "total_orders": total_orders,
+        "avg_order_value": avg_order_value,
+        "monthly": monthly,
+        "distribution": distribution,
+        "top_orders": top_orders,
+        "by_category": by_category,
+        "best_month": best_month,
+        "worst_month": worst_month,
+    }
+
+
 @api_router.get("/analytics/report")
 async def analytics_report():
     """Deeper reporting: top sellers, margin trend, category perf, best margin products."""

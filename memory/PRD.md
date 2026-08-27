@@ -1409,3 +1409,49 @@ Notification Bell deep-links) — zero regressions detected.
   starts with `data:image/png;base64,` with `type=image/png`. Sidebar
   updates in lockstep.
 
+
+
+## Feb 25, 2026 — AOV deep-dive modal (last KPI wired)
+- **Backend**: new `GET /api/analytics/aov-detail` returns everything the
+  Avg Order Value modal needs in one round-trip:
+  - `total_revenue`, `total_orders`, `avg_order_value`
+  - `monthly[]` — revenue + orders + AOV per month (Jan → current,
+    zero-filled). AOV computed server-side (`revenue / orders`, 0 when
+    no orders).
+  - `distribution[]` — five fixed buckets `$0–50`, `$50–100`,
+    `$100–250`, `$250–500`, `$500+` with count + revenue per bucket.
+    Sum of counts always equals `total_orders`.
+  - `top_orders[]` — top 5 highest-total orders YTD with id, product
+    title, customer, total, created_at.
+  - `by_category[]` — AOV per category (orders > 0 filter, sorted by
+    AOV desc).
+  - `best_month` / `worst_month` — highest / lowest AOV month
+    (months-with-orders only). Null when no sales.
+  - Cancelled orders excluded everywhere.
+- **Frontend — `AovDetailModal`** (`pages/Dashboard.jsx`):
+  - Wired to the AOV KpiCard via `onExpand`.
+    `data-testid="kpi-aov-ytd-expand"` on the trigger and
+    `aov-detail-modal` on the dialog.
+  - **AovHighlightsRow** — 3-card grid (Avg order value pink card /
+    Best AOV month emerald trophy / Worst AOV month amber down-arrow).
+  - **AovMonthlyTrend** — Recharts LineChart of AOV month-over-month
+    with a pink stroke and dot markers.
+  - **AovDistribution** — 5 buckets with gradient bars (pink → indigo)
+    plus count + % readout per row.
+  - **AovByCategory** — horizontal bars normalised to the max AOV,
+    scrollable max-h-72, sorted by AOV desc.
+  - **AovTopOrders** — top-5 list with numbered rank chip, product
+    title + customer + date subtitle, and a pink total on the right.
+  - Fully responsive: single-column on mobile, 2-column
+    distribution/category split from `lg:` up. Escape / click-outside
+    / Close button / Close footer.
+- **Tests**: `/app/backend/tests/test_aov_detail.py` — 8 pytest cases
+  (all pass): shape, `avg_order_value` math, monthly zero-fill + AOV
+  math, best/worst selection, distribution has all 5 buckets in order,
+  distribution counts sum to `total_orders`, top_orders capped + sorted
+  desc, by_category AOV math + desc sort.
+- **Verified live**: Playwright screenshot shows all 5 sub-cards
+  render (`aov-highlights`, `aov-monthly-trend`, `aov-distribution`,
+  `aov-by-category`, `aov-top-orders`) with pink accents and real
+  data from the demo seed.
+

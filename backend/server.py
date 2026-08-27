@@ -1595,7 +1595,7 @@ async def push_test():
     n = {
         "type": "new_order",
         "title": "Test push",
-        "body": "This is a test push from your Aussie Admin dashboard.",
+        "body": "This is a test push from your PCAdmin dashboard.",
         "product_title": "Test Product",
         "data": {"customer_name": "Test Buyer", "total": 99.99, "quantity": 1},
         "at": datetime.now(timezone.utc).isoformat(),
@@ -3589,10 +3589,10 @@ async def use_bypass_token(token: str, request: Request):
 # ---------------------------------------------------------------------------
 # Singleton doc under `branding` (id="singleton"). Read is unauthenticated
 # because the sidebar header needs to render before the login screen paints
-# — otherwise the admin sees a "Aussie Admin" flash before their custom
+# — otherwise the admin sees a "PCAdmin" flash before their custom
 # label loads.
 _BRANDING_DEFAULTS = {
-    "name": "Aussie Admin",
+    "name": "PCAdmin",
     "subtitle": "v1.1 · AU",
     "logo": None,   # None → fall back to the built-in gradient monogram
 }

@@ -788,7 +788,7 @@ class AdminAccount(AdminAccountBase):
 # admin. Password intentionally lands on the well-known dev value —
 # `test_credentials.md` documents it for the QA/testing agent.
 _DEFAULT_MAIN_ADMIN = {
-    "name": "Aussie Admin",
+    "name": "PCAdmin",
     "email": "admin@example.com",
     "role": "admin",
     "is_main": True,

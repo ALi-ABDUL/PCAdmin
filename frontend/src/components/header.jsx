@@ -474,7 +474,7 @@ export function AvatarMenu() {
           <div className="flex items-center gap-3 p-2">
             <div className="w-11 h-11 rounded-full grid place-items-center text-white font-bold text-sm shrink-0" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>{initials}</div>
             <div className="min-w-0">
-              <div className="font-display font-bold text-sm truncate" data-testid="avatar-menu-name">{session.name || "Aussie Admin"}</div>
+              <div className="font-display font-bold text-sm truncate" data-testid="avatar-menu-name">{session.name || "PCAdmin"}</div>
               <div className="text-xs text-slate-500 truncate font-mono" data-testid="avatar-menu-email">{session.email || "—"}</div>
             </div>
           </div>

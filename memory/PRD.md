@@ -1353,3 +1353,37 @@ Notification Bell deep-links) — zero regressions detected.
     swaps from "Aussie Admin" → "Acme Retail Ops" the instant Save is
     clicked (no page reload), and Reset restores the original.
 
+
+
+## Feb 25, 2026 — Project rename → PCAdmin
+- Every user-visible "Aussie Admin" / "Aussie Admin Dash" / eBay AU
+  Scraper string replaced with **PCAdmin**:
+  - `frontend/src/components/header.jsx` — session-avatar fallback
+    label.
+  - `frontend/src/App.js` — auth-session default display name.
+  - `frontend/src/lib/branding.js` — client cache defaults.
+  - `frontend/src/pages/Settings.jsx` — reset-confirm dialog + save
+    fallback + placeholder + preview default.
+  - `frontend/public/index.html` — browser `<title>` now reads
+    "PCAdmin" (picks up on next hard-reload).
+  - `backend/models.py` — `_DEFAULT_MAIN_ADMIN.name` for new
+    installs.
+  - `backend/server.py` — branding singleton defaults +
+    documentation comments + the "test push" body copy on the
+    push-notifications settings endpoint.
+  - `backend/helpers.py` — customer welcome-email subject +
+    footer signature.
+  - `backend/tests/test_branding.py` — expected default `name`.
+- **Live branding singleton** in the DB updated via
+  `PUT /api/branding` so the sidebar header immediately reads
+  "PCAdmin" without waiting for a redeploy.
+- **Not renamed** (intentional): the internal cluster hostname
+  `ebay-au-harvester.preview.emergentagent.com` (infrastructure /
+  env-provided URL, not a project name) and the seed product title
+  `"Aussie Edition"` (a product name, not the platform name).
+- Verified: `grep -rn "Aussie Admin\|Aussie Admin Dash"` across
+  `/app/backend`, `/app/frontend/src`, `/app/frontend/public` returns
+  0 matches. Playwright screenshot confirms sidebar shows "PCAdmin"
+  with a "P" gradient monogram, welcome toast reads "Welcome back,
+  PCAdmin", 7/7 branding pytest cases pass.
+

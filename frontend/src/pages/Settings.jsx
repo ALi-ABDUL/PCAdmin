@@ -835,7 +835,7 @@ function BrandingCard() {
     setBusy(true);
     try {
       await saveBranding({
-        name: (form.name || "").trim() || "Aussie Admin",
+        name: (form.name || "").trim() || "PCAdmin",
         subtitle: (form.subtitle || "").trim(),
         logo: form.logo || null,
       });
@@ -849,8 +849,8 @@ function BrandingCard() {
   };
 
   const reset = async () => {
-    if (!window.confirm("Reset to the default 'Aussie Admin' branding?")) return;
-    const cleared = { name: "Aussie Admin", subtitle: "v1.1 · AU", logo: null };
+    if (!window.confirm("Reset to the default 'PCAdmin' branding?")) return;
+    const cleared = { name: "PCAdmin", subtitle: "v1.1 · AU", logo: null };
     setForm(cleared);
     await saveBranding(cleared);
     toast.success("Branding reset");
@@ -886,7 +886,7 @@ function BrandingCard() {
           )}
           <div className="min-w-0">
             <div className="font-display font-bold text-[15px] tracking-tight truncate" data-testid="branding-preview-name">
-              {form.name || "Aussie Admin"}
+              {form.name || "PCAdmin"}
             </div>
             {(form.subtitle || "").trim() && (
               <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500" data-testid="branding-preview-subtitle">
@@ -909,7 +909,7 @@ function BrandingCard() {
               onChange={(e) => patch({ name: e.target.value.slice(0, 40) })}
               maxLength={40}
               className="input w-full px-3 py-2"
-              placeholder="Aussie Admin"
+              placeholder="PCAdmin"
               data-testid="branding-name-input"
             />
           </Field>

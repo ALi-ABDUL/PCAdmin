@@ -50,7 +50,7 @@ export default function App() {
   // false and the login screen mounts.
   const [signedIn, setSignedIn] = useState(hasAdminSession());
   // Branding is fetched once at startup so the sidebar header renders
-  // with the admin's custom name / logo instead of a "Aussie Admin"
+  // with the admin's custom name / logo instead of a "PCAdmin"
   // flash. Subsequent updates flow through the `brandingchange` event.
   useEffect(() => { refreshBranding(); }, []);
   // Country-blocked state: when any backend call returns 403 with

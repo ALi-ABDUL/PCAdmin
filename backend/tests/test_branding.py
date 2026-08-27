@@ -26,7 +26,7 @@ TINY_PNG = (
 
 def _reset():
     requests.put(f"{API}/branding", json={
-        "name": "Aussie Admin",
+        "name": "PCAdmin",
         "subtitle": "v1.1 · AU",
         "logo": None,
     }, timeout=10)
@@ -40,7 +40,7 @@ def test_get_branding_returns_defaults_after_reset():
     r = requests.get(f"{API}/branding", timeout=10)
     assert r.status_code == 200
     body = r.json()
-    assert body["name"] == "Aussie Admin"
+    assert body["name"] == "PCAdmin"
     assert body["subtitle"] == "v1.1 · AU"
     assert body["logo"] is None
     assert body["updated_at"]

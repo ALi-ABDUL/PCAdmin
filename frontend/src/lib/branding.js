@@ -15,7 +15,7 @@ import { API } from "./api";
 // framework, just a plain object + event bus. Consumers must call
 // `getBranding()` to read (which returns a fresh reference).
 let _cache = {
-  name: "Aussie Admin",
+  name: "PCAdmin",
   subtitle: "v1.1 · AU",
   logo: null,
 };
@@ -28,7 +28,7 @@ export async function refreshBranding() {
   try {
     const { data } = await axios.get(`${API}/branding`);
     _cache = {
-      name: data.name || "Aussie Admin",
+      name: data.name || "PCAdmin",
       subtitle: data.subtitle || "",
       logo: data.logo || null,
     };
@@ -42,7 +42,7 @@ export async function refreshBranding() {
 export async function saveBranding(patch) {
   const { data } = await axios.put(`${API}/branding`, patch);
   _cache = {
-    name: data.name || "Aussie Admin",
+    name: data.name || "PCAdmin",
     subtitle: data.subtitle || "",
     logo: data.logo || null,
   };

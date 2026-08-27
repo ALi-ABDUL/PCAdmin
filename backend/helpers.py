@@ -890,7 +890,7 @@ def _customer_email_html(title: str, intro: str, rows: list, footer: str = "") -
 <html><body style="font-family:Arial,sans-serif;background:#F7F7FB;padding:32px;color:#0F172A;">
   <table role="presentation" cellspacing="0" cellpadding="0" width="100%" style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #EAEAF0;border-radius:12px;overflow:hidden;">
     <tr><td style="padding:20px 24px;background:linear-gradient(135deg,#4F46E5,#EC4899);color:#fff;">
-      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:0.85;">Aussie Admin Dash</div>
+      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:0.85;">PCAdmin</div>
       <div style="font-size:20px;font-weight:700;margin-top:4px;">{title}</div>
     </td></tr>
     <tr><td style="padding:16px 24px;color:#334155;font-size:14px;">{intro}</td></tr>
@@ -992,7 +992,7 @@ async def send_customer_order_cancellation(order: dict) -> str:
 async def send_customer_welcome_email(customer: dict) -> str:
     to = customer.get("email") or ""
     name = customer.get("name") or customer.get("full_name") or "there"
-    subject = "Welcome to Aussie Admin Dash 🎉"
+    subject = "Welcome to PCAdmin 🎉"
     html = _customer_email_html(
         title=f"Welcome, {name}!",
         intro="Your account is ready to go. You can now track your orders, "

@@ -220,6 +220,27 @@ class CountdownStart(BaseModel):
     sale_price: float = Field(..., gt=0)
 
 
+# ---------------------------------------------------------------------------
+# Branding
+# ---------------------------------------------------------------------------
+# Singleton doc under `branding` (id="singleton") powering the sidebar
+# header + browser tab. Logo is stored inline as a data-URL so we don't
+# need Object Storage for a single tiny asset — 3 MB cap enforced below.
+class BrandingUpdate(BaseModel):
+    """PUT body for `/api/branding`.
+
+    `name`     — top-line label in the sidebar header (max 40 chars).
+    `subtitle` — the small mono label under the name (max 40 chars).
+                 Kept optional so admins can drop it entirely.
+    `logo`     — full data-URL (`data:image/...;base64,...`) OR `null`
+                 to fall back to the built-in gradient monogram.
+                 Enforced 3 MB payload cap.
+    """
+    name: str = Field(..., min_length=1, max_length=40)
+    subtitle: Optional[str] = Field(default="", max_length=40)
+    logo: Optional[str] = Field(default=None, max_length=4_500_000)  # ~3 MB base64
+
+
 # AU address generator used by the demo seed + backfill for existing orders without addresses.
 class ShippingAddress(BaseModel):
     full_name: Optional[str] = ""

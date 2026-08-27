@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, BadgeCheck, Copy, Database, Download, Globe2, KeyRound, LayoutGrid, LogIn, Lock, Moon, Palette, Pencil, Plus, RefreshCw, RotateCcw, Search, ShieldCheck, Sun, Trash2, Upload, UserPlus, X } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Copy, Database, Download, Globe2, Image as ImageIcon, KeyRound, LayoutGrid, LogIn, Lock, Moon, Palette, Pencil, Plus, RefreshCw, RotateCcw, Search, ShieldCheck, Sparkles, Sun, Trash2, Upload, UserPlus, X } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API, KEYS, loadKeys } from "../lib/api";
 import { applyTheme } from "../lib/theme";
+import { getBranding, refreshBranding, saveBranding } from "../lib/branding";
 import { ADMIN_ROLES, loadAdminSession, saveAdminSession } from "../lib/adminSession";
 import { DASHBOARD_WIDGETS, loadDashboardLayout, resetDashboardLayout, saveDashboardLayout } from "../lib/dashboardLayout";
 
 const TABS = [
   { id: "theme",     label: "Theme",            icon: Palette },
+  { id: "branding",  label: "Branding",         icon: Sparkles },
   { id: "accounts",  label: "Accounts",         icon: ShieldCheck },
   { id: "security",  label: "Security",         icon: Lock },
   { id: "layout",    label: "Dashboard Layout", icon: LayoutGrid },
@@ -53,6 +55,7 @@ export function SettingsPage() {
       </div>
 
       {activeTab === "theme"    && <ThemeCard/>}
+      {activeTab === "branding" && <BrandingCard/>}
       {activeTab === "accounts" && <AccountsCard/>}
       {activeTab === "security" && <SecurityCard/>}
       {activeTab === "layout"   && <DashboardLayoutCard/>}
@@ -769,6 +772,208 @@ function SecurityCard() {
               </button>
             );
           })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+/* ----------------------------- Branding tab -------------------------------
+ *
+ * Dashboard name + optional custom logo shown at the top of the sidebar.
+ * Live-updates every mounted view via the `brandingchange` event bus in
+ * `lib/branding.js` — no page refresh needed.
+ *
+ * Logo is stored inline as a data-URL (base64) so we don't need Object
+ * Storage for a single tiny asset. The backend caps the payload at ~3 MB
+ * and validates the `data:image/…` prefix.
+ * ------------------------------------------------------------------------- */
+
+const MAX_LOGO_BYTES = 3 * 1024 * 1024; // 3 MB
+const ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml", "image/gif"];
+
+function BrandingCard() {
+  const [form, setForm] = useState(() => getBranding());
+  const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  // Prime once from the network — the client library caches, but a fresh
+  // fetch here guarantees we're editing the latest server state even if
+  // another admin session updated it moments before.
+  useEffect(() => {
+    refreshBranding().then(setForm);
+  }, []);
+
+  const patch = (kv) => { setForm(f => ({ ...f, ...kv })); setDirty(true); };
+
+  const onPickFile = async (file) => {
+    if (!file) return;
+    if (!ALLOWED_LOGO_TYPES.includes(file.type)) {
+      toast.error("Unsupported file type", { description: "PNG, JPEG, WebP, GIF or SVG only." });
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      toast.error("Logo is too large", { description: `Max 3 MB · this file is ${(file.size / 1024 / 1024).toFixed(1)} MB.` });
+      return;
+    }
+    // Read as data-URL so we can preview instantly + POST the same
+    // string to the backend.
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    patch({ logo: dataUrl });
+  };
+
+  const clearLogo = () => { patch({ logo: null }); };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await saveBranding({
+        name: (form.name || "").trim() || "Aussie Admin",
+        subtitle: (form.subtitle || "").trim(),
+        logo: form.logo || null,
+      });
+      toast.success("Branding updated");
+      setDirty(false);
+    } catch (e) {
+      toast.error("Save failed", { description: e?.response?.data?.detail || e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reset = async () => {
+    if (!window.confirm("Reset to the default 'Aussie Admin' branding?")) return;
+    const cleared = { name: "Aussie Admin", subtitle: "v1.1 · AU", logo: null };
+    setForm(cleared);
+    await saveBranding(cleared);
+    toast.success("Branding reset");
+    setDirty(false);
+  };
+
+  const monogram = (form.name || "A").trim().charAt(0).toUpperCase();
+
+  return (
+    <div className="grid gap-4" data-testid="branding-card">
+      {/* Live preview strip — mirrors the actual sidebar header so admins
+          see the change before they hit Save. */}
+      <div className="card p-5">
+        <div className="text-[10px] font-mono uppercase tracking-widest text-slate-400 mb-2">
+          Sidebar preview
+        </div>
+        <div className="p-3 rounded-lg border hairline bg-slate-50/60 flex items-center gap-3" data-testid="branding-preview">
+          {form.logo ? (
+            <img
+              src={form.logo}
+              alt="preview"
+              className="w-9 h-9 rounded-xl object-cover shrink-0 border hairline bg-white"
+              data-testid="branding-preview-logo"
+            />
+          ) : (
+            <div
+              className="w-9 h-9 grid place-items-center rounded-xl text-white font-black font-display shrink-0"
+              style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}
+              data-testid="branding-preview-monogram"
+            >
+              {monogram}
+            </div>
+          )}
+          <div className="min-w-0">
+            <div className="font-display font-bold text-[15px] tracking-tight truncate" data-testid="branding-preview-name">
+              {form.name || "Aussie Admin"}
+            </div>
+            {(form.subtitle || "").trim() && (
+              <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500" data-testid="branding-preview-subtitle">
+                {form.subtitle}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="card p-5">
+        <div className="font-display font-bold flex items-center gap-2 mb-1">
+          <Sparkles size={14} className="text-indigo-500"/> Dashboard identity
+        </div>
+        <div className="text-xs text-slate-500 mb-4">Applied instantly across every admin session that reloads a page after saving — no restart needed.</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Dashboard name">
+            <input
+              value={form.name || ""}
+              onChange={(e) => patch({ name: e.target.value.slice(0, 40) })}
+              maxLength={40}
+              className="input w-full px-3 py-2"
+              placeholder="Aussie Admin"
+              data-testid="branding-name-input"
+            />
+          </Field>
+          <Field label="Subtitle (optional)">
+            <input
+              value={form.subtitle || ""}
+              onChange={(e) => patch({ subtitle: e.target.value.slice(0, 40) })}
+              maxLength={40}
+              className="input w-full px-3 py-2 font-mono text-sm"
+              placeholder="v1.1 · AU"
+              data-testid="branding-subtitle-input"
+            />
+          </Field>
+        </div>
+
+        <div className="mt-6">
+          <Field label={<span className="flex items-center gap-2"><ImageIcon size={12}/> Logo</span>}>
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="btn btn-primary cursor-pointer" data-testid="branding-logo-picker">
+                <Upload size={14}/>
+                <span>{form.logo ? "Replace logo" : "Upload logo"}</span>
+                <input
+                  type="file"
+                  accept={ALLOWED_LOGO_TYPES.join(",")}
+                  onChange={(e) => onPickFile(e.target.files?.[0])}
+                  className="hidden"
+                  data-testid="branding-logo-file-input"
+                />
+              </label>
+              {form.logo && (
+                <button
+                  type="button"
+                  onClick={clearLogo}
+                  className="btn btn-ghost text-red-600 hover:bg-red-50"
+                  data-testid="branding-logo-clear"
+                >
+                  <Trash2 size={14}/> Remove logo
+                </button>
+              )}
+              <span className="text-[11px] text-slate-500">
+                PNG · JPEG · WebP · GIF · SVG · up to 3 MB
+              </span>
+            </div>
+          </Field>
+        </div>
+
+        <div className="mt-6 flex items-center gap-3 flex-wrap">
+          <button
+            onClick={save}
+            disabled={busy || !dirty}
+            className="btn btn-primary"
+            data-testid="branding-save-btn"
+          >
+            {busy ? <RefreshCw className="animate-spin" size={14}/> : <BadgeCheck size={14}/>}
+            Save changes
+          </button>
+          <button
+            onClick={reset}
+            disabled={busy}
+            className="btn btn-ghost"
+            data-testid="branding-reset-btn"
+          >
+            <RotateCcw size={14}/> Reset to default
+          </button>
         </div>
       </div>
     </div>

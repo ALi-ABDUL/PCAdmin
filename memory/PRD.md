@@ -1308,3 +1308,48 @@ Notification Bell deep-links) — zero regressions detected.
   through `_expire_countdowns()` and read back the notification —
   correct type, title "Countdown sale ended", full body with prices.
 
+
+
+## Feb 25, 2026 — Branding (dashboard name + custom logo)
+- **Backend**
+  - `BrandingUpdate` pydantic model (`models.py`) — `name` (1..40),
+    `subtitle` (optional, ≤ 40), `logo` (data-URL, ≤ ~3 MB base64).
+  - Singleton doc `branding` (id="singleton") with lazy seed in
+    `_get_branding()`. Defaults: `name="Aussie Admin"`, `subtitle="v1.1 · AU"`,
+    `logo=None`.
+  - `GET /api/branding` — public (needed to render the sidebar before
+    login).
+  - `PUT /api/branding` — validates `logo` starts with `data:image/…`
+    so no cross-origin URLs sneak in.
+- **Frontend — client** (`lib/branding.js`) — module-level cache +
+  `refreshBranding()` / `saveBranding()` / `getBranding()` helpers and
+  a `brandingchange` window event so every mounted component
+  live-updates without a refresh.
+- **Frontend — Sidebar header** (`components/layout.jsx`) — subscribes
+  to `brandingchange` and renders either the uploaded logo or a
+  gradient monogram derived from the first letter of `name`.
+  Test IDs: `sidebar-branding`, `sidebar-branding-logo`,
+  `sidebar-branding-monogram`, `sidebar-branding-name`,
+  `sidebar-branding-subtitle`.
+- **Frontend — App boot** (`App.js`) — calls `refreshBranding()` once
+  on mount so the sidebar paints with the current branding before any
+  user interaction.
+- **Frontend — Settings › Branding tab** (`pages/Settings.jsx`):
+  - **Sidebar preview** card mirrors the exact sidebar header so the
+    admin sees the change before hitting Save.
+  - **Dashboard identity** card: Dashboard name + Subtitle inputs (both
+    capped at 40 chars) and a **Logo picker** (PNG / JPEG / WebP /
+    GIF / SVG, ≤ 3 MB). Uploads read via FileReader → data-URL preview
+    → same string sent to the backend. Remove-logo, Save-changes and
+    Reset-to-default buttons.
+  - Save shows a "Branding updated" toast; Reset asks for confirmation
+    and reverts to the seed defaults.
+- **Tests**
+  - `/app/backend/tests/test_branding.py` — 7 pytest cases (all pass):
+    default seed, name + subtitle persist, data-URL logo round-trip,
+    HTTP URL rejected (422), empty name rejected, long name rejected,
+    clearing subtitle + logo.
+  - Playwright smoke on the deployed preview confirmed sidebar name
+    swaps from "Aussie Admin" → "Acme Retail Ops" the instant Save is
+    clicked (no page reload), and Reset restores the original.
+

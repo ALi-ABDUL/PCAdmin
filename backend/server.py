@@ -39,7 +39,7 @@ from models import (
     DeliverySettingsUpdate,
     ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
-    CountdownStart,
+    CountdownStart, BrandingUpdate,
 )
 from countries import COUNTRIES, COUNTRY_CODES
 from helpers import (
@@ -3582,6 +3582,56 @@ async def use_bypass_token(token: str, request: Request):
 
 
 # --- End security endpoints --------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Branding — dashboard name + logo shown in the sidebar header.
+# ---------------------------------------------------------------------------
+# Singleton doc under `branding` (id="singleton"). Read is unauthenticated
+# because the sidebar header needs to render before the login screen paints
+# — otherwise the admin sees a "Aussie Admin" flash before their custom
+# label loads.
+_BRANDING_DEFAULTS = {
+    "name": "Aussie Admin",
+    "subtitle": "v1.1 · AU",
+    "logo": None,   # None → fall back to the built-in gradient monogram
+}
+
+
+async def _get_branding() -> dict:
+    """Fetch the singleton, seeding it lazily on first read."""
+    doc = await db.branding.find_one({"_id": "singleton"}, {"_id": 0})
+    if not doc:
+        seed = {**_BRANDING_DEFAULTS, "_id": "singleton",
+                "updated_at": _now_iso()}
+        await db.branding.insert_one(seed)
+        return {k: v for k, v in seed.items() if k != "_id"}
+    return {**_BRANDING_DEFAULTS, **doc}
+
+
+@api_router.get("/branding")
+async def get_branding():
+    """Public — every page fetches this on mount to render the sidebar."""
+    return await _get_branding()
+
+
+@api_router.put("/branding")
+async def put_branding(body: BrandingUpdate):
+    """Overwrite the branding singleton. Logo is validated to be a
+    data-URL when present so we don't store arbitrary strings."""
+    logo = (body.logo or "").strip() or None
+    if logo and not logo.startswith("data:image/"):
+        raise HTTPException(status_code=422, detail="logo must be a data:image/… URL")
+    patch = {
+        "name": body.name.strip(),
+        "subtitle": (body.subtitle or "").strip(),
+        "logo": logo,
+        "updated_at": _now_iso(),
+    }
+    await db.branding.update_one(
+        {"_id": "singleton"}, {"$set": patch}, upsert=True,
+    )
+    return await _get_branding()
 
 
 app.include_router(api_router)

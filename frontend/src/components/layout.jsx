@@ -8,11 +8,19 @@ import { Orders } from "../pages/Orders";
 import { Products } from "../pages/ProductsList";
 import { Suppliers } from "../pages/Suppliers";
 import { canAccess, loadAdminSession } from "../lib/adminSession";
+import { getBranding } from "../lib/branding";
 
 export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomerCount = 0, onCustomersBadgeClick }) {
   // Track the active admin session so the sidebar can hide Store /
   // Payments / Settings for Managers. The Settings › Accounts UI dispatches
   // `adminsessionchange` whenever the admin swaps identity.
+  const [branding, setBranding] = useState(getBranding());
+  useEffect(() => {
+    const on = (e) => setBranding(e.detail || getBranding());
+    window.addEventListener("brandingchange", on);
+    return () => window.removeEventListener("brandingchange", on);
+  }, []);
+  const monogram = (branding.name || "A").trim().charAt(0).toUpperCase();
   const [role, setRole] = useState(loadAdminSession().role);
   useEffect(() => {
     const on = (e) => setRole(e?.detail?.role || loadAdminSession().role);
@@ -42,11 +50,28 @@ export function Sidebar({ tab, setTab, mobileOpen, setMobileOpen, unreadCustomer
 
   const content = (
     <>
-      <div className="px-5 py-5 flex items-center gap-3">
-        <div className="w-9 h-9 grid place-items-center rounded-xl text-white font-black font-display shrink-0" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>A</div>
+      <div className="px-5 py-5 flex items-center gap-3" data-testid="sidebar-branding">
+        {branding.logo ? (
+          <img
+            src={branding.logo}
+            alt=""
+            className="w-9 h-9 rounded-xl object-cover shrink-0 border hairline bg-white"
+            data-testid="sidebar-branding-logo"
+          />
+        ) : (
+          <div
+            className="w-9 h-9 grid place-items-center rounded-xl text-white font-black font-display shrink-0"
+            style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}
+            data-testid="sidebar-branding-monogram"
+          >
+            {monogram}
+          </div>
+        )}
         <div className="min-w-0">
-          <div className="font-display font-bold text-[15px] tracking-tight truncate">Aussie Admin</div>
-          <div className="text-[10px] font-mono uppercase tracking-widest text-[color:var(--dim)]">v1.1 · AU</div>
+          <div className="font-display font-bold text-[15px] tracking-tight truncate" data-testid="sidebar-branding-name">{branding.name}</div>
+          {branding.subtitle && (
+            <div className="text-[10px] font-mono uppercase tracking-widest text-[color:var(--dim)]" data-testid="sidebar-branding-subtitle">{branding.subtitle}</div>
+          )}
         </div>
         <button className="ml-auto lg:hidden btn btn-ghost !p-1.5" onClick={() => setMobileOpen && setMobileOpen(false)}><X size={16}/></button>
       </div>

@@ -24,6 +24,7 @@ import { ScraperPage } from "./pages/Scraper";
 import { SettingsPage } from "./pages/Settings";
 import { AdminLoginScreen } from "./pages/AdminLogin";
 import { AccessDenied } from "./pages/AccessDenied";
+import { refreshBranding } from "./lib/branding";
 import { StoreManagement } from "./pages/Store";
 import { Suppliers } from "./pages/Suppliers";
 
@@ -48,6 +49,10 @@ export default function App() {
   // session which fires `adminsessionchange` → this state flips back to
   // false and the login screen mounts.
   const [signedIn, setSignedIn] = useState(hasAdminSession());
+  // Branding is fetched once at startup so the sidebar header renders
+  // with the admin's custom name / logo instead of a "Aussie Admin"
+  // flash. Subsequent updates flow through the `brandingchange` event.
+  useEffect(() => { refreshBranding(); }, []);
   // Country-blocked state: when any backend call returns 403 with
   // `code: "country_blocked"`, we swap the entire shell for the plain
   // AccessDenied page so nothing else about the dashboard leaks.

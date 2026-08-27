@@ -1455,3 +1455,22 @@ Notification Bell deep-links) — zero regressions detected.
   `aov-by-category`, `aov-top-orders`) with pink accents and real
   data from the demo seed.
 
+
+
+## Dashboard KPI click-throughs (2026-02-27)
+- Made the **Products** and **Low stock** secondary-KPI cards on the
+  main Dashboard clickable — they now navigate directly to the
+  Products › All Products and Products › Low Stock pages respectively.
+- Implementation (`/app/frontend/src/pages/Dashboard.jsx`):
+  - Added `onClick` handlers wired to `navigateTo({ tab: "products", section: "all" | "low-stock" })`.
+  - Cards with an `onClick` render as `<button>` with hover-lift,
+    hover-shadow, subtle indigo tint on the number, an inline
+    arrow-right glyph that fades in on hover, and a focus-ring for
+    keyboard accessibility. Non-clickable cards keep their `<div>`.
+  - Added `data-testid="kpi-products-link"` and
+    `data-testid="kpi-low-stock-link"` for test coverage.
+- **Verified live** (Playwright, admin session):
+  - Products count (52) click → `/products` All Products, 51 items grid.
+  - Low stock count (4) click → Low Stock section with the 3 stocked
+    items (Resident Evil 4 PS5, Kogan EasyClean R40, Kogan 45L Air Fryer).
+

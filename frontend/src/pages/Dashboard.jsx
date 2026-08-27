@@ -53,11 +53,13 @@ export function Dashboard({ navigateTo }) {
     { label: "Avg order value",value: data.ytd.orders ? moneyCents(data.ytd.revenue / data.ytd.orders) : "—", sub: "YTD", icon: Percent, tone: "pink", testId: "kpi-aov-ytd", onExpand: () => setAovModalOpen(true) },
   ];
 
+  const goProducts    = () => navigateTo?.({ tab: "products", section: "all" });
+  const goLowStock    = () => navigateTo?.({ tab: "products", section: "low-stock" });
   const kpi2 = [
     { label: "Revenue (Month)", value: moneyCents(data.mtd.revenue), sub: `${data.mtd.orders} orders`, delta: "+12.4%" },
     { label: "Revenue (7d)",    value: moneyCents(data.last7.revenue), sub: `${data.last7.orders} orders`, delta: "+4.1%" },
-    { label: "Products",        value: data.totals.products, sub: `${data.totals.active_products} active`, delta: null },
-    { label: "Low stock",       value: data.totals.low_stock, sub: "≤ 3 in stock", delta: null, danger: data.totals.low_stock > 0 },
+    { label: "Products",        value: data.totals.products, sub: `${data.totals.active_products} active`, delta: null, onClick: goProducts, testId: "kpi-products-link" },
+    { label: "Low stock",       value: data.totals.low_stock, sub: "≤ 3 in stock", delta: null, danger: data.totals.low_stock > 0, onClick: goLowStock, testId: "kpi-low-stock-link" },
   ];
 
   const catColors = ["#4F46E5", "#EC4899", "#0EA5E9", "#10B981", "#F59E0B"];
@@ -85,16 +87,33 @@ export function Dashboard({ navigateTo }) {
       {/* Secondary row */}
       {layout.kpi_secondary && (
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-          {kpi2.map((k) => (
-            <div key={k.label} className="card p-4">
-              <div className="text-xs text-slate-500 font-medium">{k.label}</div>
-              <div className="mt-1 flex items-baseline gap-2">
-                <div className={`font-display text-2xl font-bold ${k.danger ? "text-red-600" : ""}`}>{k.value}</div>
-                {k.delta && <span className="chip chip-success">{k.delta}</span>}
-              </div>
-              <div className="text-xs text-slate-400 mt-0.5">{k.sub}</div>
-            </div>
-          ))}
+          {kpi2.map((k) => {
+            const clickable = typeof k.onClick === "function";
+            const Wrapper = clickable ? "button" : "div";
+            const wrapperProps = clickable
+              ? {
+                  type: "button",
+                  onClick: k.onClick,
+                  "data-testid": k.testId,
+                  className:
+                    "card p-4 text-left w-full cursor-pointer transition hover:-translate-y-0.5 hover:shadow-md hover:border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 group",
+                  "aria-label": `Open ${k.label}`,
+                }
+              : { className: "card p-4" };
+            return (
+              <Wrapper key={k.label} {...wrapperProps}>
+                <div className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                  {k.label}
+                  {clickable && <ArrowRight size={11} className="opacity-0 group-hover:opacity-70 transition -mb-0.5"/>}
+                </div>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <div className={`font-display text-2xl font-bold ${k.danger ? "text-red-600" : clickable ? "group-hover:text-indigo-600 transition" : ""}`}>{k.value}</div>
+                  {k.delta && <span className="chip chip-success">{k.delta}</span>}
+                </div>
+                <div className="text-xs text-slate-400 mt-0.5">{k.sub}</div>
+              </Wrapper>
+            );
+          })}
         </div>
       )}
 

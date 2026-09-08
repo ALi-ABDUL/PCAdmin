@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
+__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_update_schedule_entry', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
 
 
 import bcrypt
@@ -195,28 +195,43 @@ async def _get_scraper_schedule() -> dict:
     doc = await db.scraper_schedule.find_one({"id": "singleton"}, {"_id": 0})
     if not doc:
         await db.scraper_schedule.insert_one({**SCRAPER_SCHEDULE_DEFAULTS})
-        return {**SCRAPER_SCHEDULE_DEFAULTS}
-    return {**SCRAPER_SCHEDULE_DEFAULTS, **doc}
+        doc = {**SCRAPER_SCHEDULE_DEFAULTS}
+    merged = {**SCRAPER_SCHEDULE_DEFAULTS, **doc}
+    # Auto-migrate: legacy singletons only carry the scalar fields — seed a
+    # `schedules[0]` mirror the first time we read them so the multi-schedule
+    # UI has something to render.
+    if not merged.get("schedules"):
+        merged["schedules"] = [{
+            "id": uuid.uuid4().hex,
+            "enabled": bool(merged.get("enabled", True)),
+            "start_time_hhmm": merged.get("start_time_hhmm") or "02:00",
+            "frequency": merged.get("frequency") or "daily",
+            "stop_date": merged.get("stop_date"),
+            "next_run_at": merged.get("next_run_at"),
+            "last_run_at": merged.get("last_run_at"),
+            "last_run_stats": merged.get("last_run_stats"),
+        }]
+        await db.scraper_schedule.update_one(
+            {"id": "singleton"}, {"$set": {"schedules": merged["schedules"]}}, upsert=True,
+        )
+    return merged
 
 
-def _compute_next_run(sched: dict) -> Optional[str]:
-    """Given the current schedule, work out the next fire time (UTC ISO)."""
-    if not sched.get("enabled"):
+def _compute_next_run_for(entry: dict) -> Optional[str]:
+    """Next fire time (UTC ISO) for ONE schedule entry."""
+    if not entry.get("enabled"):
         return None
     now = datetime.now(timezone.utc)
-    # Anchor: today at start_time_hhmm (AEST) → UTC
-    hh, mm = (sched.get("start_time_hhmm") or "02:00").split(":")
+    hh, mm = (entry.get("start_time_hhmm") or "02:00").split(":")
     try:
         anchor = now.astimezone(_SYDNEY).replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
     except Exception:
         anchor = now.astimezone(_SYDNEY).replace(hour=2, minute=0, second=0, microsecond=0)
     anchor_utc = anchor.astimezone(timezone.utc)
-    interval = timedelta(seconds=FREQ_INTERVAL_SECONDS.get(sched.get("frequency", "daily"), 86400))
-    # Walk anchor forward by interval until it's in the future
+    interval = timedelta(seconds=FREQ_INTERVAL_SECONDS.get(entry.get("frequency", "daily"), 86400))
     while anchor_utc <= now:
         anchor_utc = anchor_utc + interval
-    # Stop-date check
-    stop = sched.get("stop_date")
+    stop = entry.get("stop_date")
     if stop:
         try:
             stop_dt = datetime.fromisoformat(stop).replace(tzinfo=timezone.utc)
@@ -225,6 +240,23 @@ def _compute_next_run(sched: dict) -> Optional[str]:
         except Exception:
             pass
     return anchor_utc.isoformat()
+
+
+def _compute_next_run(sched: dict) -> Optional[str]:
+    """Doc-level convenience: earliest next run across all enabled schedules,
+    or across the legacy scalar fields when no `schedules` list is present.
+    Kept for backwards compatibility with the singleton API."""
+    entries = sched.get("schedules") or []
+    if not entries:
+        # Legacy single-schedule path.
+        return _compute_next_run_for({
+            "enabled": sched.get("enabled"),
+            "start_time_hhmm": sched.get("start_time_hhmm"),
+            "frequency": sched.get("frequency"),
+            "stop_date": sched.get("stop_date"),
+        })
+    nexts = [n for n in (_compute_next_run_for(e) for e in entries) if n]
+    return min(nexts) if nexts else None
 
 def _classify_run(summary: Optional[dict], error: Optional[str]) -> str:
     """success | failed — 'failed' triggers a retry when the run came from the scheduler."""
@@ -250,11 +282,14 @@ async def _push_run_history(entry: dict) -> None:
         {"id": "singleton"}, {"$set": {"run_history": history}}, upsert=True,
     )
 
-async def _refresh_all_and_record(method: str = "auto", trigger: str = "scheduled", attempt: int = 1, original_run_id: Optional[str] = None) -> dict:
-    """Run a full refresh and record the outcome in run_history. On failure of a scheduled run, queue a 15-min retry."""
+async def _refresh_all_and_record(method: str = "auto", trigger: str = "scheduled", attempt: int = 1, original_run_id: Optional[str] = None, schedule_id: Optional[str] = None) -> dict:
+    """Run a full refresh and record the outcome in run_history. On failure of a scheduled run, queue a 15-min retry.
+
+    `schedule_id` names which schedule entry fired this run (multi-schedule
+    support). Manual runs pass `None` — they're not attached to any entry."""
     run_id = original_run_id or uuid.uuid4().hex
     started = datetime.now(timezone.utc)
-    logger.info(f"scraper schedule: run starting · trigger={trigger} attempt={attempt} id={run_id}")
+    logger.info(f"scraper schedule: run starting · trigger={trigger} attempt={attempt} id={run_id} sched={schedule_id}")
     summary: Optional[dict] = None
     error: Optional[str] = None
     try:
@@ -279,24 +314,31 @@ async def _refresh_all_and_record(method: str = "auto", trigger: str = "schedule
         "trigger": trigger,
         "stats": summary,
         "error": error,
+        "schedule_id": schedule_id,
     }
     await _push_run_history(entry)
 
     # NOTE: failed / blocked scrapes are silent — no admin notification. Admins
     # can still inspect run history via GET /api/scraper/schedule.
 
-    # Update last_run_at / last_run_stats on any completed attempt.
+    # Update last_run_at / last_run_stats on any completed attempt (doc-level
+    # mirror for backwards compat + per-entry stamp).
     await db.scraper_schedule.update_one(
         {"id": "singleton"},
         {"$set": {"last_run_at": finished.isoformat(), "last_run_stats": summary}},
         upsert=True,
     )
+    if schedule_id:
+        await _update_schedule_entry(schedule_id, {
+            "last_run_at": finished.isoformat(),
+            "last_run_stats": summary,
+        })
 
     # Retry orchestration: only for scheduled runs, only on first-attempt failure.
     retry_pending: Optional[dict] = None
     if trigger == "scheduled" and status == "failed" and attempt == 1:
         retry_at = (finished + timedelta(seconds=RETRY_DELAY_SECONDS)).isoformat()
-        retry_pending = {"retry_at": retry_at, "original_run_id": run_id, "trigger": "scheduled"}
+        retry_pending = {"retry_at": retry_at, "original_run_id": run_id, "trigger": "scheduled", "schedule_id": schedule_id}
         logger.info(f"scraper schedule: queued retry at {retry_at} for run {run_id}")
     # Clear retry_pending after a retry attempt (success or dead).
     await db.scraper_schedule.update_one(
@@ -306,24 +348,53 @@ async def _refresh_all_and_record(method: str = "auto", trigger: str = "schedule
     # Recompute next run (skip on retry — the primary schedule anchor is unchanged).
     if attempt == 1:
         sched = await _get_scraper_schedule()
-        next_run = _compute_next_run(sched)
-        await db.scraper_schedule.update_one({"id": "singleton"}, {"$set": {"next_run_at": next_run}})
-        logger.info(f"scraper schedule: run done · status={status} · next {next_run}")
+        # Refresh next_run_at on every enabled entry AND the doc-level mirror.
+        entries = sched.get("schedules") or []
+        for e in entries:
+            e["next_run_at"] = _compute_next_run_for(e)
+        next_run_doc = min([e["next_run_at"] for e in entries if e.get("next_run_at")], default=None)
+        await db.scraper_schedule.update_one(
+            {"id": "singleton"},
+            {"$set": {"schedules": entries, "next_run_at": next_run_doc}},
+        )
+        logger.info(f"scraper schedule: run done · status={status} · next {next_run_doc}")
     else:
         logger.info(f"scraper schedule: retry finished · status={status}")
     return summary or {"refreshed": 0, "sold_found": 0, "failed": 0, "total": 0, "error": error}
 
 
+async def _update_schedule_entry(schedule_id: str, fields: dict) -> None:
+    """Patch a single schedule entry inside the `schedules` list."""
+    sched = await _get_scraper_schedule()
+    entries = list(sched.get("schedules") or [])
+    changed = False
+    for e in entries:
+        if e.get("id") == schedule_id:
+            e.update(fields)
+            changed = True
+            break
+    if changed:
+        await db.scraper_schedule.update_one(
+            {"id": "singleton"}, {"$set": {"schedules": entries}}, upsert=True,
+        )
+
+
 async def _scheduler_loop():
-    """Poll the schedule config every minute and fire refresh-all when due (or retry when queued)."""
+    """Poll the schedule config every minute and fire refresh-all when due (or retry when queued).
+
+    Iterates every entry in `schedules` — each has its own start time,
+    frequency and stop date so multiple can be active simultaneously.
+    Only one refresh actually runs per tick (they're serialised so the
+    scraper doesn't hammer eBay), but every due entry gets its own
+    history row and per-entry `next_run_at` bookkeeping.
+    """
     await asyncio.sleep(30)  # small boot delay
     while True:
         try:
             sched = await _get_scraper_schedule()
             now = datetime.now(timezone.utc)
 
-            # 1) Retry orchestration: fire a queued retry regardless of schedule enable flag
-            #    (the original scheduled run was already accepted; user intent was to retry).
+            # 1) Retry orchestration (unchanged) — fires regardless of schedule enable flag.
             retry_pending = sched.get("retry_pending")
             if retry_pending and retry_pending.get("retry_at"):
                 try:
@@ -336,33 +407,48 @@ async def _scheduler_loop():
                         trigger="retry",
                         attempt=2,
                         original_run_id=retry_pending.get("original_run_id"),
+                        schedule_id=retry_pending.get("schedule_id"),
                     )
-                    # Reload after the retry so we don't also fire a scheduled run this tick.
                     sched = await _get_scraper_schedule()
 
-            # 2) Scheduled runs
-            if sched.get("enabled"):
-                stop = sched.get("stop_date")
-                stop_passed = False
+            # 2) Scheduled runs — walk each entry independently.
+            entries = list(sched.get("schedules") or [])
+            entries_changed = False
+            for entry in entries:
+                if not entry.get("enabled"):
+                    continue
+                stop = entry.get("stop_date")
                 if stop:
                     try:
                         stop_dt = datetime.fromisoformat(stop).replace(tzinfo=timezone.utc)
-                        stop_passed = datetime.now(timezone.utc) >= stop_dt
+                        if datetime.now(timezone.utc) >= stop_dt:
+                            continue
                     except Exception:
                         pass
-                if not stop_passed:
-                    next_run = sched.get("next_run_at") or _compute_next_run(sched)
-                    if next_run:
-                        try:
-                            due = datetime.fromisoformat(next_run) <= datetime.now(timezone.utc)
-                        except Exception:
-                            due = False
-                        if due:
-                            await _refresh_all_and_record(method="auto", trigger="scheduled", attempt=1)
-                        elif sched.get("next_run_at") != next_run:
-                            await db.scraper_schedule.update_one(
-                                {"id": "singleton"}, {"$set": {"next_run_at": next_run}}, upsert=True,
-                            )
+                next_run = entry.get("next_run_at") or _compute_next_run_for(entry)
+                if not next_run:
+                    continue
+                try:
+                    due = datetime.fromisoformat(next_run) <= datetime.now(timezone.utc)
+                except Exception:
+                    due = False
+                if due:
+                    await _refresh_all_and_record(
+                        method="auto", trigger="scheduled", attempt=1, schedule_id=entry.get("id"),
+                    )
+                    # `_refresh_all_and_record` already recomputed the array in
+                    # DB — break the tick so we don't run a second entry in
+                    # the same minute.
+                    entries_changed = True
+                    break
+                elif entry.get("next_run_at") != next_run:
+                    entry["next_run_at"] = next_run
+                    entries_changed = True
+            # Persist any recomputed next_run_at values that didn't trigger a run.
+            if entries_changed:
+                await db.scraper_schedule.update_one(
+                    {"id": "singleton"}, {"$set": {"schedules": entries}}, upsert=True,
+                )
         except Exception as e:
             logger.exception(f"scheduler loop error: {e}")
         await asyncio.sleep(60)

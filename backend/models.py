@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 
 
-__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate']
+__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate']
 
 
 CATEGORIES = ["electronics", "home", "tools", "apparel", "other"]
@@ -330,6 +330,9 @@ class RefreshAllRequest(BaseModel):
 
 SCRAPER_SCHEDULE_DEFAULTS: dict = {
     "id": "singleton",
+    # Legacy scalar fields — kept for backwards compatibility. They now mirror
+    # `schedules[0]` (the "primary" schedule) so pre-multi-schedule callers
+    # continue to work unchanged.
     "enabled": True,
     "start_time_hhmm": "02:00",       # local time (Australia/Sydney)
     "frequency": "daily",              # hourly | every_6h | every_12h | daily | weekly
@@ -337,11 +340,19 @@ SCRAPER_SCHEDULE_DEFAULTS: dict = {
     "last_run_at": None,
     "last_run_stats": None,
     "next_run_at": None,
-    # Run history: newest first, capped at 20 entries.
-    # Each entry: {id, started_at, finished_at, duration_seconds, status, attempt, trigger, stats, error}
+    # New multi-schedule support (2026-02): a list of independently
+    # firing schedules. Each entry: {id, enabled, start_time_hhmm,
+    # frequency, stop_date, next_run_at, last_run_at, last_run_stats}.
+    # If missing on legacy docs, `_get_scraper_schedule` backfills it
+    # from the scalar fields above so the migration is invisible.
+    "schedules": [],
+    # Run history: newest first, capped at 20 entries. SHARED across
+    # every schedule entry — each history row carries an optional
+    # `schedule_id` naming which schedule fired it.
+    # Each entry: {id, started_at, finished_at, duration_seconds, status, attempt, trigger, stats, error, schedule_id}
     "run_history": [],
     # Set when a scheduled run fails and a retry is queued for 15 min later.
-    # Shape: {"retry_at": iso, "original_run_id": id, "trigger": "scheduled"|"manual"}
+    # Shape: {"retry_at": iso, "original_run_id": id, "trigger": "scheduled"|"manual", "schedule_id": id}
     "retry_pending": None,
 }
 RETRY_DELAY_SECONDS = 15 * 60  # 15 minutes
@@ -361,6 +372,22 @@ class ScraperScheduleUpdate(BaseModel):
     start_time_hhmm: Optional[str] = None    # "HH:MM"
     frequency: Optional[str] = None          # keys of FREQ_INTERVAL_SECONDS
     stop_date: Optional[str] = None          # "YYYY-MM-DD" or "" to clear
+
+
+class ScheduleEntryBody(BaseModel):
+    """One editable schedule row sent by the multi-schedule UI. `id` is
+    optional on new rows — the server assigns a uuid4."""
+    id: Optional[str] = None
+    enabled: bool = True
+    start_time_hhmm: str = "02:00"
+    frequency: str = "daily"
+    stop_date: Optional[str] = None
+
+
+class ScraperSchedulesReplaceBody(BaseModel):
+    """PUT `/api/scraper/schedules` body — full replacement of the list.
+    An empty list is a valid state (no automatic runs at all)."""
+    schedules: List[ScheduleEntryBody] = Field(default_factory=list)
 
 ORDER_STATUSES = ["new", "pending", "processing", "ready_to_ship", "shipped", "delivered", "cancelled"]
 

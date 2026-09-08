@@ -28,7 +28,7 @@ from models import (
     Product, ProductUpdate, ShippingAddress, _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, 
     OrderCreate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, ItemBulkAction, 
     RefreshAllRequest, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
-    FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ORDER_STATUSES, ReturnRequest, 
+    FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ScheduleEntryBody, ScraperSchedulesReplaceBody, ORDER_STATUSES, ReturnRequest, 
     AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate,
     CouponBase, Coupon, ReviewBase, Review, JWT_ALGO, JWT_ACCESS_TTL, PortalRegisterBody, 
     PortalLoginBody, PortalReviewBody, PortalReviewVoteBody, MessageBase, Message, StockMove, 
@@ -46,8 +46,8 @@ from countries import COUNTRIES, COUNTRY_CODES
 from helpers import (
     _rand_au_address, _slug, _product_code_base, _generate_unique_product_code, 
     _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _refresh_all_items, 
-    _get_scraper_schedule, _compute_next_run, _classify_run, _push_run_history, 
-    _refresh_all_and_record, _scheduler_loop, _ensure_categories_seeded, _ensure_ebay_category, _now_iso, 
+    _get_scraper_schedule, _compute_next_run, _compute_next_run_for, _classify_run, _push_run_history, 
+    _refresh_all_and_record, _update_schedule_entry, _scheduler_loop, _ensure_categories_seeded, _ensure_ebay_category, _now_iso, 
     _seed_transactions_and_returns, _rebuild_customers_from_orders, _shape_review, _jwt_secret, 
     _hash_password, _verify_password, _issue_token, get_current_customer, _has_purchased, 
     _seller_id, _build_sellers, _match_rules, _guess_category, _get_push_settings, _mask, 
@@ -464,12 +464,80 @@ async def refresh_all_items(body: RefreshAllRequest):
 @api_router.get("/scraper/schedule")
 async def get_scraper_schedule():
     sched = await _get_scraper_schedule()
-    # Always refresh next_run_at on read so the UI shows an accurate value
-    next_run = _compute_next_run(sched)
-    if next_run != sched.get("next_run_at"):
-        await db.scraper_schedule.update_one({"id": "singleton"}, {"$set": {"next_run_at": next_run}}, upsert=True)
-        sched["next_run_at"] = next_run
+    # Always refresh per-entry `next_run_at` on read so the UI is accurate.
+    entries = list(sched.get("schedules") or [])
+    changed = False
+    for e in entries:
+        fresh = _compute_next_run_for(e)
+        if fresh != e.get("next_run_at"):
+            e["next_run_at"] = fresh
+            changed = True
+    doc_next = min([e["next_run_at"] for e in entries if e.get("next_run_at")], default=None)
+    if changed or doc_next != sched.get("next_run_at"):
+        await db.scraper_schedule.update_one(
+            {"id": "singleton"},
+            {"$set": {"schedules": entries, "next_run_at": doc_next}},
+            upsert=True,
+        )
+        sched["schedules"] = entries
+        sched["next_run_at"] = doc_next
+    # Keep legacy scalar fields mirrored to `schedules[0]` so old clients
+    # continue to see a coherent single-schedule view.
+    if entries:
+        primary = entries[0]
+        for legacy_key in ("enabled", "start_time_hhmm", "frequency", "stop_date"):
+            sched[legacy_key] = primary.get(legacy_key)
     return sched
+
+
+@api_router.put("/scraper/schedules")
+async def replace_scraper_schedules(body: ScraperSchedulesReplaceBody):
+    """Replace the entire schedule list. Called by the multi-schedule UI's
+    single Save button — one round-trip persists every add / edit / remove."""
+    cleaned: list = []
+    for raw in body.schedules:
+        entry = raw.model_dump()
+        # Validate + normalise fields.
+        freq = entry.get("frequency") or "daily"
+        if freq not in FREQ_INTERVAL_SECONDS:
+            raise HTTPException(status_code=400, detail=f"frequency must be one of {list(FREQ_INTERVAL_SECONDS)}")
+        start_hhmm = entry.get("start_time_hhmm") or "02:00"
+        if not re.match(r"^\d{2}:\d{2}$", start_hhmm):
+            raise HTTPException(status_code=400, detail="start_time_hhmm must be HH:MM")
+        stop = entry.get("stop_date")
+        if stop == "":
+            stop = None
+        cleaned.append({
+            "id": entry.get("id") or uuid.uuid4().hex,
+            "enabled": bool(entry.get("enabled", True)),
+            "start_time_hhmm": start_hhmm,
+            "frequency": freq,
+            "stop_date": stop,
+            "next_run_at": None,   # recomputed below
+            # Preserve per-entry last_run stats when the client sends them
+            # back untouched (they don't yet, but hedges future usage).
+            "last_run_at": entry.get("last_run_at"),
+            "last_run_stats": entry.get("last_run_stats"),
+        })
+    # Recompute next_run for every entry once with a fresh clock.
+    for e in cleaned:
+        e["next_run_at"] = _compute_next_run_for(e)
+    doc_next = min([e["next_run_at"] for e in cleaned if e.get("next_run_at")], default=None)
+    # Mirror the primary schedule back into legacy scalar fields.
+    primary = cleaned[0] if cleaned else {}
+    await db.scraper_schedule.update_one(
+        {"id": "singleton"},
+        {"$set": {
+            "schedules": cleaned,
+            "enabled": bool(primary.get("enabled", False)) if cleaned else False,
+            "start_time_hhmm": primary.get("start_time_hhmm") if cleaned else SCRAPER_SCHEDULE_DEFAULTS["start_time_hhmm"],
+            "frequency": primary.get("frequency") if cleaned else SCRAPER_SCHEDULE_DEFAULTS["frequency"],
+            "stop_date": primary.get("stop_date") if cleaned else None,
+            "next_run_at": doc_next,
+        }},
+        upsert=True,
+    )
+    return await get_scraper_schedule()
 
 
 @api_router.patch("/scraper/schedule")
@@ -483,10 +551,19 @@ async def update_scraper_schedule(body: ScraperScheduleUpdate):
         fields["stop_date"] = None
     if fields:
         await db.scraper_schedule.update_one({"id": "singleton"}, {"$set": fields}, upsert=True)
-    # Recompute next run after any change
-    sched = await _get_scraper_schedule()
-    next_run = _compute_next_run(sched)
-    await db.scraper_schedule.update_one({"id": "singleton"}, {"$set": {"next_run_at": next_run}}, upsert=True)
+        # Mirror the same edit into `schedules[0]` (the "primary" row) so
+        # the multi-schedule loop picks it up.
+        sched = await _get_scraper_schedule()
+        entries = list(sched.get("schedules") or [])
+        if entries:
+            entries[0].update({k: v for k, v in fields.items() if k in ("enabled", "start_time_hhmm", "frequency", "stop_date")})
+            entries[0]["next_run_at"] = _compute_next_run_for(entries[0])
+            doc_next = min([e["next_run_at"] for e in entries if e.get("next_run_at")], default=None)
+            await db.scraper_schedule.update_one(
+                {"id": "singleton"},
+                {"$set": {"schedules": entries, "next_run_at": doc_next}},
+                upsert=True,
+            )
     return await get_scraper_schedule()
 
 

@@ -1551,3 +1551,39 @@ Notification Bell deep-links) — zero regressions detected.
   updates. Curl smoke-tested the register block, sub-domain
   match, and pass-through for non-disposable emails.
 
+
+## PCStore Public Storefront API (2026-02-27)
+- Added a lean, read-only, unauthenticated **PCStore integration
+  layer** at `/api/store/*` so the sibling public storefront app
+  (PCStore) can consume the same catalogue without touching Mongo
+  directly or reaching any admin routes.
+- **New endpoints**:
+  - `GET /api/store/health` — cheap liveness / CORS probe
+  - `GET /api/store/products` — paginated catalogue with filters
+    (`q`, `category`, `tag`, `on_sale`, `in_stock_only`, `sort`,
+    `limit`, `offset`). Only returns `active=True`, non-archived,
+    non-countdown-expired products.
+  - `GET /api/store/products/{id}` — single product resolvable by
+    `id` / `product_code` / `url_slug` (SEO-friendly URLs)
+  - `GET /api/store/products/{id}/related` — same-category rail
+  - `GET /api/store/categories` — only categories with visible products
+- **Shape** (`_shape_storefront_product`): whitelisted fields only —
+  never leaks `cost`, `supplier_id`, or internal notes. Includes
+  computed `on_sale`, `sale_price`, `sale_ends_at`, `in_stock`,
+  `review_count`, `average_rating` so PCStore doesn't need to
+  re-derive them.
+- **Country Access middleware exempt list** now includes
+  `/api/store/`, `/api/portal/`, `/api/products/`, `/api/reviews/`
+  so PCStore's worldwide customers aren't accidentally blocked by
+  the admin-facing IP lock.
+- **Docs**: full integration guide at `/app/PCSTORE_INTEGRATION.md`
+  covering base URL, every storefront + portal endpoint, JWT flow,
+  order-creation payload, image handling, a copy-paste React fetch
+  helper, and an explicit "don't call these" admin-route deny-list.
+- **Tests**: `/app/backend/tests/test_store_public_api.py` — 16
+  cases including shape / pagination / lookup by id-code-slug /
+  related products / private-field guard / country-exemption /
+  CORS header echo. All pass. Wider regression suite (81 tests
+  across portal, security, scheduler, disposable, country-access)
+  remains green.
+

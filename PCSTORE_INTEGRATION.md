@@ -1,0 +1,290 @@
+# PCStore ↔ PCAdmin API Integration Guide
+
+**Audience:** the developer of the **PCStore** public storefront.  
+**Goal:** point PCStore at this PCAdmin backend and consume its REST API so
+both apps share the same product catalogue, orders, and customer accounts.
+
+---
+
+## 1. Base URL
+
+Put this in PCStore's `.env` (do **not** hard-code it):
+
+```env
+REACT_APP_BACKEND_URL=https://ebay-au-harvester.preview.emergentagent.com
+```
+
+Every API call is prefixed with `/api`, so a full URL looks like:
+
+```
+https://ebay-au-harvester.preview.emergentagent.com/api/store/products
+```
+
+If you later deploy PCAdmin to a different host, change `REACT_APP_BACKEND_URL`
+in PCStore's `.env` — no code changes needed.
+
+CORS is already open (`allow_origins=*`), so PCStore can call this API from
+any domain in development or production without extra config.
+
+---
+
+## 2. Sanity-check connectivity
+
+```bash
+curl "$REACT_APP_BACKEND_URL/api/store/health"
+# → { "ok": true, "service": "PCAdmin storefront API", "version": 1 }
+```
+
+If you see this JSON, PCStore is wired up correctly. If you get a 403 with
+`{"code": "country_blocked"}`, you're calling an admin route by mistake —
+switch to `/api/store/*` or `/api/portal/*` (both are country-exempt).
+
+---
+
+## 3. Public storefront endpoints (no auth)
+
+These are the endpoints PCStore should call to render the catalogue,
+product pages, and category navigation. All are **read-only, unauthenticated,
+worldwide-accessible**, and only return products that are active,
+non-archived, and not countdown-expired.
+
+### `GET /api/store/products`
+
+List products for a catalogue grid.
+
+**Query parameters:**
+
+| param           | type       | default       | description                                                  |
+| --------------- | ---------- | ------------- | ------------------------------------------------------------ |
+| `q`             | string     | —             | full-text search across title / description / tags           |
+| `category`      | string     | —             | filter to one category slug (e.g. `mobile-phones`)           |
+| `tag`           | string     | —             | filter to one tag (exact match)                              |
+| `on_sale`       | bool       | —             | only products with an active countdown sale                  |
+| `in_stock_only` | bool       | `true`        | drop out-of-stock products; pass `false` to include them     |
+| `sort`          | string     | `created_at_desc` | `created_at_desc`, `created_at_asc`, `price_asc`, `price_desc`, `sold_desc`, `title_asc` |
+| `limit`         | int (1–100) | `50`         | page size                                                    |
+| `offset`        | int        | `0`           | pagination offset                                            |
+
+**Response:**
+
+```json
+{
+  "products": [
+    {
+      "id": "9c937958-...",
+      "product_code": "LC21-PC0826",
+      "title": "Lavazza Desea Capsule Coffee Machine",
+      "description": "…",
+      "category": "espresso-cappuccino-machines",
+      "price": 320.0,
+      "sale_price": null,
+      "on_sale": false,
+      "sale_ends_at": null,
+      "images": ["https://…/a.jpg", "https://…/b.jpg"],
+      "primary_image": "https://…/a.jpg",
+      "stock": 10,
+      "in_stock": true,
+      "stock_status": "live",
+      "tags": ["kitchen", "coffee"],
+      "specifics": { "Brand": "Lavazza", "Type": "Capsule" },
+      "postage": "Free Postage",
+      "postage_amount": null,
+      "delivery_speed": "Free delivery in 2–4 days",
+      "delivery_date_range": "Get it between …",
+      "meta_title": "…",
+      "meta_description": "…",
+      "url_slug": "lavazza-desea-capsule",
+      "image_alt_text": "…",
+      "review_count": 4,
+      "average_rating": 4.75,
+      "created_at": "2026-08-27T…Z"
+    }
+  ],
+  "total": 57,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+### `GET /api/store/products/{id}`
+
+Single-product view. `{id}` accepts three forms so PCStore can build
+SEO-friendly URLs:
+
+- The product `id` (UUID, e.g. `9c937958-1075-4fb5-a112-bb67cb711592`)
+- The `product_code` (e.g. `LC21-PC0826`)
+- The `url_slug` (e.g. `lavazza-desea-capsule`)
+
+Same shape as one row in the list response.
+
+### `GET /api/store/products/{id}/related?limit=6`
+
+"You might also like" — returns up to 20 (default 6) products from the
+same category as `{id}`, newest first, excluding the current product.
+
+### `GET /api/store/categories`
+
+Returns every category that has at least one visible product — safe to
+render as a nav menu without empty sections.
+
+```json
+{
+  "categories": [
+    { "id": "…", "name": "Headphones", "slug": "headphones", "group": "Electronics", "icon": "headphones", "color": "#0EA5E9", "description": "…", "active": true, "sort_order": 3, "product_count": 6 }
+  ],
+  "total": 42
+}
+```
+
+### `GET /api/store/health`
+
+Cheap liveness check for CI / uptime probes. Doesn't touch the DB.
+
+### `GET /api/products/{id}/reviews`
+
+Public reviews for a product (already exists in the admin API but is
+safe to expose). Returns `{reviews, total, average_rating, rating_distribution}`.
+
+---
+
+## 4. Customer accounts + orders — `/api/portal/*`
+
+For sign-up, sign-in, and personal order history, PCStore uses the
+**customer portal API** (JWT bearer).
+
+### Registration gate
+
+Only emails that appear on an existing order can register — this is the
+"verified purchaser" gate. So the sign-up flow is:
+
+1. Guest **places an order** (see §5) with their real email.
+2. Same email can now `POST /api/portal/register` and set a password.
+
+Also: emails from **disposable / temporary providers** (`yopmail.com`,
+`mailinator.com`, `mail.tm`, and 30+ others — full list is admin-editable
+via `PATCH /api/security/disposable-domains`) return
+`400 {"detail": "Please use a valid email address. Temporary or disposable emails are not accepted."}`.
+
+### Endpoints
+
+| method | path                        | body / auth                          | returns                                         |
+| ------ | --------------------------- | ------------------------------------ | ----------------------------------------------- |
+| `POST` | `/api/portal/register`      | `{ email, password, name? }`         | `{ token, customer }`                           |
+| `POST` | `/api/portal/login`         | `{ email, password }`                | `{ token, customer }`                           |
+| `GET`  | `/api/portal/me`            | Bearer token                          | `{ customer }`                                  |
+| `GET`  | `/api/portal/orders`        | Bearer token                          | `{ orders: [...], total }` (each row tagged with `can_review` + `already_reviewed`) |
+| `POST` | `/api/portal/reviews`       | Bearer token, `{ product_id, rating, title, body }` | verified review                    |
+| `GET`  | `/api/portal/my-reviews`    | Bearer token                          | reviews written by this customer                 |
+| `POST` | `/api/reviews/{rid}/vote`   | Bearer token, `{ vote: "helpful"\|"not_helpful"\|"clear" }` | vote counts |
+
+Password minimum length is 6 characters.
+
+---
+
+## 5. Placing orders
+
+PCStore's checkout should `POST /api/orders` with:
+
+```json
+{
+  "customer_name": "Ada Lovelace",
+  "customer_email": "ada@example.com",
+  "product_id": "9c937958-…",
+  "quantity": 1,
+  "shipping_address": {
+    "line1": "1 George St",
+    "suburb": "Sydney",
+    "state": "NSW",
+    "postcode": "2000",
+    "country": "AU"
+  },
+  "total": 320.0,
+  "status": "paid"
+}
+```
+
+Server assigns `id`, `reference` (like `AB12-CD34`), and `created_at`.
+The order is then discoverable via `GET /api/portal/orders` for the
+same customer email.
+
+---
+
+## 6. Images
+
+Product images come straight from eBay's CDN
+(`https://i.ebayimg.com/…`) and are safe to embed directly in `<img>`
+tags — no proxying needed for storefront use.
+
+If eBay ever blocks hotlinking, you can route through the built-in
+`/api/image-proxy?url=<encoded>` endpoint (already CORS-exempt).
+
+---
+
+## 7. Sample React fetch hook
+
+Drop this into PCStore for a copy-paste starting point:
+
+```js
+// src/lib/api.js
+const API = process.env.REACT_APP_BACKEND_URL + "/api";
+
+export async function apiGet(path, params = {}) {
+  const url = new URL(API + path);
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
+  });
+  const r = await fetch(url, { credentials: "omit" });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+export async function apiPost(path, body, token) {
+  const r = await fetch(API + path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+// Example usage in a component:
+// const { products, total } = await apiGet("/store/products", { limit: 24 });
+// const product = await apiGet(`/store/products/${slug}`);
+// const { token } = await apiPost("/portal/login", { email, password });
+```
+
+---
+
+## 8. Things NOT to call from PCStore
+
+These are admin-only routes protected by the Country Access middleware
+and (in most cases) the RBAC session. Calling them from a public
+storefront will either 403 or leak internal data:
+
+- Everything under `/api/security/*` (except `/api/security/status`)
+- `/api/scraper/*` — scraper controls
+- `/api/analytics/*` — dashboard KPIs
+- `/api/orders` (list) — admin order dashboard
+- `/api/customers`, `/api/customers/*` — admin CRM
+- `/api/suppliers/*`, `/api/coupons/*`, `/api/push/*`, `/api/notifications/*`
+- Any `PATCH` / `DELETE` on `/api/products/*` — admin catalog edits
+
+If PCStore needs something new that isn't in `/api/store/*`, ping the
+PCAdmin owner to add it — don't reach for admin routes.
+
+---
+
+## 9. Environment variables cheat-sheet
+
+| Var                     | Set in                | Purpose                                              |
+| ----------------------- | --------------------- | ---------------------------------------------------- |
+| `REACT_APP_BACKEND_URL` | PCStore `.env`        | Base URL of the PCAdmin backend                      |
+| (nothing else)          | —                     | PCStore doesn't need the DB URL, Mongo creds, or JWT secret. Never share those with a frontend. |
+
+---
+
+Last updated: 2026-02-27.

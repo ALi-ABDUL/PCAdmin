@@ -3650,6 +3650,13 @@ COUNTRY_MIDDLEWARE_EXEMPT_PREFIXES = (
     "/api/security/bypass/",     # emergency bypass URL — must always be reachable
     "/api/security/status",      # public status endpoint feeding the 403 page
     "/api/image-proxy",          # eBay CDN pass-through (used from customer emails)
+    # PCStore (public storefront frontend) integration — the storefront and
+    # its customers can be anywhere in the world, so these routes must
+    # never hit the admin country lock.
+    "/api/store/",               # public storefront read-only API
+    "/api/portal/",              # customer portal auth + orders + reviews
+    "/api/products/",            # public product-detail sub-paths (reviews etc.)
+    "/api/reviews/",             # public review voting
     "/docs", "/openapi.json", "/redoc",  # framework internals
 )
 
@@ -3851,6 +3858,215 @@ async def use_bypass_token(token: str, request: Request):
 
 
 # --- End security endpoints --------------------------------------------------
+
+
+# --- PCStore public storefront API ------------------------------------------
+#
+# Read-only endpoints designed for the PCStore public frontend. All routes
+# are unauthenticated, exempt from the Country Access middleware (customers
+# live worldwide), and only expose data that's safe to render to anonymous
+# visitors — active + non-archived products, approved reviews, published
+# categories.
+#
+# For customer sign-in / order lookup PCStore should use `/api/portal/*`
+# (JWT bearer). See `PCSTORE_INTEGRATION.md` for the full integration guide.
+
+def _shape_storefront_product(p: dict) -> dict:
+    """Whittle a full product doc down to fields safe + useful for a
+    public storefront. Drops cost / supplier / internal notes."""
+    countdown_active = bool(p.get("countdown_enabled")) and not bool(p.get("countdown_expired"))
+    return {
+        "id": p.get("id"),
+        "product_code": p.get("product_code"),
+        "title": p.get("title"),
+        "description": p.get("description") or "",
+        "category": p.get("category"),
+        "price": p.get("price"),
+        "sale_price": p.get("countdown_sale_price") if countdown_active else None,
+        "on_sale": countdown_active,
+        "sale_ends_at": p.get("countdown_ends_at") if countdown_active else None,
+        "images": p.get("images") or [],
+        "primary_image": (p.get("images") or [None])[0],
+        "stock": p.get("stock", 0),
+        "in_stock": (p.get("stock") or 0) > 0 and (p.get("stock_status") or "live") == "live",
+        "stock_status": p.get("stock_status", "live"),
+        "tags": p.get("tags") or [],
+        "specifics": p.get("specifics") or {},
+        "postage": p.get("postage"),
+        "postage_amount": p.get("postage_amount"),
+        "delivery_speed": p.get("delivery_speed"),
+        "delivery_date_range": p.get("delivery_date_range"),
+        # SEO fields for PCStore's product detail SSR / meta tags.
+        "meta_title": p.get("meta_title"),
+        "meta_description": p.get("meta_description"),
+        "url_slug": p.get("url_slug"),
+        "image_alt_text": p.get("image_alt_text"),
+        "review_count": p.get("review_count", 0),
+        "average_rating": p.get("average_rating", 0.0),
+        "created_at": p.get("created_at"),
+    }
+
+
+@api_router.get("/store/products")
+async def store_list_products(
+    q: Optional[str] = None,
+    category: Optional[str] = None,
+    tag: Optional[str] = None,
+    on_sale: Optional[bool] = None,
+    in_stock_only: bool = True,
+    sort: str = "created_at_desc",   # created_at_desc | price_asc | price_desc | sold_desc
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """Public product catalogue for PCStore. Only returns products that
+    are `active=True`, not archived, not countdown-expired."""
+    query: dict = {
+        "active": True,
+        "archived": {"$ne": True},
+        "countdown_expired": {"$ne": True},
+    }
+    if q:
+        query["$or"] = [
+            {"title": {"$regex": q, "$options": "i"}},
+            {"description": {"$regex": q, "$options": "i"}},
+            {"tags": {"$regex": q, "$options": "i"}},
+        ]
+    if category:
+        query["category"] = category
+    if tag:
+        query["tags"] = tag
+    if on_sale:
+        query["countdown_enabled"] = True
+        query["countdown_expired"] = {"$ne": True}
+    if in_stock_only:
+        query["stock"] = {"$gt": 0}
+        query["stock_status"] = {"$ne": "sold"}
+    sort_map = {
+        "created_at_desc": [("created_at", -1)],
+        "created_at_asc":  [("created_at", 1)],
+        "price_asc":       [("price", 1)],
+        "price_desc":      [("price", -1)],
+        "sold_desc":       [("sold_count", -1)],
+        "title_asc":       [("title", 1)],
+    }
+    cursor = (
+        db.products
+        .find(query, {"_id": 0})
+        .sort(sort_map.get(sort, [("created_at", -1)]))
+        .skip(offset)
+        .limit(limit)
+    )
+    rows = await cursor.to_list(length=limit)
+    total = await db.products.count_documents(query)
+    # Attach approved-review aggregate (one round-trip).
+    ids = [p["id"] for p in rows]
+    if ids:
+        pipeline = [
+            {"$match": {"product_id": {"$in": ids}, "status": "approved"}},
+            {"$group": {"_id": "$product_id", "count": {"$sum": 1}, "avg": {"$avg": "$rating"}}},
+        ]
+        agg = await db.reviews.aggregate(pipeline).to_list(length=len(ids))
+        by_id = {r["_id"]: r for r in agg}
+        for p in rows:
+            row = by_id.get(p["id"])
+            p["review_count"] = int(row["count"]) if row else 0
+            p["average_rating"] = round(float(row["avg"]), 2) if row and row.get("avg") is not None else 0.0
+    return {
+        "products": [_shape_storefront_product(p) for p in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@api_router.get("/store/products/{pid}")
+async def store_get_product(pid: str):
+    """Public single-product view — supports either the product `id`
+    (uuid) or the human-friendly `product_code` (e.g. `KF21-PC0826`)
+    or the `url_slug` for SEO-friendly deep links."""
+    p = await db.products.find_one(
+        {
+            "$or": [
+                {"id": pid},
+                {"product_code": pid},
+                {"url_slug": pid},
+            ],
+            "active": True,
+            "archived": {"$ne": True},
+            "countdown_expired": {"$ne": True},
+        },
+        {"_id": 0},
+    )
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+    # Attach approved reviews aggregate.
+    pipeline = [
+        {"$match": {"product_id": p["id"], "status": "approved"}},
+        {"$group": {"_id": "$product_id", "count": {"$sum": 1}, "avg": {"$avg": "$rating"}}},
+    ]
+    agg = await db.reviews.aggregate(pipeline).to_list(length=1)
+    if agg:
+        p["review_count"] = int(agg[0]["count"])
+        p["average_rating"] = round(float(agg[0]["avg"] or 0), 2)
+    else:
+        p["review_count"] = 0
+        p["average_rating"] = 0.0
+    return _shape_storefront_product(p)
+
+
+@api_router.get("/store/categories")
+async def store_list_categories():
+    """Public category list — only categories that have at least one
+    visible product, so PCStore's navigation never surfaces an empty
+    section."""
+    # Distinct category slugs in the storefront-visible product set.
+    visible = await db.products.distinct(
+        "category",
+        {"active": True, "archived": {"$ne": True}, "countdown_expired": {"$ne": True}},
+    )
+    visible = [v for v in visible if v]
+    # Categories are matched by slug OR name so we handle both storage shapes.
+    docs = await db.categories.find(
+        {"$or": [{"slug": {"$in": visible}}, {"name": {"$in": visible}}]},
+        {"_id": 0},
+    ).to_list(length=500)
+    docs.sort(key=lambda c: (c.get("group") or "", c.get("name") or ""))
+    return {"categories": docs, "total": len(docs)}
+
+
+@api_router.get("/store/products/{pid}/related")
+async def store_related_products(pid: str, limit: int = Query(6, ge=1, le=20)):
+    """Simple related-products: same category, newest first, excludes
+    the current product. Enough for a 'You might also like' rail on
+    PCStore's product page without a recommender."""
+    p = await db.products.find_one({"id": pid}, {"_id": 0, "category": 1})
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+    cursor = (
+        db.products
+        .find({
+            "id": {"$ne": pid},
+            "category": p.get("category"),
+            "active": True,
+            "archived": {"$ne": True},
+            "countdown_expired": {"$ne": True},
+            "stock": {"$gt": 0},
+        }, {"_id": 0})
+        .sort([("created_at", -1)])
+        .limit(limit)
+    )
+    rows = await cursor.to_list(length=limit)
+    return {"products": [_shape_storefront_product(r) for r in rows], "total": len(rows)}
+
+
+@api_router.get("/store/health")
+async def store_health():
+    """Cheap liveness check for PCStore to sanity-test connectivity + CORS
+    from its own environment without hitting a data endpoint."""
+    return {"ok": True, "service": "PCAdmin storefront API", "version": 1}
+
+
+# --- End PCStore public storefront API --------------------------------------
 
 
 @api_router.get("/security/disposable-domains")

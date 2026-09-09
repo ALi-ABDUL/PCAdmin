@@ -1729,3 +1729,29 @@ Notification Bell deep-links) — zero regressions detected.
   filled the input with `10`, highlighted the chip, updated the
   live helper text, and Save toasted the new state.
 
+
+## "Set as hero" Image Button (2026-02-27)
+- Replaced the drag-to-reorder mechanic on the Product Detail
+  image strip with a simpler one-tap **Set as hero** button.
+- **UI** (`/app/frontend/src/pages/ProductDetail.jsx`):
+  - Removed drag state (`dragFrom`, `dragOver`) and every
+    `onDrag*` / `onDrop` handler on thumbnail tiles.
+  - Renamed `reorderImages(from, to)` to `setAsHero(idx)` — moves
+    the tapped image to index 0 and persists with an optimistic
+    UI + toast; reverts on error.
+  - The hero image gets an indigo ring + Home icon in the chip
+    (`Hero`). Non-hero images reveal three buttons on hover:
+    **Set as hero** (indigo primary), Replace, Delete.
+  - Header hint updated: "First image is the listing hero · tap
+    Set as hero to promote another".
+  - Dropped `GripVertical` import; added `Home`.
+- **Test IDs**: new `product-image-set-hero-{i}` for each non-hero
+  tile. Existing `product-image-{i}`, `product-image-replace-{i}`,
+  `product-image-delete-{i}` unchanged.
+- **Backend**: no changes — same `PATCH /api/products/{pid}` with
+  the reordered `images` list.
+- **Verified live**: Playwright confirmed clicking Set as hero on
+  image #2 promotes it to slot 0, swaps the ring/chip, and hides
+  the button from the now-hero image. Toast fires ("New listing
+  hero image").
+

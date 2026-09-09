@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, ExternalLink, GripVertical, Layout, Loader2, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
+import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, ExternalLink, Home, Layout, Loader2, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
@@ -22,10 +22,6 @@ export function ProductDetailPage({ productId, onBack }) {
   const [showCatPopover, setShowCatPopover] = useState(false);
   const [imgDialog, setImgDialog] = useState({ open: false, mode: "add", idx: null, current: "" });
   const [lightboxIdx, setLightboxIdx] = useState(null);   // opens full-size viewer at index
-  // Drag-reorder state: the index currently being dragged + which slot is
-  // being hovered. Persist to server on drop.
-  const [dragFrom, setDragFrom] = useState(null);
-  const [dragOver, setDragOver] = useState(null);
 
   const load = useCallback(async () => {
     const [prod, rev] = await Promise.all([
@@ -158,21 +154,22 @@ export function ProductDetailPage({ productId, onBack }) {
   };
 
   /**
-   * Persist a reordered images array. Called by onDrop after the user drags
-   * one thumbnail onto another. If the source == target index, this is a no-op.
+   * Promote the image at `idx` to slot 0 (the "hero" position) and
+   * persist. No-op when the image is already the hero. Optimistic UI so
+   * the swap feels instant — reverts on error.
    */
-  const reorderImages = async (from, to) => {
-    if (from === to || from == null || to == null) return;
+  const setAsHero = async (idx) => {
+    if (idx == null || idx === 0) return;
     const list = [...(p.images || [])];
-    const [moved] = list.splice(from, 1);
-    list.splice(to, 0, moved);
-    // Optimistic UI so the drag feels snappy.
+    if (idx >= list.length) return;
+    const [moved] = list.splice(idx, 1);
+    list.unshift(moved);
     setP((prev) => ({ ...prev, images: list }));
     try {
       await axios.patch(`${API}/products/${productId}`, { images: list });
-      toast.success(to === 0 ? "New listing hero image" : "Image order saved");
+      toast.success("New listing hero image");
     } catch {
-      toast.error("Reorder failed");
+      toast.error("Failed to update hero image");
       await load();
     }
   };
@@ -243,7 +240,7 @@ export function ProductDetailPage({ productId, onBack }) {
           <div className="flex items-center gap-3">
             {(p.images || []).length > 1 && (
               <div className="text-[11px] text-slate-400 hidden sm:flex items-center gap-1">
-                <GripVertical size={11}/> Drag to reorder · first image = listing hero
+                <Home size={11}/> First image is the listing hero · tap <span className="font-mono">Set as hero</span> to promote another
               </div>
             )}
             <button onClick={openAdd} className="btn btn-ghost text-xs" data-testid="product-add-image-btn"><Plus size={12}/> Add image</button>
@@ -252,35 +249,32 @@ export function ProductDetailPage({ productId, onBack }) {
         <div className="flex gap-3 overflow-x-auto pb-1" data-testid="product-images-strip">
           {(p.images || []).length === 0 && <div className="text-slate-400 text-sm py-8 text-center flex-1">No images yet.</div>}
           {(p.images || []).map((src, i) => {
-            const isDragging = dragFrom === i;
-            const isOver = dragOver === i && dragFrom !== null && dragFrom !== i;
+            const isHero = i === 0;
             return (
               <div
                 key={`${i}-${src.slice(0, 32)}`}
-                draggable
-                onDragStart={(e) => { setDragFrom(i); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", String(i)); } catch {} }}
-                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragOver !== i) setDragOver(i); }}
-                onDragEnter={(e) => { e.preventDefault(); }}
-                onDragLeave={() => { if (dragOver === i) setDragOver(null); }}
-                onDrop={async (e) => {
-                  e.preventDefault();
-                  const from = dragFrom;
-                  setDragFrom(null); setDragOver(null);
-                  await reorderImages(from, i);
-                }}
-                onDragEnd={() => { setDragFrom(null); setDragOver(null); }}
                 onClick={() => setLightboxIdx(i)}
                 role="button"
                 aria-label="Open full-size image"
-                className={`relative shrink-0 w-40 h-40 rounded-xl overflow-hidden bg-slate-100 border hairline group cursor-pointer active:cursor-grabbing transition ${isDragging ? "opacity-40 scale-95" : ""} ${isOver ? "ring-2 ring-indigo-500 scale-[1.02]" : ""}`}
+                className={`relative shrink-0 w-40 h-40 rounded-xl overflow-hidden bg-slate-100 border hairline group cursor-pointer transition ${isHero ? "ring-2 ring-indigo-500/40" : ""}`}
                 data-testid={`product-image-${i}`}
                 data-image-idx={i}
               >
                 <img src={proxyImg(imgThumb(src))} alt="" loading="lazy" className="w-full h-full object-cover pointer-events-none"/>
-                {i === 0 && (
-                  <span className="absolute top-2 left-2 chip chip-primary !text-[10px] !py-0.5 shadow-sm pointer-events-none">Hero</span>
+                {isHero && (
+                  <span className="absolute top-2 left-2 chip chip-primary !text-[10px] !py-0.5 shadow-sm pointer-events-none inline-flex items-center gap-1">
+                    <Home size={9}/> Hero
+                  </span>
                 )}
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 pointer-events-none">
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 pointer-events-none flex-wrap px-2">
+                  {!isHero && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setAsHero(i); }}
+                      className="btn btn-primary text-xs !py-1 pointer-events-auto"
+                      data-testid={`product-image-set-hero-${i}`}
+                      title="Make this the listing hero image"
+                    ><Home size={11}/> Set as hero</button>
+                  )}
                   <button
                     onClick={(e) => { e.stopPropagation(); openReplace(i); }}
                     className="btn btn-ghost !bg-white text-xs !py-1 pointer-events-auto"

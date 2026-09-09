@@ -1710,3 +1710,22 @@ Notification Bell deep-links) — zero regressions detected.
   curl round-trip confirms threshold=20 hides a 6% discount but
   surfaces a 36% one.
 
+
+## Discount Threshold Preset Chips (2026-02-27)
+- Added a one-tap preset row under the discount-badge threshold
+  input in `StorefrontDisplayCard`:
+  **Show all** (0) / **Hide <5%** / **Hide <10%** / **Hide <20%**.
+- Chips render as rounded pills. The chip matching the current
+  clamped threshold is highlighted in rose; the others sit muted
+  with a hover tint. Clicking a chip fills the numeric input and
+  marks the form dirty so the Save button lights up — Save still
+  hits the same `PATCH /api/store-display-settings` endpoint, so
+  no backend or contract changes were needed.
+- ARIA: wrapped in `role="radiogroup"` with `role="radio"` +
+  `aria-checked` on each chip for keyboard/AT accessibility.
+- `data-testid`s: `storefront-threshold-presets`, `preset-show-all`,
+  `preset-hide-5`, `preset-hide-10`, `preset-hide-20`.
+- **Verified live**: Playwright confirmed clicking "Hide <10%"
+  filled the input with `10`, highlighted the chip, updated the
+  live helper text, and Save toasted the new state.
+

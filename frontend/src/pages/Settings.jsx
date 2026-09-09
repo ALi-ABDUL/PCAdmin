@@ -1053,6 +1053,37 @@ function StorefrontDisplayCard() {
           </div>
         </div>
 
+        {/* Preset chips — one tap for the common thresholds so admins never
+            have to type a number. Active chip is highlighted; tapping the
+            already-selected chip is a no-op. */}
+        <div className="mt-4 flex flex-wrap gap-2" data-testid="storefront-threshold-presets" role="radiogroup" aria-label="Discount threshold presets">
+          {[
+            { value: 0,  label: "Show all",   testid: "preset-show-all" },
+            { value: 5,  label: "Hide <5%",   testid: "preset-hide-5"   },
+            { value: 10, label: "Hide <10%",  testid: "preset-hide-10"  },
+            { value: 20, label: "Hide <20%",  testid: "preset-hide-20"  },
+          ].map((p) => {
+            const active = clamped === p.value;
+            return (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => { setThreshold(p.value); setDirty(clamped !== p.value); }}
+                className={`text-xs font-mono rounded-full px-3 py-1.5 border transition ${
+                  active
+                    ? "bg-rose-600 border-rose-600 text-white shadow-sm"
+                    : "bg-white hairline text-slate-600 hover:border-rose-300 hover:text-rose-700"
+                }`}
+                data-testid={p.testid}
+                role="radio"
+                aria-checked={active}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="mt-5 flex items-center justify-end gap-2">
           {dirty && <span className="text-[11px] text-amber-600 font-mono">unsaved changes</span>}
           <button

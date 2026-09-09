@@ -111,6 +111,11 @@ class WatchlistToggle(BaseModel):
 class ProductCreate(BaseModel):
     title: str
     price: float
+    # Optional "was" price for storefront strikethrough. When set and higher
+    # than `price` the PCStore product card renders it as a struck-through
+    # anchor so shoppers see the saving. Left `None` on scraped/imported
+    # products by default — the admin sets it manually.
+    original_price: Optional[float] = None
     cost: Optional[float] = 0.0
     stock: int = 10
     category: str = "other"
@@ -181,6 +186,7 @@ class Product(ProductCreate):
 class ProductUpdate(BaseModel):
     title: Optional[str] = None
     price: Optional[float] = None
+    original_price: Optional[float] = None
     cost: Optional[float] = None
     stock: Optional[int] = None
     category: Optional[str] = None

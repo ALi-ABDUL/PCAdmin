@@ -38,6 +38,7 @@ export function ProductDetailPage({ productId, onBack }) {
       sku: prod.sku || "",
       category: prod.category || "other",
       price: prod.price ?? 0,
+      original_price: prod.original_price ?? "",
       cost: prod.cost ?? 0,
       stock: prod.stock ?? 0,
       active: !!prod.active,
@@ -70,6 +71,7 @@ export function ProductDetailPage({ productId, onBack }) {
       const body = {
         title: f.title, sku: f.sku, category: f.category,
         price: Number(f.price), cost: Number(f.cost), stock: Number(f.stock),
+        original_price: f.original_price === "" || f.original_price === null ? null : Number(f.original_price),
         active: !!f.active, description: f.description,
         meta_title: (f.meta_title || "").trim(),
         meta_description: (f.meta_description || "").slice(0, 160),
@@ -338,6 +340,18 @@ export function ProductDetailPage({ productId, onBack }) {
             </select>
           </Field>
           <Field label="Sell price (AUD)"><input type="number" className="input w-full px-3 py-2 font-mono" value={f.price} onChange={(e) => setField("price", e.target.value)} data-testid="product-price-input"/></Field>
+          <Field label="Original price (AUD)">
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Optional 'was' price"
+              className="input w-full px-3 py-2 font-mono"
+              value={f.original_price}
+              onChange={(e) => setField("original_price", e.target.value)}
+              data-testid="product-original-price-input"
+            />
+          </Field>
           <Field label="Cost (AUD)"><input type="number" className="input w-full px-3 py-2 font-mono" value={f.cost} onChange={(e) => setField("cost", e.target.value)} data-testid="product-cost-input"/></Field>
           <Field label="Stock"><input type="number" className="input w-full px-3 py-2 font-mono" value={f.stock} onChange={(e) => setField("stock", e.target.value)} data-testid="product-stock-input"/></Field>
           <Field label="Active">

@@ -2347,6 +2347,11 @@ async def get_product(pid: str):
 @api_router.patch("/products/{pid}")
 async def update_product(pid: str, body: ProductUpdate):
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    # `original_price` is explicitly clearable — if the caller sent it as
+    # `null`, treat that as "wipe the was-price" so the admin's Original
+    # Price field can be blanked out from the storefront strikethrough.
+    if "original_price" in body.model_fields_set and body.original_price is None:
+        fields["original_price"] = None
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
     # Per-product custom delivery window: only validate when both bounds are
@@ -3875,6 +3880,13 @@ def _shape_storefront_product(p: dict) -> dict:
     """Whittle a full product doc down to fields safe + useful for a
     public storefront. Drops cost / supplier / internal notes."""
     countdown_active = bool(p.get("countdown_enabled")) and not bool(p.get("countdown_expired"))
+    # `original_price` — the was/before price used for a strikethrough on
+    # PCStore. Only surface it when it's actually higher than the current
+    # sell price so the storefront doesn't render a strikethrough for the
+    # same value.
+    price_now = p.get("price")
+    orig = p.get("original_price")
+    show_original = bool(orig) and price_now is not None and float(orig) > float(price_now)
     return {
         "id": p.get("id"),
         "product_code": p.get("product_code"),
@@ -3882,6 +3894,7 @@ def _shape_storefront_product(p: dict) -> dict:
         "description": p.get("description") or "",
         "category": p.get("category"),
         "price": p.get("price"),
+        "original_price": orig if show_original else None,
         "sale_price": p.get("countdown_sale_price") if countdown_active else None,
         "on_sale": countdown_active,
         "sale_ends_at": p.get("countdown_ends_at") if countdown_active else None,

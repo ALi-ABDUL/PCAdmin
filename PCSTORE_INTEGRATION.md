@@ -77,6 +77,7 @@ List products for a catalogue grid.
       "description": "…",
       "category": "espresso-cappuccino-machines",
       "price": 320.0,
+      "original_price": 399.0,   // when set and higher than `price` — render struck-through; `null` otherwise
       "sale_price": null,
       "on_sale": false,
       "sale_ends_at": null,

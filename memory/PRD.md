@@ -1587,3 +1587,34 @@ Notification Bell deep-links) — zero regressions detected.
   across portal, security, scheduler, disposable, country-access)
   remains green.
 
+
+## Original / Was Price for storefront strikethrough (2026-02-27)
+- **Backend**: added optional `original_price: Optional[float]` to
+  `ProductCreate` and `ProductUpdate` models (backwards-compat — old
+  docs read as `null`). `PATCH /api/products/{pid}` now supports
+  clearing the field by sending `original_price: null` explicitly
+  (via `body.model_fields_set` — the general "strip Nones" rule
+  still applies to every other optional field).
+- **Storefront shape** (`_shape_storefront_product`): exposes
+  `original_price` only when it's numeric AND strictly greater
+  than the current `price` — this prevents PCStore from rendering
+  a same-value or lower strikethrough by mistake. `null` otherwise.
+- **Admin UI** (`/app/frontend/src/pages/ProductDetail.jsx`):
+  new "Original price (AUD)" input rendered immediately next to
+  "Sell price (AUD)" in the Product details grid. Optional
+  placeholder guidance, `type=number` with 0.01 step. Send `null`
+  on save when the field is blanked so the storefront hides the
+  strikethrough. `data-testid="product-original-price-input"`.
+- **Doc**: `/app/PCSTORE_INTEGRATION.md` sample response updated to
+  include `original_price` with an inline comment describing when
+  PCStore should render the strikethrough.
+- **Tests**: `/app/backend/tests/test_original_price.py` — 6 cases
+  (PATCH persists, GET returns, storefront surfaces when higher,
+  hides when equal/lower, null clears, list endpoint includes key).
+  All 22 tests pass in the store + original-price files; 114-test
+  wider regression suite remains green.
+- **Verified live**: Playwright screenshot shows Sell price (320)
+  and Original price (499) side-by-side; value persisted across
+  reload. Curl confirms storefront API surfaces 499 when higher
+  and null when lower.
+

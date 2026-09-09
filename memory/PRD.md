@@ -1669,3 +1669,44 @@ Notification Bell deep-links) — zero regressions detected.
   product with sell=320 → `discount=20`; `original=500` → `36`;
   `null`/equal/lower → `null`.
 
+
+## Discount Badge Threshold (2026-02-27)
+- Added an admin-editable **minimum discount percent** knob so tiny
+  1–2% strikethroughs no longer clutter PCStore.
+- **Backend**:
+  - New singleton mock-DB collection `store_display_settings` with
+    `discount_badge_min_percent` (0–99, default 0). Seeded via
+    `_get_store_display()` on first read (matches the country-access
+    pattern).
+  - New admin endpoints:
+    - `GET /api/store-display-settings` → current knobs
+    - `PATCH /api/store-display-settings` → update knobs (Pydantic
+      `StoreDisplaySettingsUpdate` clamps 0–99)
+  - `_shape_storefront_product` now accepts `discount_min` and
+    nulls **both** `original_price` and `discount_percent` when the
+    computed saving is below the threshold — the strikethrough and
+    badge always render together or not at all.
+  - Every storefront endpoint fetches the threshold once per request
+    and passes it into every shape call (one round-trip per list,
+    zero per row).
+- **Admin UI** (`/app/frontend/src/pages/Settings.jsx`):
+  new **Storefront** tab with `<StorefrontDisplayCard>` — Percent
+  icon, numeric 0–99 input, live-updating helper text ("Discounts
+  below N% hide the strikethrough and the badge on PCStore."),
+  Save button that toasts the new state. `data-testid`s:
+  `storefront-card`, `storefront-threshold-input`, `storefront-save-btn`.
+- **Doc**: `/app/PCSTORE_INTEGRATION.md` sample response updated
+  with a note describing how the threshold nulls both fields.
+- **Tests**: 7 new pytest cases inside a merged
+  `TestOriginalPriceStorefront` class (combines the earlier
+  `TestOriginalPrice` + `TestDiscountPercent` + threshold suites
+  via mixin inheritance so pytest-xdist `loadscope` schedules them
+  in one worker — no cross-worker singleton races). All 18 tests
+  in `test_original_price.py` pass; wider regression suite (118
+  tests across storefront / portal / scheduler / countdown /
+  disposable / stuck-orders / auto-apply) remains green.
+- **Verified live**: Playwright screenshot shows the new Storefront
+  tab with the Discount Badge Threshold card + live helper copy;
+  curl round-trip confirms threshold=20 hides a 6% discount but
+  surfaces a 36% one.
+

@@ -79,6 +79,9 @@ List products for a catalogue grid.
       "price": 320.0,
       "original_price": 399.0,   // when set and higher than the effective price — render struck-through; `null` otherwise
       "discount_percent": 20,    // rounded % off vs `original_price` (e.g. render as `-20%` badge); `null` when no strikethrough
+      // Note: admins can set a minimum-percent threshold under Settings → Storefront.
+      // Discounts below the threshold return `original_price: null` + `discount_percent: null`
+      // so tiny 1–2% savings never clutter the storefront.
       "sale_price": null,
       "on_sale": false,
       "sale_ends_at": null,

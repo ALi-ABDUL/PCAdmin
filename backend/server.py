@@ -40,6 +40,7 @@ from models import (
     ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
     DisposableDomainsUpdate, DISPOSABLE_EMAIL_ERROR,
+    _DEFAULT_STORE_DISPLAY, StoreDisplaySettingsUpdate,
     CountdownStart, BrandingUpdate,
 )
 from countries import COUNTRIES, COUNTRY_CODES
@@ -3876,9 +3877,28 @@ async def use_bypass_token(token: str, request: Request):
 # For customer sign-in / order lookup PCStore should use `/api/portal/*`
 # (JWT bearer). See `PCSTORE_INTEGRATION.md` for the full integration guide.
 
-def _shape_storefront_product(p: dict) -> dict:
+async def _get_store_display() -> dict:
+    """Fetch (and lazily seed) the storefront display singleton. Used by
+    every storefront endpoint so admin-editable knobs like the
+    discount-badge threshold apply everywhere in one place."""
+    doc = await db.store_display_settings.find_one({"_id": "singleton"}, {"_id": 0})
+    if not doc:
+        seed = dict(_DEFAULT_STORE_DISPLAY)
+        seed.pop("_id", None)
+        await db.store_display_settings.update_one(
+            {"_id": "singleton"}, {"$set": seed}, upsert=True,
+        )
+        return dict(seed)
+    return {**{k: v for k, v in _DEFAULT_STORE_DISPLAY.items() if k != "_id"}, **doc}
+
+
+def _shape_storefront_product(p: dict, discount_min: int = 0) -> dict:
     """Whittle a full product doc down to fields safe + useful for a
-    public storefront. Drops cost / supplier / internal notes."""
+    public storefront. Drops cost / supplier / internal notes.
+
+    `discount_min` (0-99) suppresses `original_price` + `discount_percent`
+    when the computed saving is below that integer percent — an admin-
+    editable knob so tiny 1-2% strikethroughs don't clutter PCStore."""
     countdown_active = bool(p.get("countdown_enabled")) and not bool(p.get("countdown_expired"))
     # `original_price` — the was/before price used for a strikethrough on
     # PCStore. Only surface it when it's actually higher than the current
@@ -3907,6 +3927,13 @@ def _shape_storefront_product(p: dict) -> dict:
                 discount_percent = None
         except (TypeError, ValueError, ZeroDivisionError):
             discount_percent = None
+    # Admin threshold — hide both the strikethrough and the badge when
+    # the discount is below the configured minimum. Suppressing them
+    # together means PCStore doesn't render a lonely strikethrough with
+    # no badge (or vice versa) for tiny savings.
+    if discount_percent is not None and discount_min > 0 and discount_percent < discount_min:
+        discount_percent = None
+        show_original = False
     return {
         "id": p.get("id"),
         "product_code": p.get("product_code"),
@@ -3992,6 +4019,7 @@ async def store_list_products(
     )
     rows = await cursor.to_list(length=limit)
     total = await db.products.count_documents(query)
+    discount_min = int((await _get_store_display()).get("discount_badge_min_percent", 0) or 0)
     # Attach approved-review aggregate (one round-trip).
     ids = [p["id"] for p in rows]
     if ids:
@@ -4006,7 +4034,7 @@ async def store_list_products(
             p["review_count"] = int(row["count"]) if row else 0
             p["average_rating"] = round(float(row["avg"]), 2) if row and row.get("avg") is not None else 0.0
     return {
-        "products": [_shape_storefront_product(p) for p in rows],
+        "products": [_shape_storefront_product(p, discount_min=discount_min) for p in rows],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -4045,7 +4073,7 @@ async def store_get_product(pid: str):
     else:
         p["review_count"] = 0
         p["average_rating"] = 0.0
-    return _shape_storefront_product(p)
+    return _shape_storefront_product(p, discount_min=int((await _get_store_display()).get("discount_badge_min_percent", 0) or 0))
 
 
 @api_router.get("/store/categories")
@@ -4090,7 +4118,8 @@ async def store_related_products(pid: str, limit: int = Query(6, ge=1, le=20)):
         .limit(limit)
     )
     rows = await cursor.to_list(length=limit)
-    return {"products": [_shape_storefront_product(r) for r in rows], "total": len(rows)}
+    discount_min = int((await _get_store_display()).get("discount_badge_min_percent", 0) or 0)
+    return {"products": [_shape_storefront_product(r, discount_min=discount_min) for r in rows], "total": len(rows)}
 
 
 @api_router.get("/store/health")
@@ -4098,6 +4127,29 @@ async def store_health():
     """Cheap liveness check for PCStore to sanity-test connectivity + CORS
     from its own environment without hitting a data endpoint."""
     return {"ok": True, "service": "PCAdmin storefront API", "version": 1}
+
+
+@api_router.get("/store-display-settings")
+async def get_store_display_settings():
+    """Admin-view of the storefront display singleton. Powers the
+    Settings → Storefront panel."""
+    return await _get_store_display()
+
+
+@api_router.patch("/store-display-settings")
+async def patch_store_display_settings(body: StoreDisplaySettingsUpdate):
+    """Admin edit. Only surfaces keys the admin actually sent so future
+    fields on this doc aren't accidentally overwritten."""
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    # Bounds guard — pydantic already validates 0-99 but be defensive.
+    if "discount_badge_min_percent" in fields:
+        fields["discount_badge_min_percent"] = max(0, min(99, int(fields["discount_badge_min_percent"])))
+    await db.store_display_settings.update_one(
+        {"_id": "singleton"}, {"$set": fields}, upsert=True,
+    )
+    return await _get_store_display()
 
 
 # --- End PCStore public storefront API --------------------------------------

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, BadgeCheck, Copy, Database, Download, Globe2, Image as ImageIcon, KeyRound, LayoutGrid, LogIn, Lock, Mail, MailX, Moon, Palette, Pencil, Plus, RefreshCw, RotateCcw, Search, ShieldCheck, Sparkles, Sun, Trash2, Upload, UserPlus, X } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Copy, Database, Download, Globe2, Image as ImageIcon, KeyRound, LayoutGrid, LogIn, Lock, Mail, MailX, Moon, Palette, Pencil, Percent, Plus, RefreshCw, RotateCcw, Search, ShieldCheck, Sparkles, Store as StoreIcon, Sun, Trash2, Upload, UserPlus, X } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API, KEYS, loadKeys } from "../lib/api";
 import { applyTheme } from "../lib/theme";
@@ -10,13 +10,14 @@ import { ADMIN_ROLES, loadAdminSession, saveAdminSession } from "../lib/adminSes
 import { DASHBOARD_WIDGETS, loadDashboardLayout, resetDashboardLayout, saveDashboardLayout } from "../lib/dashboardLayout";
 
 const TABS = [
-  { id: "theme",     label: "Theme",            icon: Palette },
-  { id: "branding",  label: "Branding",         icon: Sparkles },
-  { id: "accounts",  label: "Accounts",         icon: ShieldCheck },
-  { id: "security",  label: "Security",         icon: Lock },
-  { id: "layout",    label: "Dashboard Layout", icon: LayoutGrid },
-  { id: "cache",     label: "Cache",            icon: RotateCcw },
-  { id: "backup",    label: "Backup",           icon: Database },
+  { id: "theme",      label: "Theme",            icon: Palette },
+  { id: "branding",   label: "Branding",         icon: Sparkles },
+  { id: "accounts",   label: "Accounts",         icon: ShieldCheck },
+  { id: "security",   label: "Security",         icon: Lock },
+  { id: "storefront", label: "Storefront",       icon: StoreIcon },
+  { id: "layout",     label: "Dashboard Layout", icon: LayoutGrid },
+  { id: "cache",      label: "Cache",            icon: RotateCcw },
+  { id: "backup",     label: "Backup",           icon: Database },
 ];
 
 const TAB_STORAGE = "settings_active_tab";
@@ -58,6 +59,7 @@ export function SettingsPage() {
       {activeTab === "branding" && <BrandingCard/>}
       {activeTab === "accounts" && <AccountsCard/>}
       {activeTab === "security" && <SecurityCard/>}
+      {activeTab === "storefront" && <StorefrontDisplayCard/>}
       {activeTab === "layout"   && <DashboardLayoutCard/>}
       {activeTab === "cache"    && <CacheCard/>}
       {activeTab === "backup"   && <BackupCard/>}
@@ -960,6 +962,110 @@ function DisposableDomainsCard() {
           <span>The blocklist is empty — every domain is currently allowed to register. Add at least one domain (e.g. <span className="font-mono">yopmail.com</span>) to enable the check.</span>
         </div>
       )}
+    </div>
+  );
+}
+
+
+
+/* ---------------------------- Storefront tab -----------------------------
+ *
+ * Admin knobs that shape how PCStore renders products. Currently just the
+ * "hide discount badge below N%" threshold — but this card is where any
+ * future storefront-facing preferences (currency, default sort, etc.)
+ * should live so admins have one place to look.
+ * ------------------------------------------------------------------------- */
+
+function StorefrontDisplayCard() {
+  const [threshold, setThreshold] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    axios.get(`${API}/store-display-settings`)
+      .then(r => setThreshold(Number(r.data?.discount_badge_min_percent) || 0))
+      .catch(() => setThreshold(0));
+  }, []);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const clamped = Math.max(0, Math.min(99, Math.round(Number(threshold) || 0)));
+      const { data } = await axios.patch(`${API}/store-display-settings`, {
+        discount_badge_min_percent: clamped,
+      });
+      setThreshold(Number(data?.discount_badge_min_percent) || 0);
+      setDirty(false);
+      toast.success(clamped === 0
+        ? "Showing every discount badge"
+        : `Hiding discount badges below ${clamped}%`);
+    } catch (e) {
+      toast.error("Save failed", { description: e?.response?.data?.detail || e.message });
+    } finally { setBusy(false); }
+  };
+
+  if (threshold === null) {
+    return <div className="card p-6 text-slate-500 text-sm" data-testid="storefront-loading">Loading storefront settings…</div>;
+  }
+
+  const clamped = Math.max(0, Math.min(99, Math.round(Number(threshold) || 0)));
+
+  return (
+    <div className="grid gap-4" data-testid="storefront-card">
+      <div className="card p-5">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl grid place-items-center bg-rose-50 text-rose-600 shrink-0">
+            <Percent size={18}/>
+          </div>
+          <div>
+            <div className="font-display font-bold text-lg">Discount badge threshold</div>
+            <div className="text-xs text-slate-500 max-w-xl mt-0.5">
+              Hide the strikethrough and <span className="font-mono">-N%</span> badge on PCStore whenever the computed saving is below this percent. Keeps tiny 1–2% strikethroughs from cluttering the storefront.
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-[220px_1fr] gap-4 items-center">
+          <div>
+            <label className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1 block">
+              Minimum percent
+            </label>
+            <div className="relative">
+              <input
+                type="number"
+                min={0}
+                max={99}
+                step={1}
+                value={threshold}
+                onChange={(e) => { setThreshold(e.target.value); setDirty(true); }}
+                className="input w-full px-3 py-2 pr-8 font-mono text-sm"
+                data-testid="storefront-threshold-input"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs pointer-events-none">%</span>
+            </div>
+          </div>
+          <div className="text-xs text-slate-500 font-mono bg-slate-50/60 border hairline rounded-lg p-3">
+            {clamped === 0 ? (
+              <span>All discounts render — even 1%.</span>
+            ) : (
+              <span>Discounts below <span className="text-rose-600 font-bold">{clamped}%</span> hide the strikethrough <em>and</em> the badge on PCStore.</span>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-5 flex items-center justify-end gap-2">
+          {dirty && <span className="text-[11px] text-amber-600 font-mono">unsaved changes</span>}
+          <button
+            onClick={save}
+            disabled={busy || !dirty}
+            className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            data-testid="storefront-save-btn"
+          >
+            {busy ? <RefreshCw size={14} className="animate-spin"/> : <BadgeCheck size={14}/>}
+            Save
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

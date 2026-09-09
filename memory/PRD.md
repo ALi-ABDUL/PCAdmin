@@ -1645,3 +1645,27 @@ Notification Bell deep-links) — zero regressions detected.
   regression (61 tests across store/portal/scheduler/countdown/
   original-price) remains green.
 
+
+## Storefront `discount_percent` Field (2026-02-27)
+- Storefront API (`_shape_storefront_product`) now derives and
+  exposes an integer `discount_percent` alongside `original_price`
+  and `sale_price`, so PCStore drops it straight into a
+  `-{n}%` badge without repeating the maths on the client.
+- Formula: `round((original_price - effective_price) / original_price * 100)`
+  where `effective_price` = `sale_price` when a countdown is
+  active, else the regular `price`. When there's no strikethrough
+  (no original set, original ≤ effective, or invalid input),
+  `discount_percent` is `null`.
+- **Doc**: `PCSTORE_INTEGRATION.md` sample response updated with
+  the new field + inline comment describing badge usage.
+- **Tests**: 5 new pytest cases in
+  `/app/backend/tests/test_original_price.py::TestDiscountPercent`
+  — matches manual maths, larger original ⇒ larger discount, null
+  when no original, null when original ≤ current, present on
+  every list-endpoint row (even as null) so PCStore doesn't have
+  to key-check. All 33 tests across store / original-price /
+  price-drop auto-apply pass.
+- **Verified live**: curl round-trip — set `original=400` on a
+  product with sell=320 → `discount=20`; `original=500` → `36`;
+  `null`/equal/lower → `null`.
+

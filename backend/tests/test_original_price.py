@@ -94,3 +94,69 @@ class TestOriginalPrice:
         found = next((p for p in rows if p["id"] == product["id"]), None)
         if found is not None:
             assert float(found["original_price"]) == 999.99
+
+
+class TestDiscountPercent:
+    """`discount_percent` is derived from `original_price` and the effective
+    price on the storefront (sale_price when a countdown is active, else
+    the sell price). Rounded to a whole number so PCStore can drop it
+    straight into a `-{n}%` badge."""
+
+    @classmethod
+    @pytest.fixture(autouse=True, scope="class")
+    def restore(cls):
+        yield
+        try:
+            r = requests.get(f"{API}/store/products", params={"limit": 1}, timeout=15)
+            pid = r.json()["products"][0]["id"]
+            requests.patch(f"{API}/products/{pid}", json={"original_price": None}, timeout=15)
+        except Exception:
+            pass
+
+    def _patch_and_get(self, pid, orig):
+        r = requests.patch(f"{API}/products/{pid}", json={"original_price": orig}, timeout=15)
+        assert r.status_code == 200
+        return requests.get(f"{API}/store/products/{pid}", timeout=15).json()
+
+    def test_discount_matches_manual_math(self, product):
+        body = self._patch_and_get(product["id"], 400.0)
+        price = float(body["price"])
+        orig = float(body["original_price"])
+        expected = round((orig - price) / orig * 100)
+        assert body["discount_percent"] == expected
+        assert 1 <= body["discount_percent"] <= 99
+
+    def test_larger_original_larger_discount(self, product):
+        low = self._patch_and_get(product["id"], 400.0)["discount_percent"]
+        high = self._patch_and_get(product["id"], 800.0)["discount_percent"]
+        assert high > low
+
+    def test_discount_null_when_no_original(self, product):
+        body = self._patch_and_get(product["id"], None)
+        assert body["original_price"] is None
+        assert body["discount_percent"] is None
+
+    def test_discount_null_when_original_below_or_equal(self, product):
+        # Equal → 0% saving → should be treated as no strikethrough → null.
+        r = requests.get(f"{API}/store/products/{product['id']}", timeout=15).json()
+        current = float(r["price"])
+        body = self._patch_and_get(product["id"], current)
+        assert body["original_price"] is None
+        assert body["discount_percent"] is None
+        # Lower than current → same result.
+        body = self._patch_and_get(product["id"], round(current - 1, 2))
+        assert body["discount_percent"] is None
+
+    def test_list_endpoint_carries_discount_percent(self, product):
+        # Make sure the key exists on every list row too (even if null),
+        # so PCStore doesn't need to null-check field presence.
+        requests.patch(f"{API}/products/{product['id']}",
+                       json={"original_price": 500.0}, timeout=15)
+        rows = requests.get(f"{API}/store/products", params={"limit": 50}, timeout=15).json()["products"]
+        for row in rows:
+            assert "discount_percent" in row
+        found = next((p for p in rows if p["id"] == product["id"]), None)
+        if found is not None:
+            assert isinstance(found["discount_percent"], int)
+            assert found["discount_percent"] > 0
+

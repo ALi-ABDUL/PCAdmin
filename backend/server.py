@@ -3886,7 +3886,27 @@ def _shape_storefront_product(p: dict) -> dict:
     # same value.
     price_now = p.get("price")
     orig = p.get("original_price")
-    show_original = bool(orig) and price_now is not None and float(orig) > float(price_now)
+    sale_price = p.get("countdown_sale_price") if countdown_active else None
+    # The price a shopper actually pays right now — used both as the
+    # denominator-less side of the discount calc and as what PCStore
+    # renders in bold next to the strikethrough.
+    effective_price = sale_price if sale_price is not None else price_now
+    show_original = (
+        orig is not None
+        and effective_price is not None
+        and float(orig) > float(effective_price)
+    )
+    # Discount % — server-side so every consumer (PCStore card, PWA,
+    # future email templates) renders the same "-30%" badge without
+    # re-deriving the maths. Rounded to a whole number for badge use.
+    discount_percent = None
+    if show_original:
+        try:
+            discount_percent = round((float(orig) - float(effective_price)) / float(orig) * 100)
+            if discount_percent <= 0:
+                discount_percent = None
+        except (TypeError, ValueError, ZeroDivisionError):
+            discount_percent = None
     return {
         "id": p.get("id"),
         "product_code": p.get("product_code"),
@@ -3895,7 +3915,8 @@ def _shape_storefront_product(p: dict) -> dict:
         "category": p.get("category"),
         "price": p.get("price"),
         "original_price": orig if show_original else None,
-        "sale_price": p.get("countdown_sale_price") if countdown_active else None,
+        "discount_percent": discount_percent,
+        "sale_price": sale_price,
         "on_sale": countdown_active,
         "sale_ends_at": p.get("countdown_ends_at") if countdown_active else None,
         "images": p.get("images") or [],

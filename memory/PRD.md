@@ -1618,3 +1618,30 @@ Notification Bell deep-links) — zero regressions detected.
   reload. Curl confirms storefront API surfaces 499 when higher
   and null when lower.
 
+
+## Price-Alert → Auto Was-Price (2026-02-27)
+- When the eBay scraper detects an item price movement and the
+  rule-derived sell price DROPS, `_emit_price_change_notifications`
+  in `/app/backend/helpers.py` now also **auto-applies the drop to
+  every linked product**:
+  - Stashes the product's current `price` into `original_price`
+    (or keeps whichever value is higher, protecting an admin who
+    already set a manual "was" price)
+  - Sets the product's `price` to the new rule-derived sell price
+  - Storefront strikethrough appears instantly — no admin edit
+- **Guardrails**:
+  - Price INCREASES never touch `original_price` (would show a
+    nonsensical strikethrough)
+  - If the product's current sell is already at or below the new
+    rule-derived value (admin manually undercut it), auto-apply
+    is skipped — never raises a price
+  - Notifications still fire alongside the auto-update (backwards
+    compatible with the existing bell/email flow)
+- **Tests**: `/app/backend/tests/test_price_drop_auto_apply.py` —
+  6 cases covering drop moves current→original, preserves higher
+  existing original, price increase leaves everything alone, no
+  change when current already below new sell, notification still
+  emitted, multiple linked products all update. All pass; wider
+  regression (61 tests across store/portal/scheduler/countdown/
+  original-price) remains green.
+

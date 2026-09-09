@@ -1236,7 +1236,19 @@ async def _emit_notification(**kwargs) -> dict:
 
 async def _emit_price_change_notifications(item: dict, new_image: Optional[str], new_title: str,
                                            old_price: float, new_price: float, now_iso: str) -> None:
-    """Create a notification for each product linked to this scraped item."""
+    """Create a notification for each product linked to this scraped item.
+
+    On a genuine sell-price DROP we also auto-adjust every linked product:
+      * stash the product's current `price` into `original_price`
+        (keeping whichever `original_price` is higher if the admin had
+        already set one manually — so the strikethrough always reflects
+        the largest historical anchor)
+      * set the product's `price` to the new (lower) rule-derived sell
+        price so PCStore instantly renders the sale + strikethrough
+        without any admin intervention.
+    Price INCREASES never touch `original_price` — a rising anchor would
+    display a nonsensical strikethrough on the storefront.
+    """
     ebay_item_id = item.get("item_id") or item.get("id")
     if not ebay_item_id:
         return
@@ -1250,9 +1262,48 @@ async def _emit_price_change_notifications(item: dict, new_image: Optional[str],
     old_margin = margin_pct(old_calc["sell_price"], old_price)
     new_margin = margin_pct(new_calc["sell_price"], new_price)
 
+    # Broader projection so we can preserve any existing `original_price`.
     products = await db.products.find(
-        {"source_item_id": ebay_item_id}, {"_id": 0, "id": 1, "title": 1, "images": 1}
+        {"source_item_id": ebay_item_id},
+        {"_id": 0, "id": 1, "title": 1, "images": 1, "price": 1, "original_price": 1},
     ).to_list(50)
+
+    # ---------- Auto-apply the drop to every linked product ------------
+    is_drop = float(new_calc["sell_price"]) < float(old_calc["sell_price"])
+    if is_drop and products:
+        new_sell = round(float(new_calc["sell_price"]), 2)
+        for prod in products:
+            current_sell = prod.get("price")
+            if current_sell is None:
+                continue
+            # Skip if the new sell isn't actually lower than what's on the
+            # product doc right now — protects admins who already dropped
+            # the price manually below the rule-derived value.
+            if float(current_sell) <= new_sell:
+                continue
+            # Anchor for the strikethrough: keep whichever is higher
+            # between the existing `original_price` and the current sell
+            # price we're about to overwrite. This way a second drop
+            # doesn't shrink the was-price.
+            existing_orig = prod.get("original_price")
+            anchor = float(current_sell)
+            if existing_orig is not None:
+                try:
+                    anchor = max(anchor, float(existing_orig))
+                except (TypeError, ValueError):
+                    pass
+            await db.products.update_one(
+                {"id": prod["id"]},
+                {"$set": {
+                    "price": new_sell,
+                    "original_price": round(anchor, 2),
+                    "updated_at": now_iso,
+                }},
+            )
+            logger.info(
+                "price-drop auto-apply: product %s · %.2f → %.2f (was %.2f)",
+                prod["id"], float(current_sell), new_sell, anchor,
+            )
 
     # No linked products yet — still emit one notification tied to the scraped item so
     # the user sees eBay-side price movement in their bell drop-down.

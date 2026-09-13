@@ -1748,6 +1748,31 @@ Notification Bell deep-links) — zero regressions detected.
 - **Test IDs**: new `product-image-set-hero-{i}` for each non-hero
   tile. Existing `product-image-{i}`, `product-image-replace-{i}`,
   `product-image-delete-{i}` unchanged.
+
+## Switched to Atlas — Fresh `prettycheap` DB (2026-02-27)
+- Moved `MONGO_URL` in `/app/backend/.env` from the local
+  Kubernetes MongoDB (`mongodb://localhost:27017`) to the user's
+  MongoDB Atlas cluster (`mongodb+srv://…@prettycheap.xxo1tem.mongodb.net`).
+- Set `DB_NAME=prettycheap`.
+- **Fresh empty database** — no legacy data was copied. Startup
+  verified: 0 products, 0 orders, 0 customers, 0 transactions.
+  Only essential singletons were auto-seeded:
+    - 29 categories (taxonomy)
+    - 5 pricing rules
+    - 3 postage presets
+    - `admin@example.com` / `admin123` main admin
+    - Country access allow-list (AU + MA)
+    - 35 disposable-email domains
+- The mock/demo seeders (`_seed_transactions_and_returns`,
+  `_rebuild_customers_from_orders`, `POST /api/demo/seed`) are all
+  no-ops on an empty DB or manual-only — nothing populates fake
+  revenue / orders / customers / products automatically.
+- Updated `/app/memory/test_credentials.md` with a data-reset
+  note and the new admin login. Old customer accounts
+  (`olivia.anderson@example.com`, `charlie.taylor@example.com`)
+  are gone with the reset — the portal now starts from zero,
+  gated by real orders.
+
 - **Backend**: no changes — same `PATCH /api/products/{pid}` with
   the reordered `images` list.
 - **Verified live**: Playwright confirmed clicking Set as hero on

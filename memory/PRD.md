@@ -1780,3 +1780,20 @@ Notification Bell deep-links) — zero regressions detected.
   the button from the now-hero image. Toast fires ("New listing
   hero image").
 
+
+## Removed emergentintegrations for local/off-platform runs (2026-02-27)
+- Removed `emergentintegrations==0.2.0` from
+  `/app/backend/requirements.txt`. It was a leftover dependency —
+  a full codebase scan (`server.py`, `helpers.py`, `deps.py`,
+  `models.py`, `scraper.py`, `countries.py`) confirmed it is
+  **never imported or used**. The app has no LLM/AI features:
+  notifications use Resend/Telegram HTTP APIs and scraping uses
+  `curl_cffi`.
+- No open-source equivalent needed to be swapped in — there was
+  no code depending on it. The package only lived on Emergent's
+  private pip index, which is why installs failed off-platform.
+- **Verified**: `pip install -r requirements.txt` now succeeds
+  with the public PyPI index only (no `--extra-index-url`), and
+  the backend restarts cleanly (`/api/store/health` → ok). The
+  backend can now run locally outside Emergent's environment.
+

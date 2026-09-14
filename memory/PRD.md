@@ -1894,3 +1894,18 @@ Notification Bell deep-links) — zero regressions detected.
   and a new regression test `tests/test_customer_permanent_delete.py` (passing).
   Frontend delete flow (`Customers.jsx` `del()`) unchanged — it already calls DELETE
   then reloads.
+
+
+## Jun 2026 — Customers list stale-cache fix (refresh after portal registration)
+- **Investigation:** confirmed the backend is correct — after a fresh portal
+  registration, the new record appears in BOTH the direct `db.customers` query AND
+  `GET /api/customers` (total 23→24). The Customers list query has no phantom
+  `id`/`_id`/`portal`/`source` filter; the "All Customers" tab passes no status/type
+  filter. So the reported "missing records" was a frontend not re-fetching.
+- **Fix:** `CustomerPortal` now takes an `onCustomersChanged` callback, fired on every
+  successful registration write. `CustomersModule` passes a `bumpCustomers` handler
+  that increments a `refreshTick`, which is now a dependency of the list `load()` and
+  the summary fetch — so the list + KPI counts refresh immediately after a portal
+  registration (no manual reload). Files: `pages/CustomerPortal.jsx`, `pages/Customers.jsx`.
+- Verified via UI: registered in the embedded portal → returned to All Customers →
+  new registrant showed at the top with the Portal badge and the count bumped.

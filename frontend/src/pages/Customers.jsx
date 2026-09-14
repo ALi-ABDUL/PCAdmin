@@ -23,6 +23,10 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
   const [messages, setMessages] = useState([]);
   const [coupons, setCoupons] = useState([]);
   const [reviews, setReviews] = useState([]);
+  // Bumped whenever a write happens outside the list (e.g. a portal
+  // registration) so the list + summary re-fetch and never show stale data.
+  const [refreshTick, setRefreshTick] = useState(0);
+  const bumpCustomers = useCallback(() => setRefreshTick((t) => t + 1), []);
 
   const isPaginated = ["all","pending","active","guest","registered","blocked"].includes(section);
 
@@ -40,9 +44,9 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/customers`, { params });
     setList(data.customers); setTotal(data.total);
-  }, [JSON.stringify(params)]); // eslint-disable-line
+  }, [JSON.stringify(params), refreshTick]); // eslint-disable-line
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { axios.get(`${API}/customers/summary`).then(r => setSummary(r.data)); }, [list.length]);
+  useEffect(() => { axios.get(`${API}/customers/summary`).then(r => setSummary(r.data)); }, [list.length, refreshTick]);
   useEffect(() => { if (section === "messages") axios.get(`${API}/messages`).then(r => setMessages(r.data.messages)); }, [section]);
   useEffect(() => { if (section === "coupons") axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons)); }, [section]);
   useEffect(() => { if (section === "reviews") axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews)); }, [section]);
@@ -77,7 +81,7 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
   return (
     <div className="grid gap-6">
       <SubHero icon={Icon} group={meta.group} label={meta.label} hint={hints[section]}/>
-      {section === "portal"     && <CustomerPortal/>}
+      {section === "portal"     && <CustomerPortal onCustomersChanged={bumpCustomers}/>}
       {section === "create"     && <CreateCustomer onCreated={() => { load(); setSection("all"); }}/>}
       {section === "import"     && <ImportCustomers onImported={() => { load(); setSection("all"); }}/>}
       {(["all","pending","active","guest","registered","blocked"].includes(section)) && <CustomerTable list={list} total={total} q={q} setQ={setQ} sortField={sortField} sortDir={sortDir} toggleSort={toggleSort} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} onChanged={load} onOpen={openCustomerDetail}/>}

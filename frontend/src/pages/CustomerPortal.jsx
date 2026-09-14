@@ -8,14 +8,14 @@ import { fmtDate, moneyCents } from "../lib/format";
 import { usePortalAuth } from "../lib/portal-auth";
 import { Orders } from "./Orders";
 
-export function CustomerPortal() {
+export function CustomerPortal({ onCustomersChanged }) {
   const auth = usePortalAuth();
   if (auth.checking) return <div className="text-slate-500 py-24 text-center">loading portal…</div>;
-  if (!auth.customer) return <PortalAuthCard onSignedIn={auth.signIn}/>;
+  if (!auth.customer) return <PortalAuthCard onSignedIn={auth.signIn} onCustomersChanged={onCustomersChanged}/>;
   return <PortalDashboard auth={auth}/>;
 }
 
-export function PortalAuthCard({ onSignedIn }) {
+export function PortalAuthCard({ onSignedIn, onCustomersChanged }) {
   const [mode, setMode] = useState("login"); // login | register
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -48,6 +48,11 @@ export function PortalAuthCard({ onSignedIn }) {
       const url = `${API}/portal/${mode}`;
       const body = mode === "register" ? { email, password, name } : { email, password };
       const { data } = await axios.post(url, body);
+      if (mode === "register") {
+        // A registration always writes a customer row — tell the admin
+        // Customers list to refresh so the new record shows immediately.
+        onCustomersChanged?.();
+      }
       if (mode === "register" && data.requires_verification) {
         // Account created but inactive — show the "check your email" screen.
         setPending({ email: data.email || email, activation_link: data.activation_link });

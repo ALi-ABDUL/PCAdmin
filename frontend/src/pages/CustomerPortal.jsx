@@ -25,6 +25,14 @@ export function PortalAuthCard({ onSignedIn }) {
   // Post-registration / unverified-login state.
   const [pending, setPending] = useState(null); // { email, activation_link? }
   const [resending, setResending] = useState(false);
+  const [cooldown, setCooldown] = useState(0); // seconds until resend is allowed again
+
+  // Tick the resend cooldown down to zero.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   const parseErr = (e) => {
     const d = e?.response?.data?.detail;
@@ -63,12 +71,13 @@ export function PortalAuthCard({ onSignedIn }) {
   };
 
   const resend = async () => {
-    if (!pending?.email) return;
+    if (!pending?.email || resending || cooldown > 0) return;
     setResending(true);
     try {
       const { data } = await axios.post(`${API}/portal/resend-verification`, { email: pending.email });
       setPending((p) => ({ ...p, activation_link: data.activation_link || p.activation_link }));
-      toast.success("Verification link sent — check your inbox");
+      setCooldown(30);
+      toast.success("Verification link sent — check your inbox (and spam)");
     } catch (e) {
       toast.error(parseErr(e));
     } finally { setResending(false); }
@@ -97,13 +106,26 @@ export function PortalAuthCard({ onSignedIn }) {
             <a href={pending.activation_link} className="text-indigo-600 underline break-all font-mono">{pending.activation_link}</a>
           </div>
         )}
-        <div className="flex flex-wrap gap-2">
-          <button onClick={resend} disabled={resending} className="btn btn-ghost text-sm" data-testid="portal-resend-btn">
-            {resending ? <Loader2 className="animate-spin" size={14}/> : <MailCheck size={14}/>} Resend link
-          </button>
-          <button onClick={() => { setPending(null); setMode("login"); }} className="btn btn-primary text-sm" data-testid="portal-back-to-login">
-            Back to sign in
-          </button>
+        <div className="rounded-lg border hairline bg-slate-50 p-4 mb-2" data-testid="portal-resend-block">
+          <div className="text-sm font-medium text-slate-700">Didn't get the email?</div>
+          <div className="text-xs text-slate-500 mb-3">Check your spam folder, or send yourself a fresh link.</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={resend}
+              disabled={resending || cooldown > 0}
+              className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="portal-resend-btn"
+            >
+              {resending
+                ? <><Loader2 className="animate-spin" size={14}/> Sending…</>
+                : cooldown > 0
+                  ? <><MailCheck size={14}/> Resend in {cooldown}s</>
+                  : <><MailCheck size={14}/> Resend verification link</>}
+            </button>
+            <button onClick={() => { setPending(null); setMode("login"); }} className="btn btn-ghost text-sm" data-testid="portal-back-to-login">
+              Back to sign in
+            </button>
+          </div>
         </div>
       </div>
     );

@@ -1867,3 +1867,12 @@ Notification Bell deep-links) — zero regressions detected.
   `test_customer_email_notifications.py`, are PRE-EXISTING failures — they assert the
   legacy no-verification flow and use the now-disposable-blocked `aliko@yopmail.com`
   email. They predate and are unrelated to this change (verified via git stash).
+
+
+## Jun 2026 — Portal "Resend verification link" UX
+- Enhanced the existing verify-pending screen in `pages/CustomerPortal.jsx` (shown
+  after register AND after an unverified login) with a clear "Didn't get the email?"
+  block, a "Check your spam folder…" hint, and a primary **Resend verification link**
+  button wired to `POST /api/portal/resend-verification` (already existed). Added a
+  30s client-side cooldown ("Resend in Ns", button disabled) to prevent spam, plus a
+  "check your inbox (and spam)" toast. Test-ids: `portal-resend-block`, `portal-resend-btn`.

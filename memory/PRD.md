@@ -1797,3 +1797,30 @@ Notification Bell deep-links) — zero regressions detected.
   the backend restarts cleanly (`/api/store/health` → ok). The
   backend can now run locally outside Emergent's environment.
 
+
+
+## Jun 2026 — Multi-schedule Scraper UI (frontend completion) + Email Verification verified
+- **Multi-schedule Scraper UI** (`ScraperScheduleEditor` in `pages/Store.jsx`)
+  rewritten to match the multi-schedule backend. Admins can now add/remove any
+  number of independently-firing schedule rows (each with its own enable toggle,
+  start time, frequency, optional stop date). A single **Save schedules** button
+  persists the whole list via `PUT /api/scraper/schedules`; a **Discard** button
+  reverts unsaved edits; **Add schedule** appends a fresh row. Local edit state is
+  kept separate from the 30s polling `sched` doc (guarded by `dirtyRef`) so the
+  poll never clobbers in-progress edits. Status strip now shows "N active
+  schedules" and the earliest next-run across all rows; each row shows its own
+  next-run. Run-history / retry banner unchanged. New test-ids: `sched-config`,
+  `sched-add-row`, `sched-save`, `sched-discard`, `sched-row-{i}`,
+  `sched-row-{enabled,start,frequency,stop,remove}-{i}`, `sched-status-chip`.
+  Verified end-to-end: added a 2nd (weekly 18:30) schedule, saved, DB persisted
+  2 rows with correct independent `next_run_at` (daily→16:00Z, weekly→Mon 08:30Z).
+- **Email Verification flow** (customer registration) verified end-to-end via curl:
+  register → `requires_verification` + activation link (email skipped, no Resend
+  key) → login blocked with 403 `requires_verification` → `POST /api/portal/verify`
+  with token → `verified:true` + session token → login now succeeds. The
+  **Email Templates editor** (Store Management → Email Templates, `EmailTemplatesEditor`)
+  renders with live preview and saves via `PATCH /api/email-templates`.
+- **Admin login**: dashboard now has a real login gate (`POST /api/admin-accounts/login`).
+  The old `admin@example.com` seed does NOT exist on the live Atlas cluster. Created
+  a dedicated QA admin `qa@prettycheap.com.au / QaTest123!` for testing;
+  `test_credentials.md` updated accordingly.

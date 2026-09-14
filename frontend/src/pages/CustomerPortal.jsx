@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Clock as ClockIcon, Loader2, ShieldCheck, Star as StarIcon, User as UserIcon, UserPlus } from "lucide-react";
+import { BadgeCheck, Ban, Clock as ClockIcon, Loader2, MailCheck, ShieldCheck, Star as StarIcon, User as UserIcon, UserPlus } from "lucide-react";
 import { StatusChip } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
@@ -22,12 +22,15 @@ export function PortalAuthCard({ onSignedIn }) {
   const [name, setName] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // Post-registration / unverified-login state.
+  const [pending, setPending] = useState(null); // { email, activation_link? }
+  const [resending, setResending] = useState(false);
 
   const parseErr = (e) => {
     const d = e?.response?.data?.detail;
     if (typeof d === "string") return d;
     if (Array.isArray(d)) return d.map(x => x?.msg || "").filter(Boolean).join(" ") || e.message;
-    return d?.msg || e.message;
+    return d?.message || d?.msg || e.message;
   };
 
   const submit = async (evt) => {
@@ -37,11 +40,74 @@ export function PortalAuthCard({ onSignedIn }) {
       const url = `${API}/portal/${mode}`;
       const body = mode === "register" ? { email, password, name } : { email, password };
       const { data } = await axios.post(url, body);
-      onSignedIn(data.token, data.customer);
-      toast.success(mode === "register" ? "Welcome — account created" : "Signed in");
-    } catch (e) { setErr(parseErr(e)); }
+      if (mode === "register" && data.requires_verification) {
+        // Account created but inactive — show the "check your email" screen.
+        setPending({ email: data.email || email, activation_link: data.activation_link });
+        toast.success("Account created — verify your email to activate");
+      } else {
+        onSignedIn(data.token, data.customer);
+        toast.success("Signed in");
+      }
+    } catch (e) {
+      const d = e?.response?.data?.detail;
+      // Login blocked because the account isn't verified yet.
+      if (e?.response?.status === 403 && d && typeof d === "object" && d.requires_verification) {
+        setPending({ email: d.email || email });
+        setErr("");
+        toast.info("Please verify your email to sign in");
+      } else {
+        setErr(parseErr(e));
+      }
+    }
     finally { setBusy(false); }
   };
+
+  const resend = async () => {
+    if (!pending?.email) return;
+    setResending(true);
+    try {
+      const { data } = await axios.post(`${API}/portal/resend-verification`, { email: pending.email });
+      setPending((p) => ({ ...p, activation_link: data.activation_link || p.activation_link }));
+      toast.success("Verification link sent — check your inbox");
+    } catch (e) {
+      toast.error(parseErr(e));
+    } finally { setResending(false); }
+  };
+
+  // "Check your email" screen shown after registration / unverified login.
+  if (pending) {
+    return (
+      <div className="card p-6 md:p-8 max-w-xl mx-auto w-full" data-testid="portal-verify-pending">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl grid place-items-center text-white" style={{ background: "linear-gradient(135deg, #4F46E5, #EC4899)" }}>
+            <MailCheck size={18}/>
+          </div>
+          <div>
+            <div className="font-display font-bold text-xl">Verify your email</div>
+            <div className="text-xs text-slate-500">We sent an activation link to <span className="font-mono text-slate-700">{pending.email}</span>.</div>
+          </div>
+        </div>
+        <p className="text-sm text-slate-600 mb-4">
+          Click the link in that email to activate your account, then come back here to sign in.
+          The link expires in 24 hours.
+        </p>
+        {pending.activation_link && (
+          <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4" data-testid="portal-activation-link">
+            <div className="font-bold text-amber-800 mb-1">Email isn't configured yet — use this link to activate:</div>
+            <a href={pending.activation_link} className="text-indigo-600 underline break-all font-mono">{pending.activation_link}</a>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button onClick={resend} disabled={resending} className="btn btn-ghost text-sm" data-testid="portal-resend-btn">
+            {resending ? <Loader2 className="animate-spin" size={14}/> : <MailCheck size={14}/>} Resend link
+          </button>
+          <button onClick={() => { setPending(null); setMode("login"); }} className="btn btn-primary text-sm" data-testid="portal-back-to-login">
+            Back to sign in
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="card p-6 md:p-8 max-w-xl mx-auto w-full" data-testid="portal-auth-card">
@@ -81,7 +147,7 @@ export function PortalAuthCard({ onSignedIn }) {
           {mode === "register" ? "Create account" : "Sign in"}
         </button>
         {mode === "register" && (
-          <div className="text-[11px] text-slate-500">You need an existing order under this email — this stops fake reviews from non-buyers.</div>
+          <div className="text-[11px] text-slate-500">You need an existing order under this email — this stops fake reviews from non-buyers. You'll get a verification email to activate your account.</div>
         )}
       </form>
     </div>

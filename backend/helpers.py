@@ -4,13 +4,15 @@ Extracted from server.py during modular refactor (Feb 2026)."""
 import asyncio
 import re
 import os
+import hashlib
 import random
+import secrets
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_update_schedule_entry', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
+__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_update_schedule_entry', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
 
 
 import bcrypt
@@ -32,6 +34,7 @@ from models import (
     Category, Customer, Notification, PricingRule, ScrapeRequest,
     PostagePreset, _DEFAULT_POSTAGE_PRESETS, DELIVERY_SETTINGS_DEFAULTS,
     AdminAccount, _DEFAULT_MAIN_ADMIN,
+    _DEFAULT_EMAIL_TEMPLATES, VERIFICATION_TOKEN_TTL_HOURS,
 )
 import httpx
 
@@ -1092,6 +1095,152 @@ async def send_customer_welcome_email(customer: dict) -> str:
     return await send_customer_email("welcome", to, subject, html)
 
 
+# --- Account verification (email activation) --------------------------------
+#
+# On registration we mint a random URL-safe token, store only its SHA-256
+# hash (so a DB leak can't be used to activate accounts), and email the raw
+# token inside an activation link. The token is single-use and expires after
+# VERIFICATION_TOKEN_TTL_HOURS. Login is blocked until `verified` is True.
+
+async def _get_email_templates() -> dict:
+    """Fetch (lazily seed) the `email_templates` singleton."""
+    doc = await db.email_templates.find_one({"_id": "singleton"}, {"_id": 0})
+    if not doc:
+        seed = {k: v for k, v in _DEFAULT_EMAIL_TEMPLATES.items() if k != "_id"}
+        await db.email_templates.update_one({"_id": "singleton"}, {"$set": seed}, upsert=True)
+        return dict(seed)
+    # Merge over defaults so newly-added keys are always present.
+    merged = {k: v for k, v in _DEFAULT_EMAIL_TEMPLATES.items() if k != "_id"}
+    merged.update(doc)
+    v = dict(_DEFAULT_EMAIL_TEMPLATES["verification"])
+    v.update(doc.get("verification") or {})
+    merged["verification"] = v
+    return merged
+
+
+def _hash_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _render_verification_email(name: str, email: str, link: str, tpl: dict) -> tuple[str, str]:
+    """Return (subject, html) for the verification email, substituting
+    {name}/{email} placeholders and applying the admin's branding."""
+    def sub(s: str) -> str:
+        return (s or "").replace("{name}", name or "there").replace("{email}", email or "")
+    subject = sub(tpl.get("subject") or "Verify your email")
+    heading = sub(tpl.get("heading") or "Confirm your email address")
+    body = sub(tpl.get("body") or "")
+    button_label = tpl.get("button_label") or "Activate my account"
+    footer = sub(tpl.get("footer") or "")
+    accent = tpl.get("accent_color") or "#4F46E5"
+    logo = tpl.get("logo_url") or ""
+    logo_html = (
+        f'<img src="{logo}" alt="" height="36" style="max-height:36px;margin-bottom:8px;display:block;"/>'
+        if logo else
+        '<div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:0.85;color:#fff;">PCAdmin</div>'
+    )
+    html = f"""<!doctype html>
+<html><body style="font-family:Arial,sans-serif;background:#F7F7FB;padding:32px;color:#0F172A;">
+  <table role="presentation" cellspacing="0" cellpadding="0" width="100%" style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #EAEAF0;border-radius:12px;overflow:hidden;">
+    <tr><td style="padding:24px;background:{accent};">
+      {logo_html}
+      <div style="font-size:20px;font-weight:700;margin-top:6px;color:#fff;">{heading}</div>
+    </td></tr>
+    <tr><td style="padding:20px 24px;color:#334155;font-size:14px;line-height:1.6;">{body}</td></tr>
+    <tr><td style="padding:4px 24px 24px 24px;">
+      <a href="{link}" style="display:inline-block;background:{accent};color:#fff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:8px;">{button_label}</a>
+    </td></tr>
+    <tr><td style="padding:0 24px 16px 24px;color:#94A3B8;font-size:11px;word-break:break-all;">
+      Or paste this link into your browser:<br/><a href="{link}" style="color:{accent};">{link}</a>
+    </td></tr>
+    {f'<tr><td style="padding:12px 24px 22px 24px;color:#64748B;font-size:12px;border-top:1px solid #EEF2F7;">{footer}</td></tr>' if footer else ''}
+  </table>
+</body></html>"""
+    return subject, html
+
+
+async def _create_verification_token(email: str) -> str:
+    """Invalidate any prior tokens for this email and mint a fresh one.
+    Returns the RAW token (only the hash is stored)."""
+    await db.verification_tokens.delete_many({"email": email})
+    raw = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    await db.verification_tokens.insert_one({
+        "id": str(uuid.uuid4()),
+        "email": email,
+        "token_hash": _hash_token(raw),
+        "expires_at": (now + timedelta(hours=VERIFICATION_TOKEN_TTL_HOURS)).isoformat(),
+        "used_at": None,
+        "created_at": now.isoformat(),
+    })
+    return raw
+
+
+async def _send_verification_email(account: dict) -> dict:
+    """Mint a token, build the activation link, and try to email it.
+
+    Returns { "sent": bool, "link": str, "email_status": str }. The link is
+    always returned so callers can surface it for manual testing when email
+    isn't configured. The link is also logged.
+    """
+    email = account.get("email") or ""
+    name = account.get("name") or email.split("@")[0]
+    tpl = await _get_email_templates()
+    raw = await _create_verification_token(email)
+    base = (tpl.get("portal_base_url") or "").rstrip("/")
+    link = f"{base}/verify?token={raw}" if base else f"/verify?token={raw}"
+
+    settings = await _get_push_settings()
+    key = settings.get("resend_api_key")
+    frm = settings.get("resend_from_email") or "onboarding@resend.dev"
+    master_on = settings.get("customer_email_enabled")
+    sent = False
+    status = "skipped_no_key"
+    if key and master_on:
+        subject, html = _render_verification_email(name, email, link, tpl.get("verification") or {})
+        resend.api_key = key
+        try:
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": frm, "to": [email], "subject": subject, "html": html,
+            })
+            sent = True
+            status = "sent"
+        except Exception as e:
+            logger.warning(f"[verify email] send failed · to={email} · {e}")
+            status = "failed"
+    elif not master_on:
+        status = "skipped_master_off"
+    # Always log the link so it's grabbable during testing.
+    logger.info(f"[verify email] activation link for {email}: {link} (email_status={status})")
+    return {"sent": sent, "link": link, "email_status": status}
+
+
+async def _consume_verification_token(raw: str) -> Optional[str]:
+    """Validate + single-use-consume a token. Returns the email on success,
+    or None if the token is unknown / expired / already used."""
+    if not raw:
+        return None
+    doc = await db.verification_tokens.find_one({"token_hash": _hash_token(raw)}, {"_id": 0})
+    if not doc or doc.get("used_at"):
+        return None
+    try:
+        expires = datetime.fromisoformat(doc["expires_at"])
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+    except (KeyError, ValueError, TypeError):
+        return None
+    if expires <= datetime.now(timezone.utc):
+        return None
+    # Mark used (single-use) + flip the account to verified.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.verification_tokens.update_one({"id": doc["id"]}, {"$set": {"used_at": now_iso}})
+    await db.customer_accounts.update_one(
+        {"email": doc["email"]},
+        {"$set": {"verified": True, "verified_at": now_iso}},
+    )
+    return doc["email"]
+
+
 
 async def _send_telegram(text: str) -> None:
     settings = await _get_push_settings()
@@ -1495,8 +1644,6 @@ async def _load_pricing_rules() -> list[dict]:
 # ---------------------------------------------------------------------------
 # Country access control
 # ---------------------------------------------------------------------------
-
-import secrets  # noqa: E402  – kept next to the helpers that use it
 
 from models import _DEFAULT_COUNTRY_ACCESS, BYPASS_SESSION_TTL_SECONDS  # noqa: E402
 

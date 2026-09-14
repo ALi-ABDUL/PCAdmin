@@ -82,6 +82,7 @@ export const STORE_NAV = [
   { id: "tax-rates",           label: "Tax Rates",            icon: Receipt,      group: "Configuration" },
   { id: "checkout-settings",   label: "Checkout Settings",    icon: ShoppingCart, group: "Configuration" },
   { id: "email-notifications", label: "Email & Notifications",icon: Mail,         group: "Content" },
+  { id: "email-templates",     label: "Email Templates",      icon: MessageCircle,group: "Content" },
   { id: "popup-messages",      label: "Popup Messages",       icon: MessageSquare,group: "Content" },
   { id: "site-menus",          label: "Site Menus",           icon: Menu,         group: "Content" },
   { id: "pages",               label: "Pages",                icon: FileText,     group: "Content" },

@@ -41,6 +41,7 @@ from models import (
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
     DisposableDomainsUpdate, DISPOSABLE_EMAIL_ERROR,
     _DEFAULT_STORE_DISPLAY, StoreDisplaySettingsUpdate,
+    VerifyTokenBody, ResendVerificationBody, EmailTemplatesUpdate,
     CountdownStart, BrandingUpdate,
 )
 from countries import COUNTRIES, COUNTRY_CODES
@@ -60,6 +61,7 @@ from helpers import (
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
     _customer_email_html,
+    _get_email_templates, _send_verification_email, _consume_verification_token,
     _ensure_country_access_seeded, _get_country_access, _client_country, _client_ip,
     _bypass_active_for_ip, _grant_bypass, _purge_expired_bypasses,
     _ensure_disposable_domains_seeded, _get_disposable_domains, _is_disposable_email,
@@ -1345,13 +1347,64 @@ async def portal_register(body: PortalRegisterBody):
         "email": email,
         "name": display_name,
         "password_hash": _hash_password(body.password),
+        "verified": False,
+        "verified_at": None,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.customer_accounts.insert_one(doc)
-    # Customer email: welcome (gated by customer_welcome_email toggle)
-    await send_customer_welcome_email(doc)
+    # Email verification: mint a token + send the activation link. Login is
+    # blocked until the customer clicks it. We do NOT issue a session token
+    # here — the account is inactive until verified.
+    result = await _send_verification_email(doc)
+    resp = {
+        "requires_verification": True,
+        "email": email,
+        "message": "Account created. Check your inbox for a verification link to activate your account.",
+    }
+    # When email isn't configured/sent, surface the raw activation link so
+    # the admin can complete verification manually while testing.
+    if not result["sent"]:
+        resp["activation_link"] = result["link"]
+        resp["email_status"] = result["email_status"]
+        resp["message"] = ("Account created, but the verification email couldn't be sent "
+                            "(email not configured). Use the activation link to verify.")
+    return resp
+
+
+@api_router.post("/portal/verify")
+async def portal_verify(body: VerifyTokenBody):
+    email = await _consume_verification_token(body.token)
+    if not email:
+        raise HTTPException(status_code=400, detail="This activation link is invalid or has expired. Please request a new one.")
+    acct = await db.customer_accounts.find_one({"email": email}, {"_id": 0})
+    # Now that the account is active, fire the welcome email + issue a session
+    # token so the frontend can log the customer straight in after verifying.
+    await send_customer_welcome_email(acct)
     token = _issue_token(email)
-    return {"token": token, "customer": {"id": doc["id"], "email": email, "name": display_name}}
+    return {"verified": True, "token": token, "customer": {"id": acct["id"], "email": email, "name": acct.get("name", "")}}
+
+
+@api_router.get("/portal/verify")
+async def portal_verify_get(token: str):
+    """Convenience GET so the emailed link can be clicked directly. Mirrors
+    the POST behaviour."""
+    return await portal_verify(VerifyTokenBody(token=token))
+
+
+@api_router.post("/portal/resend-verification")
+async def portal_resend_verification(body: ResendVerificationBody):
+    """Re-issue a verification link. Always returns a generic success so an
+    attacker can't probe which emails have accounts."""
+    email = (body.email or "").strip().lower()
+    generic = {"ok": True, "message": "If an unverified account exists for that email, a new verification link has been sent."}
+    acct = await db.customer_accounts.find_one({"email": email}, {"_id": 0})
+    if not acct or acct.get("verified"):
+        return generic
+    result = await _send_verification_email(acct)
+    if not result["sent"]:
+        # Surface the link for manual testing when email isn't configured.
+        return {**generic, "activation_link": result["link"], "email_status": result["email_status"]}
+    return generic
 
 
 @api_router.post("/portal/login")
@@ -1360,6 +1413,15 @@ async def portal_login(body: PortalLoginBody):
     acct = await db.customer_accounts.find_one({"email": email})
     if not acct or not _verify_password(body.password or "", acct.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Wrong email or password")
+    if not acct.get("verified"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "Please verify your email before signing in. Check your inbox for the activation link.",
+                "requires_verification": True,
+                "email": email,
+            },
+        )
     token = _issue_token(email)
     return {"token": token, "customer": {"id": acct["id"], "email": email, "name": acct.get("name", "")}}
 
@@ -4150,6 +4212,35 @@ async def patch_store_display_settings(body: StoreDisplaySettingsUpdate):
         {"_id": "singleton"}, {"$set": fields}, upsert=True,
     )
     return await _get_store_display()
+
+
+@api_router.get("/email-templates")
+async def get_email_templates():
+    """Return the customisable transactional-email templates
+    (currently the account-verification email) + PCStore portal base URL.
+    Rendered by Store Management → Email Templates."""
+    return await _get_email_templates()
+
+
+@api_router.patch("/email-templates")
+async def patch_email_templates(body: EmailTemplatesUpdate):
+    """Update the verification template and/or the portal base URL. Only
+    keys the admin actually sent are written (deep-merged for the nested
+    verification object)."""
+    current = await _get_email_templates()
+    set_fields: dict = {}
+    if body.portal_base_url is not None:
+        set_fields["portal_base_url"] = body.portal_base_url.strip().rstrip("/")
+    if body.verification is not None:
+        merged = dict(current.get("verification") or {})
+        for k, v in body.verification.model_dump().items():
+            if v is not None:
+                merged[k] = v
+        set_fields["verification"] = merged
+    if not set_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.email_templates.update_one({"_id": "singleton"}, {"$set": set_fields}, upsert=True)
+    return await _get_email_templates()
 
 
 # --- End PCStore public storefront API --------------------------------------

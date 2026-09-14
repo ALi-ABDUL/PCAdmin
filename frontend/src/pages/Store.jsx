@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Loader2, Plus, RefreshCw, Store, Trash2, X, XCircle, Zap } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, Plus, RefreshCw, Store, Trash2, X, XCircle, Zap } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
@@ -806,27 +806,81 @@ export function CredField({ label, testId, type = "text", placeholder, value, on
   );
 }
 
+const FREQ_OPTS = [
+  { value: "hourly", label: "Every hour" },
+  { value: "every_6h", label: "Every 6 hours" },
+  { value: "every_12h", label: "Every 12 hours" },
+  { value: "daily", label: "Once daily" },
+  { value: "weekly", label: "Once weekly" },
+];
+const _newScheduleRow = () => ({
+  id: `new-${Math.random().toString(36).slice(2, 10)}`,
+  _new: true,
+  enabled: true,
+  start_time_hhmm: "02:00",
+  frequency: "daily",
+  stop_date: null,
+});
+const _rowsFromSched = (data) =>
+  (Array.isArray(data?.schedules) ? data.schedules : []).map((s) => ({
+    id: s.id,
+    enabled: !!s.enabled,
+    start_time_hhmm: s.start_time_hhmm || "02:00",
+    frequency: s.frequency || "daily",
+    stop_date: s.stop_date || null,
+    next_run_at: s.next_run_at || null,
+  }));
+
 export function ScraperScheduleEditor() {
   const RUN_HISTORY_LIMIT_UI = 20;
   const [sched, setSched] = useState(null);
+  const [rows, setRows] = useState([]);
+  const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
 
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/scraper/schedule`);
     setSched(data);
+    // Don't clobber unsaved edits while the admin is mid-change.
+    if (!dirtyRef.current) setRows(_rowsFromSched(data));
   }, []);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
 
   if (!sched) return <div className="text-slate-500 py-24 text-center">loading…</div>;
 
-  const patch = async (fields) => {
-    setBusy(true);
-    setSched((s) => ({ ...s, ...fields })); // optimistic
-    try { const { data } = await axios.patch(`${API}/scraper/schedule`, fields); setSched(data); }
-    catch (e) { toast.error("Save failed"); await load(); }
-    finally { setBusy(false); }
+  const updateRow = (idx, patch) => {
+    setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+    setDirty(true);
   };
+  const addRow = () => { setRows((rs) => [...rs, _newScheduleRow()]); setDirty(true); };
+  const removeRow = (idx) => { setRows((rs) => rs.filter((_, i) => i !== idx)); setDirty(true); };
+
+  const saveAll = async () => {
+    setBusy(true);
+    try {
+      const payload = {
+        schedules: rows.map((r) => ({
+          ...(r._new ? {} : { id: r.id }),
+          enabled: r.enabled,
+          start_time_hhmm: r.start_time_hhmm,
+          frequency: r.frequency,
+          stop_date: r.stop_date || null,
+        })),
+      };
+      const { data } = await axios.put(`${API}/scraper/schedules`, payload);
+      setSched(data);
+      setRows(_rowsFromSched(data));
+      setDirty(false);
+      toast.success(rows.length ? `Saved ${rows.length} schedule${rows.length === 1 ? "" : "s"}` : "All schedules removed");
+    } catch (e) {
+      toast.error("Save failed", { description: e?.response?.data?.detail || e.message });
+    } finally { setBusy(false); }
+  };
+
+  const discard = () => { setRows(_rowsFromSched(sched)); setDirty(false); };
 
   const runNow = async () => {
     if (!window.confirm("Trigger a full re-fetch now? This may take several minutes for all items.")) return;
@@ -842,8 +896,15 @@ export function ScraperScheduleEditor() {
     } finally { setRunning(false); }
   };
 
-  const stopPassed = sched.stop_date ? new Date(sched.stop_date) <= new Date() : false;
-  const disabledByStop = sched.enabled && stopPassed;
+  const activeCount = rows.filter((r) => {
+    if (!r.enabled) return false;
+    const passed = r.stop_date ? new Date(r.stop_date) <= new Date() : false;
+    return !passed;
+  }).length;
+  const nextRun = rows
+    .map((r) => r.next_run_at)
+    .filter(Boolean)
+    .sort()[0] || sched.next_run_at || null;
   const history = Array.isArray(sched.run_history) ? sched.run_history : [];
   const retryPending = sched.retry_pending && sched.retry_pending.retry_at ? sched.retry_pending : null;
 
@@ -878,9 +939,9 @@ export function ScraperScheduleEditor() {
           <div>
             <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 flex items-center gap-1"><ClockIcon size={11}/> Status</div>
             <div className="mt-1 flex items-center gap-2">
-              {sched.enabled && !disabledByStop
-                ? <span className="chip chip-success"><BadgeCheck size={11}/> Active</span>
-                : <span className="chip chip-neutral"><Ban size={11}/> {disabledByStop ? "Stopped (past stop date)" : "Disabled"}</span>}
+              {activeCount > 0
+                ? <span className="chip chip-success" data-testid="sched-status-chip"><BadgeCheck size={11}/> {activeCount} active schedule{activeCount === 1 ? "" : "s"}</span>
+                : <span className="chip chip-neutral" data-testid="sched-status-chip"><Ban size={11}/> No active schedules</span>}
             </div>
           </div>
           <div>
@@ -897,85 +958,126 @@ export function ScraperScheduleEditor() {
           <div>
             <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Next run</div>
             <div className="mt-1 text-sm font-mono text-indigo-600 font-bold" data-testid="sched-next">
-              {sched.next_run_at ? fmtDate(sched.next_run_at) : "—"}
+              {nextRun ? fmtDate(nextRun) : "—"}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Configuration */}
-      <div className="card p-5">
+      {/* Configuration — multiple independent schedules */}
+      <div className="card p-5" data-testid="sched-config">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div>
             <div className="font-display font-bold text-base">Schedule configuration</div>
-            <div className="text-xs text-slate-500">Times use Australia/Sydney (AEST) for the start-time anchor.</div>
+            <div className="text-xs text-slate-500">Add as many schedules as you like — each fires independently. Times use Australia/Sydney (AEST) for the start-time anchor.</div>
           </div>
           <button onClick={runNow} disabled={running} className="btn btn-primary text-sm" data-testid="sched-run-now">
             {running ? <Loader2 className="animate-spin" size={14}/> : <Zap size={14}/>} Run now
           </button>
         </div>
 
-        <label className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 mb-3 cursor-pointer" data-testid="sched-enabled">
-          <div className="flex-1">
-            <div className="text-sm font-medium">Enable auto-refresh</div>
-            <div className="text-xs text-slate-500">When off, the scraper only runs when you click <span className="font-mono">Run now</span> or <span className="font-mono">Refresh all now</span>.</div>
+        {rows.length === 0 ? (
+          <div className="text-slate-500 text-sm py-8 text-center border border-dashed rounded-lg" data-testid="sched-empty">
+            No schedules configured. The scraper only runs when you click <span className="font-mono">Run now</span>.
+            Add a schedule below to automate refreshes.
           </div>
-          <input type="checkbox" checked={sched.enabled} onChange={(e) => patch({ enabled: e.target.checked })} className="accent-indigo-600 w-5 h-5"/>
-        </label>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Field label="Start time (AEST)">
-            <input
-              data-testid="sched-start"
-              type="time"
-              value={sched.start_time_hhmm}
-              onChange={(e) => patch({ start_time_hhmm: e.target.value })}
-              className="input px-3 py-2 w-full font-mono text-sm"
-            />
-          </Field>
-          <Field label="Frequency">
-            <select
-              data-testid="sched-frequency"
-              value={sched.frequency}
-              onChange={(e) => patch({ frequency: e.target.value })}
-              className="input px-3 py-2 w-full text-sm"
-            >
-              <option value="hourly">Every hour</option>
-              <option value="every_6h">Every 6 hours</option>
-              <option value="every_12h">Every 12 hours</option>
-              <option value="daily">Once daily</option>
-              <option value="weekly">Once weekly</option>
-            </select>
-          </Field>
-          <Field label="Stop date (optional)">
-            <div className="relative">
-              <input
-                data-testid="sched-stop"
-                type="date"
-                value={sched.stop_date || ""}
-                onChange={(e) => patch({ stop_date: e.target.value })}
-                className="input px-3 py-2 w-full font-mono text-sm pr-8"
-              />
-              {sched.stop_date && (
-                <button
-                  type="button"
-                  onClick={() => patch({ stop_date: "" })}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-600 p-1"
-                  title="Clear stop date"
-                >
-                  <X size={12}/>
-                </button>
-              )}
-            </div>
-          </Field>
-        </div>
-
-        {disabledByStop && (
-          <div className="mt-4 p-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800 flex items-center gap-2">
-            <AlertTriangle size={13}/> Stop date has passed — the schedule is paused. Clear the stop date to resume.
+        ) : (
+          <div className="grid gap-3">
+            {rows.map((r, idx) => {
+              const passed = r.stop_date ? new Date(r.stop_date) <= new Date() : false;
+              return (
+                <div key={r.id} className="rounded-xl border hairline p-3 md:p-4 bg-slate-50/50" data-testid={`sched-row-${idx}`}>
+                  <div className="flex items-center justify-between mb-3 gap-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={r.enabled}
+                        onChange={(e) => updateRow(idx, { enabled: e.target.checked })}
+                        className="accent-indigo-600 w-4 h-4"
+                        data-testid={`sched-row-enabled-${idx}`}
+                      />
+                      <span className="text-sm font-medium">{r.enabled ? "Enabled" : "Disabled"}</span>
+                      {r.enabled && passed && <span className="chip chip-neutral text-[10px]"><Ban size={10}/> stopped</span>}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => removeRow(idx)}
+                      className="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
+                      title="Remove schedule"
+                      data-testid={`sched-row-remove-${idx}`}
+                    >
+                      <Trash2 size={15}/>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <Field label="Start time (AEST)">
+                      <input
+                        data-testid={`sched-row-start-${idx}`}
+                        type="time"
+                        value={r.start_time_hhmm}
+                        onChange={(e) => updateRow(idx, { start_time_hhmm: e.target.value })}
+                        className="input px-3 py-2 w-full font-mono text-sm"
+                      />
+                    </Field>
+                    <Field label="Frequency">
+                      <select
+                        data-testid={`sched-row-frequency-${idx}`}
+                        value={r.frequency}
+                        onChange={(e) => updateRow(idx, { frequency: e.target.value })}
+                        className="input px-3 py-2 w-full text-sm"
+                      >
+                        {FREQ_OPTS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                      </select>
+                    </Field>
+                    <Field label="Stop date (optional)">
+                      <div className="relative">
+                        <input
+                          data-testid={`sched-row-stop-${idx}`}
+                          type="date"
+                          value={r.stop_date || ""}
+                          onChange={(e) => updateRow(idx, { stop_date: e.target.value || null })}
+                          className="input px-3 py-2 w-full font-mono text-sm pr-8"
+                        />
+                        {r.stop_date && (
+                          <button
+                            type="button"
+                            onClick={() => updateRow(idx, { stop_date: null })}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-600 p-1"
+                            title="Clear stop date"
+                          >
+                            <X size={12}/>
+                          </button>
+                        )}
+                      </div>
+                    </Field>
+                  </div>
+                  {r.next_run_at && !passed && (
+                    <div className="mt-2 text-[11px] font-mono text-indigo-600/80">
+                      Next run · {fmtDate(r.next_run_at)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
-        {busy && <div className="mt-2 text-[11px] text-slate-400 font-mono">saving…</div>}
+
+        <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
+          <button onClick={addRow} className="btn btn-ghost text-sm" data-testid="sched-add-row">
+            <Plus size={14}/> Add schedule
+          </button>
+          <div className="flex items-center gap-2">
+            {dirty && <span className="text-[11px] text-amber-600 font-mono">unsaved changes</span>}
+            {dirty && (
+              <button onClick={discard} disabled={busy} className="btn btn-ghost text-sm" data-testid="sched-discard">
+                Discard
+              </button>
+            )}
+            <button onClick={saveAll} disabled={busy || !dirty} className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed" data-testid="sched-save">
+              {busy ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>} Save schedules
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Retry pending banner */}
@@ -1057,6 +1159,125 @@ export function ScraperScheduleEditor() {
   );
 }
 
+
+/* -------------------------- Email Templates editor ------------------------
+ *
+ * Customise the account-verification email (subject / heading / body /
+ * button / footer / accent + logo) plus the PCStore base URL the activation
+ * link points at. Live preview mirrors the server-side render. Backed by
+ * GET/PATCH /api/email-templates.
+ * ------------------------------------------------------------------------- */
+
+function EmailTemplatesEditor() {
+  const [tpl, setTpl] = useState(null);
+  const [portalUrl, setPortalUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    axios.get(`${API}/email-templates`).then(({ data }) => {
+      setTpl(data.verification || {});
+      setPortalUrl(data.portal_base_url || "");
+    }).catch((e) => toast.error("Failed to load templates", { description: e?.response?.data?.detail || e.message }));
+  }, []);
+
+  const setField = (k, v) => { setTpl((t) => ({ ...t, [k]: v })); setDirty(true); };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const { data } = await axios.patch(`${API}/email-templates`, {
+        portal_base_url: portalUrl,
+        verification: tpl,
+      });
+      setTpl(data.verification || {});
+      setPortalUrl(data.portal_base_url || "");
+      setDirty(false);
+      toast.success("Email template saved");
+    } catch (e) {
+      toast.error("Save failed", { description: e?.response?.data?.detail || e.message });
+    } finally { setBusy(false); }
+  };
+
+  if (tpl === null) {
+    return <div className="card p-6 text-slate-500 text-sm" data-testid="email-templates-loading">Loading email templates…</div>;
+  }
+
+  const accent = tpl.accent_color || "#4F46E5";
+  const previewName = "Jordan";
+  const sub = (s) => (s || "").replace(/\{name\}/g, previewName).replace(/\{email\}/g, "jordan@example.com");
+
+  return (
+    <div className="grid lg:grid-cols-2 gap-4" data-testid="email-templates-card">
+      {/* Editor */}
+      <div className="card p-5 grid gap-4">
+        <div className="flex items-center gap-2">
+          <Mail size={16} className="text-indigo-500"/>
+          <div className="font-display font-bold">Verification email</div>
+        </div>
+
+        <div>
+          <label className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1 flex items-center gap-1"><Link2 size={11}/> PCStore portal URL</label>
+          <input value={portalUrl} onChange={(e) => { setPortalUrl(e.target.value); setDirty(true); }}
+            placeholder="https://your-pcstore.com"
+            className="input w-full px-3 py-2 text-sm font-mono" data-testid="et-portal-url"/>
+          <div className="text-[11px] text-slate-400 mt-1">
+            Activation links become <span className="font-mono">{(portalUrl || "").replace(/\/$/, "") || "…"}/verify?token=…</span>
+            {!portalUrl && <span className="text-amber-600"> — leave blank while testing; the link is returned in the API response instead.</span>}
+          </div>
+        </div>
+
+        <Field label="Subject line"><input value={tpl.subject || ""} onChange={(e) => setField("subject", e.target.value)} className="input w-full px-3 py-2 text-sm" data-testid="et-subject"/></Field>
+        <Field label="Heading"><input value={tpl.heading || ""} onChange={(e) => setField("heading", e.target.value)} className="input w-full px-3 py-2 text-sm" data-testid="et-heading"/></Field>
+        <Field label="Body text">
+          <textarea value={tpl.body || ""} onChange={(e) => setField("body", e.target.value)} rows={4} className="input w-full px-3 py-2 text-sm" data-testid="et-body"/>
+          <div className="text-[11px] text-slate-400 mt-1">Placeholders: <span className="font-mono">{"{name}"}</span>, <span className="font-mono">{"{email}"}</span></div>
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Button label"><input value={tpl.button_label || ""} onChange={(e) => setField("button_label", e.target.value)} className="input w-full px-3 py-2 text-sm" data-testid="et-button"/></Field>
+          <Field label="Accent colour">
+            <div className="flex items-center gap-2">
+              <input type="color" value={accent} onChange={(e) => setField("accent_color", e.target.value)} className="h-9 w-12 rounded border hairline cursor-pointer" data-testid="et-accent"/>
+              <input value={accent} onChange={(e) => setField("accent_color", e.target.value)} className="input flex-1 px-2 py-2 text-sm font-mono"/>
+            </div>
+          </Field>
+        </div>
+        <Field label="Logo URL (optional)"><input value={tpl.logo_url || ""} onChange={(e) => setField("logo_url", e.target.value)} placeholder="https://…/logo.png" className="input w-full px-3 py-2 text-sm font-mono" data-testid="et-logo"/></Field>
+        <Field label="Footer text"><textarea value={tpl.footer || ""} onChange={(e) => setField("footer", e.target.value)} rows={2} className="input w-full px-3 py-2 text-sm" data-testid="et-footer"/></Field>
+
+        <div className="flex items-center justify-end gap-2">
+          {dirty && <span className="text-[11px] text-amber-600 font-mono">unsaved changes</span>}
+          <button onClick={save} disabled={busy || !dirty} className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed" data-testid="et-save-btn">
+            {busy ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>} Save template
+          </button>
+        </div>
+      </div>
+
+      {/* Live preview */}
+      <div className="card p-5">
+        <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-3">Live preview</div>
+        <div className="text-xs text-slate-500 mb-2"><span className="font-mono">Subject:</span> {sub(tpl.subject) || <em>—</em>}</div>
+        <div className="rounded-xl overflow-hidden border hairline" data-testid="et-preview">
+          <div style={{ background: accent }} className="p-5 text-white">
+            {tpl.logo_url
+              ? <img src={tpl.logo_url} alt="" style={{ maxHeight: 36 }} className="mb-2"/>
+              : <div className="text-[11px] tracking-widest uppercase opacity-85">PCAdmin</div>}
+            <div className="text-lg font-bold mt-1">{sub(tpl.heading) || "Confirm your email address"}</div>
+          </div>
+          <div className="p-5 bg-white">
+            <p className="text-sm text-slate-700 leading-relaxed">{sub(tpl.body) || <em className="text-slate-400">Body text…</em>}</p>
+            <button style={{ background: accent }} className="mt-4 inline-block text-white font-bold text-sm px-5 py-2.5 rounded-lg" type="button" disabled>
+              {tpl.button_label || "Activate my account"}
+            </button>
+            {tpl.footer && <div className="mt-5 pt-3 border-t hairline text-xs text-slate-500">{sub(tpl.footer)}</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 export function StoreManagement({ section, setSection }) {
   const meta = STORE_NAV.find((s) => s.id === section) || STORE_NAV[0];
   const Icon = meta.icon;
@@ -1066,12 +1287,13 @@ export function StoreManagement({ section, setSection }) {
     "pricing-rules":       { hint: "Tiered profit rules the scraper uses when calculating sell prices for imported items.", fields: [], custom: <PricingRulesEditor/> },
     "postage-presets":     { hint: "Reusable postage options shown as a dropdown on every product. Free, Standard, or Large Item (postage + insurance).", fields: [], custom: <PostagePresetsEditor/> },
     "delivery-estimate":   { hint: "Store-wide default delivery window (in business days, weekends skipped). Every product page shows a live 'Estimated delivery between [date] and [date]' that rolls forward each day automatically.", fields: [], custom: <DeliverySettingsEditor/> },
-    "scraper-schedule":    { hint: "Automate the eBay re-fetch: set a start time, frequency, optional stop date, or run one right now.", fields: [], custom: <ScraperScheduleEditor/> },
+    "scraper-schedule":    { hint: "Automate the eBay re-fetch: add one or more schedules, each with its own start time, frequency and optional stop date — or run one right now.", fields: [], custom: <ScraperScheduleEditor/> },
     "payment-gateway":     { hint: "Enable/disable payment providers and configure their credentials.", fields: ["Stripe","PayPal","Apple Pay","Google Pay","Afterpay","Zip Pay","Bank transfer","Cash on delivery"] },
     "shipping-methods":    { hint: "Zones, carriers, rates and free-shipping thresholds.", fields: ["Australia Post — Parcel Post","Australia Post — Express","Sendle","Aramex","Local delivery","Click & collect","Free shipping threshold"] },
     "tax-rates":           { hint: "GST and location-based tax rules.", fields: ["Australia — GST 10%","New Zealand — GST 15%","B2B / ABN entries"] },
     "checkout-settings":   { hint: "Fine-tune the buyer journey at checkout.", fields: ["Guest checkout","Require phone","Address auto-complete","Order note field","Marketing opt-in","Terms & conditions box"] },
     "email-notifications": { hint: "Admin alerts + transactional emails sent to customers. Configure the Resend API key and per-channel toggles here.", fields: [], custom: <PushNotificationSettings/> },
+    "email-templates":     { hint: "Customise the account-verification email customers receive when they sign up, plus the PCStore link the activation button points to.", fields: [], custom: <EmailTemplatesEditor/> },
     "popup-messages":      { hint: "On-site banners, promos and pop-ups.", fields: ["Announcement bar","Welcome popup","Exit-intent offer","Free-shipping banner","Cookie consent","Age gate"] },
     "site-menus":          { hint: "Header, footer and mobile navigation menus.", fields: ["Main navigation","Footer — Shop","Footer — Support","Footer — Legal","Mobile drawer","Utility bar"] },
     "pages":               { hint: "Static content pages (About, Contact, Policies…).", fields: ["Home","About us","Contact","Shipping policy","Returns policy","Privacy policy","Terms of service","FAQ"] },

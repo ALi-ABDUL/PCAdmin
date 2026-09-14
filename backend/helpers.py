@@ -690,13 +690,19 @@ async def _seed_transactions_and_returns():
         await db.abandoned_carts.insert_many(cart_docs)
 
 async def _rebuild_customers_from_orders():
-    """Materialise customer records from orders and merge stats."""
+    """Materialise customer records from orders and merge stats.
+
+    Emails/names in `deleted_customers` (tombstones) are skipped so a customer
+    the admin explicitly deleted is NOT resurrected from their leftover orders.
+    """
     orders = await db.orders.find({}, {"_id": 0}).to_list(5000)
     if not orders: return 0
+    tombstoned = {(d.get("key") or "").strip().lower() async for d in db.deleted_customers.find({}, {"_id": 0, "key": 1})}
     by_email: dict[str, dict] = {}
     for o in orders:
         key = (o.get("customer_email") or o.get("customer_name") or "").lower().strip()
         if not key: continue
+        if key in tombstoned: continue
         e = by_email.setdefault(key, {
             "name": o.get("customer_name") or "Guest",
             "email": o.get("customer_email") or "",
@@ -728,6 +734,8 @@ async def _link_customer_to_portal_account(email: str, account: dict, verified: 
     email = (email or "").strip().lower()
     if not email:
         return
+    # Intentional (re)registration clears any delete tombstone for this email.
+    await db.deleted_customers.delete_many({"key": email})
     now = datetime.now(timezone.utc).isoformat()
     portal_fields = {
         "type": "registered",

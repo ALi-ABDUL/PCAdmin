@@ -1876,3 +1876,21 @@ Notification Bell deep-links) — zero regressions detected.
   button wired to `POST /api/portal/resend-verification` (already existed). Added a
   30s client-side cooldown ("Resend in Ns", button disabled) to prevent spam, plus a
   "check your inbox (and spam)" toast. Test-ids: `portal-resend-block`, `portal-resend-btn`.
+
+
+## Jun 2026 — Permanent customer deletion (tombstone)
+- **Root cause:** deleting a customer removed the `db.customers` row, but
+  `_rebuild_customers_from_orders` (runs on startup when the collection is empty,
+  and via the "Rebuild from orders" button) re-materialised them from their still-
+  existing orders — so they reappeared.
+- **Fix:** `DELETE /api/customers/{id}` now writes a tombstone to a new
+  `deleted_customers` collection (`{key, email, name, deleted_at}`, key = lowercased
+  email-or-name). `_rebuild_customers_from_orders` skips any tombstoned key, so a
+  deleted customer stays gone through rebuilds/restarts. The tombstone is cleared
+  automatically when the same identity is intentionally re-created
+  (`POST /api/customers`), imported (`/customers/import`), or re-registers through
+  the portal (`_link_customer_to_portal_account`).
+- Verified via curl (delete → rebuild → not resurrected → recreate clears tombstone)
+  and a new regression test `tests/test_customer_permanent_delete.py` (passing).
+  Frontend delete flow (`Customers.jsx` `del()`) unchanged — it already calls DELETE
+  then reloads.

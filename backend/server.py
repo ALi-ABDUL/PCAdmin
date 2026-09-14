@@ -1200,6 +1200,10 @@ async def message_customer(cid: str, body: dict):
 async def create_customer(body: CustomerBase):
     c = Customer(**body.model_dump())
     await db.customers.insert_one(c.model_dump())
+    # Re-creating a customer clears any prior delete tombstone for their identity.
+    key = (c.email or c.name or "").strip().lower()
+    if key:
+        await db.deleted_customers.delete_many({"key": key})
     # Notification: new customer registered
     await _emit_notification(
         type="new_customer",
@@ -1223,8 +1227,21 @@ async def update_customer(cid: str, body: CustomerUpdate):
 
 @api_router.delete("/customers/{cid}")
 async def delete_customer(cid: str):
-    r = await db.customers.delete_one({"id": cid})
-    if r.deleted_count == 0: raise HTTPException(status_code=404, detail="Not found")
+    cust = await db.customers.find_one({"id": cid}, {"_id": 0})
+    if cust is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    await db.customers.delete_one({"id": cid})
+    # Tombstone the customer so `_rebuild_customers_from_orders` (startup + the
+    # "Rebuild from orders" button) does NOT resurrect them from their still-
+    # existing orders. Cleared automatically if the customer is later re-created,
+    # imported, or re-registers through the portal.
+    key = (cust.get("email") or cust.get("name") or "").strip().lower()
+    if key:
+        await db.deleted_customers.update_one(
+            {"key": key},
+            {"$set": {"key": key, "email": cust.get("email") or "", "name": cust.get("name"), "deleted_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
     return {"deleted": True}
 
 
@@ -1232,7 +1249,12 @@ async def delete_customer(cid: str):
 async def import_customers(payload: dict):
     arr = payload.get("customers") or []
     docs = [Customer(**c).model_dump() for c in arr]
-    if docs: await db.customers.insert_many(docs)
+    if docs:
+        await db.customers.insert_many(docs)
+        keys = [(d.get("email") or d.get("name") or "").strip().lower() for d in docs]
+        keys = [k for k in keys if k]
+        if keys:
+            await db.deleted_customers.delete_many({"key": {"$in": keys}})
     return {"imported": len(docs)}
 
 

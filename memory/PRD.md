@@ -1824,3 +1824,23 @@ Notification Bell deep-links) — zero regressions detected.
   The old `admin@example.com` seed does NOT exist on the live Atlas cluster. Created
   a dedicated QA admin `qa@prettycheap.com.au / QaTest123!` for testing;
   `test_credentials.md` updated accordingly.
+
+
+## Jun 2026 — Resend on the Integrations page (Configure panel)
+- Store Management → **Integrations** is now a live panel (`IntegrationsPanel` in
+  `pages/Store.jsx`) with a real **Resend** Configure card (`ResendIntegrationCard`)
+  at the top; the other apps (eBay, Xero, MYOB, etc.) remain read-only scaffolds.
+- The Resend card has a **Configure** toggle exposing: masked Resend API key input
+  (reveal-eye + disconnect/trash), sender "from" email, and a **Send customer emails**
+  master toggle. Status chip shows Connected / Paused / Not configured.
+- Backend already supported this — the card reuses `GET/PATCH /api/push/settings`
+  (secrets masked, empty string = keep existing) + `POST /api/push/settings/clear-secret`.
+  No new endpoints. Saved key/sender feed `_send_verification_email` (gated by
+  `customer_email_enabled`), so customer verification + order emails go out via Resend.
+- Verified: saved a key from the UI (masked `re_****789`, toast + Connected chip),
+  then a portal register returned `email_status: "failed"` (i.e. a real Resend send
+  was attempted with the fake key) instead of the previous `skipped_no_key` — proving
+  the wiring. Test key/artifacts cleared afterward so the owner enters their real key.
+- New test-ids: `resend-integration`, `resend-configure-toggle`, `resend-configure-panel`,
+  `resend-api-key`, `resend-from-email`, `resend-customer-emails-toggle`, `resend-save-btn`,
+  `resend-status`, `integrations-panel`.

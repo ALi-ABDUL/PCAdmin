@@ -806,6 +806,169 @@ export function CredField({ label, testId, type = "text", placeholder, value, on
   );
 }
 
+/* --------------------------- Resend integration --------------------------
+ * Configure panel on Store Management → Integrations. Stores the Resend API
+ * key + sender address in `push_settings` (GET/PATCH /api/push/settings) and
+ * flips the `customer_email_enabled` master switch so verification / order
+ * emails actually go out. The key powers `_send_verification_email`.
+ * ------------------------------------------------------------------------- */
+export function ResendIntegrationCard() {
+  const [settings, setSettings] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState({});
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/push/settings`);
+    setSettings(data);
+    if (!data.resend_api_key_set) setOpen(true); // auto-open until configured
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  if (!settings) return <div className="card p-5 text-slate-500 text-sm" data-testid="resend-integration-loading">Loading integration…</div>;
+
+  const connected = settings.resend_api_key_set;
+  const active = connected && settings.customer_email_enabled;
+
+  const clearSecret = async () => {
+    if (!window.confirm("Disconnect Resend? Customer emails will stop sending until you add a key again.")) return;
+    setBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/push/settings/clear-secret?field=resend_api_key`);
+      setSettings(data);
+      setDraft({});
+      toast.success("Resend disconnected");
+    } catch { toast.error("Could not disconnect"); }
+    finally { setBusy(false); }
+  };
+
+  const toggleEmails = async (val) => {
+    setBusy(true);
+    setSettings((s) => ({ ...s, customer_email_enabled: val }));
+    try { const { data } = await axios.patch(`${API}/push/settings`, { customer_email_enabled: val }); setSettings(data); }
+    catch { toast.error("Save failed"); await load(); }
+    finally { setBusy(false); }
+  };
+
+  const save = async () => {
+    const patch = {};
+    if ((draft.resend_api_key ?? "") !== "") patch.resend_api_key = draft.resend_api_key.trim();
+    if (draft.resend_from_email !== undefined) patch.resend_from_email = (draft.resend_from_email || "").trim();
+    if (Object.keys(patch).length === 0) { toast("Nothing to save"); return; }
+    setBusy(true);
+    try {
+      const { data } = await axios.patch(`${API}/push/settings`, patch);
+      setSettings(data);
+      setDraft({});
+      toast.success("Resend settings saved");
+    } catch (e) { toast.error("Save failed", { description: e?.response?.data?.detail || e.message }); }
+    finally { setBusy(false); }
+  };
+
+  const dirty = (draft.resend_api_key ?? "") !== "" || draft.resend_from_email !== undefined;
+
+  return (
+    <div className="card p-5" data-testid="resend-integration">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-11 h-11 rounded-xl grid place-items-center shrink-0 text-white" style={{ background: "linear-gradient(135deg,#0F172A,#4F46E5)" }}>
+            <Mail size={18}/>
+          </div>
+          <div className="min-w-0">
+            <div className="font-display font-bold text-base flex items-center gap-2">
+              Resend
+              {active
+                ? <span className="chip chip-success text-[10px]" data-testid="resend-status"><BadgeCheck size={11}/> Connected</span>
+                : connected
+                  ? <span className="chip text-[10px]" style={{ background: "#fef3c7", color: "#92400e" }} data-testid="resend-status"><Ban size={11}/> Paused</span>
+                  : <span className="chip chip-neutral text-[10px]" data-testid="resend-status">Not configured</span>}
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">Transactional email — sends customer verification &amp; order emails.</div>
+          </div>
+        </div>
+        <button onClick={() => setOpen((o) => !o)} className="btn btn-ghost text-sm" data-testid="resend-configure-toggle">
+          {open ? "Close" : "Configure"}
+        </button>
+      </div>
+
+      {open && (
+        <div className="mt-5 pt-5 border-t hairline grid gap-4" data-testid="resend-configure-panel">
+          <CredField
+            label="Resend API key"
+            testId="resend-api-key"
+            type="password"
+            placeholder={connected ? `Saved · ${settings.resend_api_key_masked}` : "re_..."}
+            value={draft.resend_api_key ?? ""}
+            onChange={(v) => setDraft((d) => ({ ...d, resend_api_key: v }))}
+            savedBadge={connected}
+            onClear={connected ? clearSecret : null}
+          />
+          <CredField
+            label="Sender email address (from)"
+            testId="resend-from-email"
+            type="email"
+            placeholder="noreply@yourstore.com"
+            value={draft.resend_from_email ?? settings.resend_from_email}
+            onChange={(v) => setDraft((d) => ({ ...d, resend_from_email: v }))}
+          />
+          <div className="text-[11px] text-slate-400 -mt-1">
+            The sender domain must be verified in Resend. Leave blank to use Resend&apos;s
+            <span className="font-mono"> onboarding@resend.dev </span>sandbox address.
+          </div>
+
+          <label className="flex items-start gap-2 p-3 rounded-lg bg-slate-50 border hairline cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!settings.customer_email_enabled}
+              onChange={(e) => toggleEmails(e.target.checked)}
+              className="accent-indigo-600 mt-0.5 w-4 h-4"
+              data-testid="resend-customer-emails-toggle"
+            />
+            <div>
+              <div className="text-sm font-medium">Send customer emails</div>
+              <div className="text-xs text-slate-500">Master switch for verification, welcome, and order emails. Must be on for the verification link to send.</div>
+            </div>
+          </label>
+
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline">
+              Get a Resend API key <ExternalLink size={11}/>
+            </a>
+            <div className="flex items-center gap-2">
+              {dirty && <span className="text-[11px] text-amber-600 font-mono">unsaved changes</span>}
+              <button onClick={save} disabled={busy || !dirty} className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed" data-testid="resend-save-btn">
+                {busy ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>} Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function IntegrationsPanel() {
+  const others = ["eBay Australia (source)", "Xero", "MYOB", "Klaviyo", "Mailchimp", "Zapier", "Slack", "Discord"];
+  return (
+    <div className="grid gap-3" data-testid="integrations-panel">
+      <ResendIntegrationCard/>
+      {others.map((f, i) => (
+        <div key={f} className="card p-4 md:p-5 flex items-center justify-between gap-4 group hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-lg grid place-items-center shrink-0 bg-indigo-50 text-indigo-500"><ExternalLink size={16}/></div>
+            <div className="min-w-0">
+              <div className="font-medium text-sm truncate">{f}</div>
+              <div className="text-[11px] text-slate-400 font-mono">{i === 0 ? "Connected · scraper source" : "Not configured"}</div>
+            </div>
+          </div>
+          <button className="btn btn-ghost text-xs !py-1 !px-2" disabled>Configure</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 const FREQ_OPTS = [
   { value: "hourly", label: "Every hour" },
   { value: "every_6h", label: "Every 6 hours" },
@@ -1300,7 +1463,7 @@ export function StoreManagement({ section, setSection }) {
     "locations":           { hint: "Physical stores, warehouses and pickup points.", fields: ["Bellara HQ, QLD","Sydney warehouse, NSW","Melbourne showroom, VIC","Pickup: 3rd party locker"] },
     "seo-settings":        { hint: "Global SEO defaults, sitemaps and social cards.", fields: ["Meta title template","Meta description default","Open Graph image","Twitter card","Sitemap URL","robots.txt"] },
     "analytics-tracking":  { hint: "Attach analytics and tracking pixels.", fields: ["Google Analytics 4","Google Tag Manager","Meta pixel","TikTok pixel","Hotjar","Server-side conversions"] },
-    "integrations":        { hint: "Third-party apps and API connections.", fields: ["eBay Australia (source)","Xero","MYOB","Klaviyo","Mailchimp","Zapier","Slack","Discord"] },
+    "integrations":        { hint: "Third-party apps and API connections. Configure Resend to send customer verification & order emails.", fields: [], custom: <IntegrationsPanel/> },
     "security":            { hint: "Admin access controls, password rules and audit logs.", fields: ["Two-factor authentication","Session timeout","IP allowlist","Password strength","Failed-login lockout","Audit log retention"] },
   }[section] || { hint: "", fields: [] };
 

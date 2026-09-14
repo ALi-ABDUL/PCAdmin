@@ -1844,3 +1844,26 @@ Notification Bell deep-links) — zero regressions detected.
 - New test-ids: `resend-integration`, `resend-configure-toggle`, `resend-configure-panel`,
   `resend-api-key`, `resend-from-email`, `resend-customer-emails-toggle`, `resend-save-btn`,
   `resend-status`, `integrations-panel`.
+
+
+## Jun 2026 — Portal registration bug fixes (verification-first + customers mirror)
+- **Bug 1 (verification email first, welcome held):** confirmed the register flow
+  (`POST /api/portal/register`) sends ONLY the verification link and issues NO
+  session token; `send_customer_welcome_email` fires only from `POST /api/portal/verify`
+  after the email is confirmed. This ordering was already correct in code — added a
+  regression guard so it can't silently regress.
+- **Bug 2 (mirror registrant into `customers`):** new helper
+  `_link_customer_to_portal_account(email, account, verified)` in `helpers.py`
+  upserts a `customers` row on register (type=registered, status=active,
+  `has_portal_account=True`, `portal_verified=False`, `portal_account_id`, aggregated
+  order stats) and flips `portal_verified=True` + `portal_verified_at` on verify.
+  Registrants now appear in PCAdmin → Customers. Called from both endpoints in `server.py`.
+- **Frontend:** `pages/Customers.jsx` now shows a "Portal" chip next to the Type
+  column (green + BadgeCheck when verified, neutral + Clock3 when pending) —
+  test-id `cus-portal-badge`.
+- **Tests:** added `tests/test_portal_register_customer_and_welcome.py` (3 cases, all
+  green) covering both fixes over HTTP + pymongo. NOTE: the older
+  `test_aliko_portal_flow.py`, and a couple of cases in `test_customer_portal.py` /
+  `test_customer_email_notifications.py`, are PRE-EXISTING failures — they assert the
+  legacy no-verification flow and use the now-disposable-blocked `aliko@yopmail.com`
+  email. They predate and are unrelated to this change (verified via git stash).

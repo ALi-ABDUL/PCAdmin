@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Award, BadgeCheck, History, Loader2, MessageCircle, Plus, Reply, Search, Star as StarIcon, Tags, Ticket, Trash2, Upload } from "lucide-react";
+import { Award, BadgeCheck, Clock3, History, Loader2, MessageCircle, Plus, Reply, Search, Star as StarIcon, Tags, Ticket, Trash2, Upload } from "lucide-react";
 import { Field, StatusChip, SubHero } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, fmtLongDateTime, moneyCents } from "../lib/format";
@@ -221,7 +221,20 @@ export function CustomerTable({ list, total, q, setQ, sortField, sortDir, toggle
                 </div>
               </td>
               <td className="font-mono text-xs text-slate-500">{c.code}</td>
-              <td><span className="chip chip-neutral capitalize">{c.type}</span></td>
+              <td>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="chip chip-neutral capitalize">{c.type}</span>
+                  {c.has_portal_account && (
+                    <span
+                      className={`chip !text-[10px] !py-0.5 ${c.portal_verified ? "chip-success" : "chip-neutral"}`}
+                      title={c.portal_verified ? "Portal account · email verified" : "Portal account · pending email verification"}
+                      data-testid="cus-portal-badge"
+                    >
+                      {c.portal_verified ? <BadgeCheck size={10}/> : <Clock3 size={10}/>} Portal
+                    </span>
+                  )}
+                </div>
+              </td>
               <td onClick={stop}>
                 <select value={c.status} onChange={(e)=>setStatus(c, e.target.value)} className="input px-2 py-1 text-xs">
                   {["pending","active","blocked"].map(s=><option key={s}>{s}</option>)}

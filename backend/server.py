@@ -50,7 +50,7 @@ from helpers import (
     _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _refresh_all_items, 
     _get_scraper_schedule, _compute_next_run, _compute_next_run_for, _classify_run, _push_run_history, 
     _refresh_all_and_record, _update_schedule_entry, _scheduler_loop, _ensure_categories_seeded, _ensure_ebay_category, _now_iso, 
-    _seed_transactions_and_returns, _rebuild_customers_from_orders, _shape_review, _jwt_secret, 
+    _seed_transactions_and_returns, _rebuild_customers_from_orders, _link_customer_to_portal_account, _shape_review, _jwt_secret, 
     _hash_password, _verify_password, _issue_token, get_current_customer, _has_purchased, 
     _seller_id, _build_sellers, _match_rules, _guess_category, _get_push_settings, _mask, 
     _get_credential, _push_channel_status, _notif_is_critical, _send_email, _send_telegram, 
@@ -1352,9 +1352,17 @@ async def portal_register(body: PortalRegisterBody):
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.customer_accounts.insert_one(doc)
+    # Bug-2 fix: mirror the registrant into the `customers` collection so they
+    # show up in PCAdmin → Customers. Registration requires an existing order,
+    # so a customer row usually already exists (built from orders) — in that
+    # case we just flag it as a portal account. Otherwise we insert a fresh row
+    # with the customer's aggregated order stats.
+    await _link_customer_to_portal_account(email, doc, verified=False)
     # Email verification: mint a token + send the activation link. Login is
     # blocked until the customer clicks it. We do NOT issue a session token
-    # here — the account is inactive until verified.
+    # here — the account is inactive until verified. NOTE: the welcome email is
+    # deliberately NOT sent here — it only fires after the email is verified
+    # (see /portal/verify) so the very first email a customer gets is the link.
     result = await _send_verification_email(doc)
     resp = {
         "requires_verification": True,
@@ -1377,8 +1385,10 @@ async def portal_verify(body: VerifyTokenBody):
     if not email:
         raise HTTPException(status_code=400, detail="This activation link is invalid or has expired. Please request a new one.")
     acct = await db.customer_accounts.find_one({"email": email}, {"_id": 0})
-    # Now that the account is active, fire the welcome email + issue a session
-    # token so the frontend can log the customer straight in after verifying.
+    # Mark the mirrored customer row as verified, then fire the welcome email
+    # (its first-ever welcome — deliberately held back until now) and issue a
+    # session token so the frontend can log the customer straight in.
+    await _link_customer_to_portal_account(email, acct, verified=True)
     await send_customer_welcome_email(acct)
     token = _issue_token(email)
     return {"verified": True, "token": token, "customer": {"id": acct["id"], "email": email, "name": acct.get("name", "")}}

@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_update_schedule_entry', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
+__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_update_schedule_entry', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_link_customer_to_portal_account', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
 
 
 import bcrypt
@@ -718,6 +718,48 @@ async def _rebuild_customers_from_orders():
         else:
             await db.customers.update_one({"id": existing["id"]}, {"$set": {"orders_count": agg["orders_count"], "total_spend": round(agg["total_spend"], 2), "updated_at": datetime.now(timezone.utc).isoformat()}})
     return n
+
+async def _link_customer_to_portal_account(email: str, account: dict, verified: bool = False) -> None:
+    """Ensure a `customers` row exists for a portal registrant and flag it as a
+    portal account. Called on registration (verified=False) and again on email
+    verification (verified=True). Registration requires an existing order, so a
+    row usually already exists (materialised from orders) — we upsert either way
+    without downgrading an existing customer's status."""
+    email = (email or "").strip().lower()
+    if not email:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    portal_fields = {
+        "type": "registered",
+        "has_portal_account": True,
+        "portal_account_id": account.get("id"),
+        "portal_verified": bool(verified),
+        "updated_at": now,
+    }
+    if verified:
+        portal_fields["portal_verified_at"] = now
+    existing = await db.customers.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}, {"_id": 0})
+    if existing:
+        await db.customers.update_one({"id": existing["id"]}, {"$set": portal_fields})
+        return
+    # No customer row yet — aggregate this email's orders for accurate stats.
+    agg = await db.orders.aggregate([
+        {"$match": {"customer_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}},
+        {"$group": {"_id": None, "count": {"$sum": 1}, "spend": {"$sum": {"$ifNull": ["$total", 0]}}}},
+    ]).to_list(1)
+    orders_count = int(agg[0]["count"]) if agg else 0
+    total_spend = round(float(agg[0]["spend"]), 2) if agg else 0.0
+    cust = Customer(
+        name=account.get("name") or email.split("@")[0],
+        email=email,
+        status="active",
+        type="registered",
+        orders_count=orders_count,
+        total_spend=total_spend,
+    ).model_dump()
+    cust.update(portal_fields)
+    cust["created_at"] = account.get("created_at") or now
+    await db.customers.insert_one(cust)
 
 def _shape_review(r: dict) -> dict:
     """Attach counts, strip private lists before returning to public consumers."""

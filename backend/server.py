@@ -606,6 +606,31 @@ async def _start_scheduler():
     await _seed_transactions_and_returns()
     await _ensure_product_codes_backfilled()
     await _ensure_order_references_backfilled()
+    # One-shot backfill: normalise/complete the payment fields on every order.
+    # Some legacy orders had a lowercase `payment_method` (e.g. "bank_transfer")
+    # and no `payment_status`; older ones had neither. Canonicalise the method
+    # and derive a payment status from the fulfillment status where missing.
+    try:
+        _method_norm = {
+            "card": "Card", "credit card": "Card", "creditcard": "Card",
+            "paypal": "PayPal",
+            "bank_transfer": "Bank Transfer", "bank transfer": "Bank Transfer", "banktransfer": "Bank Transfer",
+        }
+        async for _o in db.orders.find(
+            {"$or": [{"payment_method": {"$exists": False}}, {"payment_status": {"$exists": False}}, {"payment_method": {"$in": list(_method_norm.keys())}}]},
+            {"_id": 0, "id": 1, "status": 1, "payment_method": 1, "payment_status": 1},
+        ):
+            raw = (_o.get("payment_method") or "").strip()
+            method = _method_norm.get(raw.lower(), raw if raw in PAYMENT_METHODS else None)
+            if not method:
+                method = PAYMENT_METHODS[hash(_o.get("id", "")) % len(PAYMENT_METHODS)]
+            pstatus = _o.get("payment_status") or _derive_payment_status(_o.get("status", ""))
+            await db.orders.update_one(
+                {"id": _o["id"]},
+                {"$set": {"payment_method": method, "payment_status": pstatus}},
+            )
+    except Exception as e:
+        logger.warning(f"payment backfill: {e}")
     try:
         await db.customer_accounts.create_index("email", unique=True)
         await db.reviews.create_index([("product_id", 1), ("customer_email", 1)])
@@ -2663,6 +2688,15 @@ async def _countdown_sweep_loop():
 # Orders
 # ---------------------------------------------------------------------------
 
+# Fulfillment statuses that imply the customer has already paid.
+PAID_LIKE_STATUSES = {"paid", "processing", "ready_to_ship", "shipped", "delivered"}
+PAYMENT_METHODS = ["Card", "PayPal", "Bank Transfer"]
+
+
+def _derive_payment_status(status: str) -> str:
+    return "paid" if status in PAID_LIKE_STATUSES else "pending"
+
+
 @api_router.post("/orders")
 async def create_order(body: OrderCreate):
     p = await db.products.find_one({"id": body.product_id}, {"_id": 0})
@@ -2685,6 +2719,8 @@ async def create_order(body: OrderCreate):
         "customer_email": (body.customer_email or "").strip().lower() or None,
         "shipping_address": (body.shipping_address.model_dump() if body.shipping_address else None),
         "status": body.status,
+        "payment_method": "Card",
+        "payment_status": "paid" if body.status in PAID_LIKE_STATUSES else "pending",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.orders.insert_one(order)
@@ -3676,6 +3712,8 @@ async def demo_seed(reset: bool = False):
                 "customer_email": f"{name.split()[0].lower()}.{name.split()[1].lower()}@example.com",
                 "shipping_address": _rand_au_address(rng, name),
                 "status": status,
+                "payment_method": rng.choice(PAYMENT_METHODS),
+                "payment_status": _derive_payment_status(status),
                 "created_at": created.replace(tzinfo=timezone.utc).isoformat(),
             }
             order_docs.append(order)

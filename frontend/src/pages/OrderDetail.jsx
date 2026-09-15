@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { ChevronLeft, ImageIcon } from "lucide-react";
+import { ChevronLeft, ImageIcon, CreditCard, Wallet, Landmark, CheckCircle2, Clock } from "lucide-react";
 import { StatBox } from "../components/atoms";
 import { API, proxyImg } from "../lib/api";
 import { fmtDate, humaniseStatus, moneyCents } from "../lib/format";
@@ -24,12 +24,30 @@ export function OrderDetailPage({ orderId, onBack }) {
     } catch { toast.error("Update failed"); }
   };
 
+  const setPayment = async (fields) => {
+    try {
+      await axios.patch(`${API}/orders/${orderId}`, fields);
+      load();
+    } catch { toast.error("Update failed"); }
+  };
+
   if (!o) return <div className="text-slate-500 py-24 text-center">loading order…</div>;
 
   const unitPrice = o.unit_price ?? (o.total / Math.max(1, o.quantity));
   const unitCost = o.unit_cost ?? 0;
   const profit = (unitPrice - unitCost) * o.quantity;
   const addr = o.shipping_address || {};
+
+  const PAYMENT_METHODS = ["Card", "PayPal", "Bank Transfer"];
+  const methodIcon = { Card: CreditCard, PayPal: Wallet, "Bank Transfer": Landmark };
+  const normMethod = (m) => {
+    const k = (m || "").toLowerCase().replace(/[\s_]+/g, "");
+    return { card: "Card", creditcard: "Card", paypal: "PayPal", banktransfer: "Bank Transfer" }[k] || "Card";
+  };
+  const paymentMethod = normMethod(o.payment_method);
+  const paymentStatus = o.payment_status || "pending";
+  const MethodIcon = methodIcon[paymentMethod] || CreditCard;
+  const isPaid = paymentStatus === "paid";
 
   return (
     <div className="grid gap-4 max-w-4xl mx-auto w-full" data-testid="order-detail-page">
@@ -83,6 +101,56 @@ export function OrderDetailPage({ orderId, onBack }) {
               </button>
             );
           })}
+        </div>
+      </div>
+
+      {/* Payment */}
+      <div className="card p-5" data-testid="order-payment-card">
+        <div className="font-display font-bold mb-4">Payment</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2">Payment method</div>
+            <div className="flex flex-wrap gap-2" data-testid="order-payment-method">
+              {PAYMENT_METHODS.map((m) => {
+                const Icon = methodIcon[m] || CreditCard;
+                const on = m === paymentMethod;
+                return (
+                  <button
+                    key={m}
+                    onClick={() => setPayment({ payment_method: m })}
+                    data-testid={`order-payment-method-${m.toLowerCase().replace(/\s+/g, "-")}`}
+                    className={`px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${on ? "bg-indigo-600 text-white shadow-md" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                  >
+                    <Icon size={13}/> {m}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2">Payment status</div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <span
+                data-testid="order-payment-status-badge"
+                className={`chip ${isPaid ? "chip-success" : ""} !text-xs !py-1 !px-3`}
+                style={isPaid ? undefined : { background: "#fef3c7", color: "#92400e" }}
+              >
+                {isPaid ? <CheckCircle2 size={13}/> : <Clock size={13}/>}
+                {isPaid ? "Paid" : "Pending"}
+              </span>
+              <button
+                onClick={() => setPayment({ payment_status: isPaid ? "pending" : "paid" })}
+                className="btn btn-ghost text-xs"
+                data-testid="order-payment-status-toggle"
+              >
+                Mark as {isPaid ? "pending" : "paid"}
+              </button>
+            </div>
+            <div className="mt-3 flex items-center gap-2 text-sm text-slate-600">
+              <MethodIcon size={15} className="text-slate-400"/>
+              <span>Paid via <span className="font-medium text-slate-800">{paymentMethod}</span></span>
+            </div>
+          </div>
         </div>
       </div>
 

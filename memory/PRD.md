@@ -1909,3 +1909,21 @@ Notification Bell deep-links) — zero regressions detected.
   registration (no manual reload). Files: `pages/CustomerPortal.jsx`, `pages/Customers.jsx`.
 - Verified via UI: registered in the embedded portal → returned to All Customers →
   new registrant showed at the top with the Portal badge and the count bumped.
+
+
+## Jun 2026 — Order detail: Payment section
+- Added a **Payment** section to the order detail page (`pages/OrderDetail.jsx`)
+  showing the payment method (Card / PayPal / Bank Transfer, each a clickable chip
+  that PATCHes `payment_method`) and the payment status (green "Paid" / amber
+  "Pending" badge with a "Mark as paid/pending" toggle → PATCH `payment_status`),
+  plus a "Paid via {method}" summary line.
+- Backend: orders now carry `payment_method` + `payment_status`. `create_order`
+  defaults method="Card" and derives status from fulfillment status
+  (`PAID_LIKE_STATUSES`). Demo seed assigns a random method. A one-shot startup
+  backfill (in `_start_scheduler`) canonicalises legacy lowercase methods
+  (e.g. `bank_transfer`→`Bank Transfer`) and fills missing `payment_status` from the
+  order status — all 46 orders now have canonical values. PATCH `/orders/{id}` already
+  accepts these fields. Frontend also normalises any non-canonical method defensively.
+- Test-ids: `order-payment-card`, `order-payment-method`, `order-payment-method-*`,
+  `order-payment-status-badge`, `order-payment-status-toggle`. Verified via screenshot
+  (badge + chips render, toggle flips Paid↔Pending and persists).

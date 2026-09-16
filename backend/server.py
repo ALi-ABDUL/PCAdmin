@@ -4312,6 +4312,31 @@ async def store_config():
 
 
 
+@api_router.put("/store/config")
+async def put_store_config(body: StoreBrandingUpdate):
+    """Write storefront branding to the SAME `store_branding` collection that
+    PCStore reads via GET /api/store/config. This is the canonical save path used
+    by PCAdmin → Store Settings → Store name & branding."""
+    await _save_store_branding(body)
+    return await store_config()
+
+
+async def _save_store_branding(body: StoreBrandingUpdate) -> None:
+    """Apply a partial branding update to the `store_branding` singleton.
+    Shared by PUT /store/config and (legacy) PATCH /store-branding."""
+    payload = body.model_dump(exclude_unset=True)
+    fields: dict = {}
+    for key in ("store_name", "tagline", "tab_title"):
+        if key in payload and payload[key] is not None:
+            fields[key] = payload[key].strip()
+    for key, label in (("logo", "Logo"), ("favicon", "Favicon")):
+        if key in payload:
+            fields[key] = _validate_data_image(payload[key], label)
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.store_branding.update_one({"_id": "singleton"}, {"$set": fields}, upsert=True)
+
+
 async def _get_store_branding() -> dict:
     """Storefront branding singleton (name, tagline, logo, favicon, tab title).
     Read publicly by PCStore via /api/store/config and edited from
@@ -4338,20 +4363,8 @@ async def get_store_branding():
 
 @api_router.patch("/store-branding")
 async def patch_store_branding(body: StoreBrandingUpdate):
-    """Partial update of the storefront branding. Only keys the admin actually
-    sent are written. Images (logo/favicon) are validated data-URLs or cleared
-    when an empty string is sent explicitly."""
-    payload = body.model_dump(exclude_unset=True)
-    fields: dict = {}
-    for key in ("store_name", "tagline", "tab_title"):
-        if key in payload and payload[key] is not None:
-            fields[key] = payload[key].strip()
-    for key, label in (("logo", "Logo"), ("favicon", "Favicon")):
-        if key in payload:
-            fields[key] = _validate_data_image(payload[key], label)
-    if not fields:
-        raise HTTPException(status_code=400, detail="No fields to update")
-    await db.store_branding.update_one({"_id": "singleton"}, {"$set": fields}, upsert=True)
+    """Legacy alias — same effect as PUT /store/config (writes `store_branding`)."""
+    await _save_store_branding(body)
     return await _get_store_branding()
 
 

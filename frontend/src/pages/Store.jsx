@@ -1641,7 +1641,8 @@ export function StoreBrandingEditor() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const { data } = await axios.get(`${API}/store-branding`);
+    // Read from the SAME endpoint PCStore reads (GET /api/store/config).
+    const { data } = await axios.get(`${API}/store/config`);
     setData(data);
     setForm((f) => f ?? data);
   }, []);
@@ -1675,7 +1676,7 @@ export function StoreBrandingEditor() {
         logo: form.logo || "",
         favicon: form.favicon || "",
       };
-      const { data } = await axios.patch(`${API}/store-branding`, payload);
+      const { data } = await axios.put(`${API}/store/config`, payload);
       setData(data); setForm(data);
       toast.success("Store branding saved — live on PCStore");
     } catch (e) {

@@ -2019,3 +2019,13 @@ Notification Bell deep-links) — zero regressions detected.
 - The ItemModal is retained ONLY for the "Already imported → View existing" duplicate
   banner (a deliberate preview, not a card click). Verified via screenshot: clicking a
   card lands on the ProductDetail editor, no modal.
+
+
+## Jun 2026 — Unify store branding save onto PUT /api/store/config
+- Added **`PUT /api/store/config`** (writes the `store_branding` singleton — the SAME
+  collection `GET /api/store/config` / PCStore read). Shared `_save_store_branding`
+  helper; legacy `PATCH /store-branding` now delegates to it (kept as alias).
+- Frontend `StoreBrandingEditor` now loads via `GET /api/store/config` and saves via
+  `PUT /api/store/config` (was PATCH /store-branding). Verified: PUT persists to
+  store_branding, GET reflects instantly, 422 on bad image, and the UI issues the PUT
+  (request captured) with success toast. Reset to defaults after test.

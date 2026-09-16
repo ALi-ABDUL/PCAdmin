@@ -1003,6 +1003,8 @@ export function ScraperScheduleEditor() {
   const [running, setRunning] = useState(false);
   const [retryingIds, setRetryingIds] = useState([]);
   const [retryingAll, setRetryingAll] = useState(false);
+  const [arLocal, setArLocal] = useState(null);
+  const [arDirty, setArDirty] = useState(false);
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
 
@@ -1013,6 +1015,12 @@ export function ScraperScheduleEditor() {
     if (!dirtyRef.current) setRows(_rowsFromSched(data));
   }, []);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+
+  // Keep the auto-retry settings form in sync with the server unless the admin
+  // is mid-edit.
+  useEffect(() => {
+    if (sched?.auto_retry && !arDirty) setArLocal(sched.auto_retry);
+  }, [sched, arDirty]);
 
   if (!sched) return <div className="text-slate-500 py-24 text-center">loading…</div>;
 
@@ -1084,6 +1092,18 @@ export function ScraperScheduleEditor() {
     } catch (e) {
       toast.error("Retry failed", { id: "retry-all", description: e?.response?.data?.detail?.slice(0, 160) || e.message });
     } finally { setRetryingAll(false); }
+  };
+
+  const saveAutoRetry = async (patch) => {
+    setArLocal((p) => ({ ...(p || {}), ...patch }));
+    setArDirty(false);
+    try {
+      const { data } = await axios.patch(`${API}/scraper/auto-retry`, patch);
+      setSched(data);
+      toast.success("Auto-retry settings saved");
+    } catch (e) {
+      toast.error("Save failed", { description: e?.response?.data?.detail || e.message });
+    }
   };
 
   const activeCount = rows.filter((r) => {
@@ -1273,6 +1293,58 @@ export function ScraperScheduleEditor() {
           </div>
         </div>
       </div>
+
+      {/* Auto-retry settings */}
+      {arLocal && (
+        <div className="card p-5" data-testid="sched-auto-retry-card">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <div className="font-display font-bold text-base flex items-center gap-2"><RefreshCw size={15}/> Auto-retry failed items</div>
+              <div className="text-xs text-slate-500 mt-0.5">After a scheduled run, automatically re-fetch just the items that failed — not the whole batch.</div>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={!!arLocal.enabled}
+                onChange={(e) => saveAutoRetry({ enabled: e.target.checked })}
+                className="accent-indigo-600 w-4 h-4"
+                data-testid="sched-auto-retry-toggle"
+              />
+              <span className="text-sm font-medium">{arLocal.enabled ? "On" : "Off"}</span>
+            </label>
+          </div>
+          {arLocal.enabled && (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+              <Field label="Retry after (minutes)">
+                <input
+                  type="number" min={1} max={180}
+                  value={arLocal.delay_minutes ?? 3}
+                  onChange={(e) => { setArLocal((p) => ({ ...p, delay_minutes: e.target.value === "" ? "" : Number(e.target.value) })); setArDirty(true); }}
+                  className="input px-3 py-2 w-full font-mono text-sm"
+                  data-testid="sched-auto-retry-delay"
+                />
+              </Field>
+              <Field label="Max attempts">
+                <input
+                  type="number" min={1} max={10}
+                  value={arLocal.max_attempts ?? 2}
+                  onChange={(e) => { setArLocal((p) => ({ ...p, max_attempts: e.target.value === "" ? "" : Number(e.target.value) })); setArDirty(true); }}
+                  className="input px-3 py-2 w-full font-mono text-sm"
+                  data-testid="sched-auto-retry-attempts"
+                />
+              </Field>
+              <button
+                onClick={() => saveAutoRetry({ delay_minutes: Math.max(1, Math.min(180, Number(arLocal.delay_minutes) || 3)), max_attempts: Math.max(1, Math.min(10, Number(arLocal.max_attempts) || 2)) })}
+                disabled={!arDirty}
+                className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                data-testid="sched-auto-retry-save"
+              >
+                <BadgeCheck size={14}/> Save
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Retry pending banners */}
       {itemRetry && (

@@ -1972,3 +1972,19 @@ Notification Bell deep-links) — zero regressions detected.
   recovered/still-failed into the Refreshed/Failed columns with a detail summary.
 - Verified: Price Alerts sort+chart via screenshot; auto-retry success/re-queue/dead
   paths via direct helper calls (recovered→clear, unresolved→attempt2→dead); page renders.
+
+
+## Jun 2026 — Auto-retry toggle + adjustable delay/attempts
+- The scheduler's failed-item auto-retry is now admin-configurable via
+  `scraper_schedule.auto_retry = {enabled, delay_minutes, max_attempts}` (defaults
+  on / 3 min / 2). New endpoint `PATCH /api/scraper/auto-retry` (validated:
+  delay 1–180 min, attempts 1–10; partial updates supported). `_auto_retry_cfg()`
+  reads it; `_refresh_all_and_record` skips queueing when disabled and honours the
+  delay; `_run_failed_item_retry` honours max_attempts (gives up → `dead`).
+- Frontend (`ScraperScheduleEditor`): new "Auto-retry failed items" card with an
+  On/Off toggle (saves immediately) plus "Retry after (minutes)" and "Max attempts"
+  inputs + Save. Test-ids: `sched-auto-retry-card`, `sched-auto-retry-toggle`,
+  `sched-auto-retry-delay`, `sched-auto-retry-attempts`, `sched-auto-retry-save`.
+- Verified: PATCH persists/validates (422 on out-of-range); max_attempts=1 → item
+  fails straight to `dead`; disabled reflected in `_auto_retry_cfg`; card renders and
+  saves (toast). Old hardcoded constants remain as fallbacks.

@@ -369,6 +369,8 @@ SCRAPER_SCHEDULE_DEFAULTS: dict = {
     # (instead of the whole batch). Shape:
     # {"retry_at": iso, "item_ids": [...], "attempt": int, "schedule_id": id}
     "failed_retry_pending": None,
+    # Admin-configurable settings for the item-level auto-retry above.
+    "auto_retry": {"enabled": True, "delay_minutes": 3, "max_attempts": 2},
 }
 RETRY_DELAY_SECONDS = 15 * 60  # 15 minutes
 ITEM_RETRY_DELAY_SECONDS = 3 * 60   # auto-retry failed items ~3 min after a run
@@ -399,6 +401,13 @@ class ScheduleEntryBody(BaseModel):
     start_time_hhmm: str = "02:00"
     frequency: str = "daily"
     stop_date: Optional[str] = None
+
+
+class AutoRetryConfigBody(BaseModel):
+    """Admin settings for the scheduler's failed-item auto-retry."""
+    enabled: Optional[bool] = None
+    delay_minutes: Optional[int] = Field(default=None, ge=1, le=180)
+    max_attempts: Optional[int] = Field(default=None, ge=1, le=10)
 
 
 class ScraperSchedulesReplaceBody(BaseModel):

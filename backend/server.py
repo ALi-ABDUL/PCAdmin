@@ -28,7 +28,7 @@ from models import (
     Product, ProductUpdate, ShippingAddress, _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, 
     OrderCreate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, ItemBulkAction, 
     RefreshAllRequest, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
-    FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ScheduleEntryBody, ScraperSchedulesReplaceBody, ORDER_STATUSES, ReturnRequest, 
+    FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ScheduleEntryBody, ScraperSchedulesReplaceBody, AutoRetryConfigBody, ORDER_STATUSES, ReturnRequest, 
     AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate,
     CouponBase, Coupon, ReviewBase, Review, JWT_ALGO, JWT_ACCESS_TTL, PortalRegisterBody, 
     PortalLoginBody, PortalReviewBody, PortalReviewVoteBody, MessageBase, Message, StockMove, 
@@ -583,6 +583,17 @@ async def clear_scraper_history():
         {"$set": {"run_history": [], "retry_pending": None, "failed_retry_pending": None}},
         upsert=True,
     )
+    return await get_scraper_schedule()
+
+
+@api_router.patch("/scraper/auto-retry")
+async def update_auto_retry(body: AutoRetryConfigBody):
+    """Update the scheduler's failed-item auto-retry settings (on/off, delay, attempts)."""
+    sched = await _get_scraper_schedule()
+    cfg = {**(sched.get("auto_retry") or {"enabled": True, "delay_minutes": 3, "max_attempts": 2})}
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    cfg.update(fields)
+    await db.scraper_schedule.update_one({"id": "singleton"}, {"$set": {"auto_retry": cfg}}, upsert=True)
     return await get_scraper_schedule()
 
 

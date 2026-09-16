@@ -294,7 +294,7 @@ export default function App() {
               {tab === "orders"    && <OrdersModule section={ordersSection} setSection={changeOrdersSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openOrderDetail={setOrderDetailId} orderDetailId={orderDetailId}/>}
               {tab === "payments"  && <PaymentsModule section={paymentsSection} setSection={setPaymentsSection}/>}
               {tab === "categories" && <Categories navigateTo={navigateTo}/>}
-              {tab === "scraper"   && <ScraperPage onView={setSelectedItem} />}
+              {tab === "scraper"   && <ScraperPage onView={setSelectedItem} onEditProduct={(pid) => { setTab("products"); setProductDetailId(pid); }} />}
               {tab === "analytics" && <Analytics />}
               {tab === "settings"  && <SettingsPage />}
             </motion.div>

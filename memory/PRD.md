@@ -2006,3 +2006,16 @@ Notification Bell deep-links) — zero regressions detected.
 - Verified: admin GET/PATCH, public /store/config reflects changes, 422 on non-image
   logo, and the Configure form renders/saves via UI (toast "live on PCStore").
   Branding reset to clean defaults after testing.
+
+
+## Jun 2026 — Product Sourcing: card click opens product editor (no lightbox)
+- On the Product Sourcing page (`pages/Scraper.jsx`), clicking a sourced product
+  card (image or title) no longer opens the ItemModal lightbox — it now navigates
+  straight to that item's **product edit page**. New `openEdit(it)` handler:
+  if the item is already linked to a product (`linked_product_id`) it opens it;
+  otherwise it creates the product via `POST /products/from-item/{id}` then opens
+  the new product's editor. New prop `onEditProduct` wired from `App.js`
+  (`setTab("products")` + `setProductDetailId(pid)`). Test-id on card: `scraped-card-open-{id}`.
+- The ItemModal is retained ONLY for the "Already imported → View existing" duplicate
+  banner (a deliberate preview, not a card click). Verified via screenshot: clicking a
+  card lands on the ProductDetail editor, no modal.

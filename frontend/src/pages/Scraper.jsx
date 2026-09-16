@@ -10,7 +10,7 @@ import { calcPricing, usePricingRules } from "../lib/pricing";
 import { Orders } from "./Orders";
 import { Products } from "./ProductsList";
 
-export function ScraperPage({ onView }) {
+export function ScraperPage({ onView, onEditProduct }) {
   const [url, setUrl] = useState(""); const [method, setMethod] = useState(loadKeys().method);
   const [loading, setLoading] = useState(false); const [status, setStatus] = useState("");
   const [items, setItems] = useState([]);
@@ -110,6 +110,19 @@ export function ScraperPage({ onView }) {
       toast.success("Added to products", { description: `${data.title} · ${moneyCents(data.price)} · SKU ${data.sku}` });
       await load();
     } catch (e) { toast.error("Failed", { description: e?.response?.data?.detail || e.message }); }
+  };
+
+  // Clicking a sourced card jumps straight to the product edit page. If the
+  // item isn't in Products yet, create it from the item first, then open it.
+  const openEdit = async (it) => {
+    if (it.linked_product_id) { onEditProduct?.(it.linked_product_id); return; }
+    try {
+      const { data } = await axios.post(`${API}/products/from-item/${it.id}`);
+      toast.success("Added to products — opening editor", { description: `${data.title} · ${moneyCents(data.price)}` });
+      onEditProduct?.(data.id);
+    } catch (e) {
+      toast.error("Couldn't open editor", { description: e?.response?.data?.detail || e.message });
+    }
   };
 
   const del = async (it) => { if (!window.confirm("Delete this scraped item?")) return; await axios.delete(`${API}/items/${it.id}`); toast.success("Deleted"); load(); };
@@ -333,7 +346,7 @@ export function ScraperPage({ onView }) {
                   <label className="absolute top-2 right-2 z-10 grid place-items-center w-6 h-6 rounded-md bg-white/90 border hairline cursor-pointer" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggleOne(it.id)} className="accent-indigo-600 w-4 h-4" data-testid="scraped-card-checkbox"/>
                   </label>
-                  <div className="aspect-[4/3] bg-slate-50 relative cursor-pointer" onClick={() => onView(it)}>
+                  <div className="aspect-[4/3] bg-slate-50 relative cursor-pointer" onClick={() => openEdit(it)} data-testid={`scraped-card-open-${it.id}`} title="Open product editor">
                     {it.images?.[0]
                       ? <img src={proxyImg(it.images[0])} alt="" className="w-full h-full object-contain p-2"/>
                       : <div className="w-full h-full grid place-items-center text-slate-300"><ImageIcon size={22}/></div>}
@@ -341,7 +354,7 @@ export function ScraperPage({ onView }) {
                     {it.active === false && <span className="absolute bottom-2 right-2 chip chip-neutral">Inactive</span>}
                   </div>
                   <div className="p-4">
-                    <h3 className="text-sm font-semibold line-clamp-2 min-h-[2.6em] cursor-pointer" onClick={() => onView(it)}>{it.title || "Untitled"}</h3>
+                    <h3 className="text-sm font-semibold line-clamp-2 min-h-[2.6em] cursor-pointer hover:text-indigo-600 transition-colors" onClick={() => openEdit(it)} title="Open product editor">{it.title || "Untitled"}</h3>
                     <div className="mt-2 flex items-baseline justify-between gap-2">
                       <span className="font-mono text-lg font-bold text-indigo-600">{it.price_display || "—"}</span>
                       {it.condition && <span className="chip chip-neutral">{it.condition.split(" ").slice(0, 2).join(" ")}</span>}

@@ -47,7 +47,7 @@ from models import (
 from countries import COUNTRIES, COUNTRY_CODES
 from helpers import (
     _rand_au_address, _slug, _product_code_base, _generate_unique_product_code, 
-    _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _refresh_all_items, 
+    _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _refresh_all_items, _retry_scrape_items, 
     _get_scraper_schedule, _compute_next_run, _compute_next_run_for, _classify_run, _push_run_history, 
     _refresh_all_and_record, _update_schedule_entry, _scheduler_loop, _ensure_categories_seeded, _ensure_ebay_category, _now_iso, 
     _seed_transactions_and_returns, _rebuild_customers_from_orders, _link_customer_to_portal_account, _shape_review, _jwt_secret, 
@@ -584,6 +584,28 @@ async def clear_scraper_history():
         upsert=True,
     )
     return await get_scraper_schedule()
+
+
+@api_router.post("/scraper/retry-item")
+async def scraper_retry_item(body: dict):
+    """Retry the scrape for ONE item from the last run's results breakdown."""
+    iid = body.get("id") or body.get("item_id")
+    if not iid:
+        raise HTTPException(status_code=400, detail="id required")
+    result = await _retry_scrape_items([iid])
+    return {"ok": True, **result, "schedule": await get_scraper_schedule()}
+
+
+@api_router.post("/scraper/retry-failed")
+async def scraper_retry_failed():
+    """Retry every failed item from the last run's results breakdown in one go."""
+    sched = await _get_scraper_schedule()
+    lrr = sched.get("last_run_results") or []
+    ids = [r.get("id") for r in lrr if not r.get("ok") and r.get("id")]
+    if not ids:
+        return {"ok": True, "results": lrr, "stats": sched.get("last_run_stats"), "retried": 0, "schedule": await get_scraper_schedule()}
+    result = await _retry_scrape_items(ids)
+    return {"ok": True, **result, "schedule": await get_scraper_schedule()}
 
 
 @app.on_event("startup")

@@ -1001,6 +1001,8 @@ export function ScraperScheduleEditor() {
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
+  const [retryingIds, setRetryingIds] = useState([]);
+  const [retryingAll, setRetryingAll] = useState(false);
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
 
@@ -1059,6 +1061,31 @@ export function ScraperScheduleEditor() {
     } finally { setRunning(false); }
   };
 
+  const retryItem = async (id) => {
+    setRetryingIds((ids) => [...ids, id]);
+    try {
+      const { data } = await axios.post(`${API}/scraper/retry-item`, { id }, { timeout: 5 * 60 * 1000 });
+      setSched(data.schedule);
+      const row = (data.results || []).find((r) => r.id === id);
+      if (row?.ok) toast.success("Item refreshed"); else toast.error("Retry failed", { description: row?.error?.slice(0, 160) });
+    } catch (e) {
+      toast.error("Retry failed", { description: e?.response?.data?.detail?.slice(0, 160) || e.message });
+    } finally { setRetryingIds((ids) => ids.filter((x) => x !== id)); }
+  };
+
+  const retryAllFailed = async () => {
+    setRetryingAll(true);
+    toast.loading("Retrying all failed items…", { id: "retry-all" });
+    try {
+      const { data } = await axios.post(`${API}/scraper/retry-failed`, {}, { timeout: 30 * 60 * 1000 });
+      setSched(data.schedule);
+      const s = data.stats || {};
+      toast.success(`Done · ${s.refreshed || 0}/${s.total || 0} now refreshed · ${s.failed || 0} still failing`, { id: "retry-all" });
+    } catch (e) {
+      toast.error("Retry failed", { id: "retry-all", description: e?.response?.data?.detail?.slice(0, 160) || e.message });
+    } finally { setRetryingAll(false); }
+  };
+
   const activeCount = rows.filter((r) => {
     if (!r.enabled) return false;
     const passed = r.stop_date ? new Date(r.stop_date) <= new Date() : false;
@@ -1069,6 +1096,9 @@ export function ScraperScheduleEditor() {
     .filter(Boolean)
     .sort()[0] || sched.next_run_at || null;
   const history = Array.isArray(sched.run_history) ? sched.run_history : [];
+  const results = Array.isArray(sched.last_run_results) ? sched.last_run_results : [];
+  const failedResults = results.filter((r) => !r.ok);
+  const okResults = results.filter((r) => r.ok);
   const retryPending = sched.retry_pending && sched.retry_pending.retry_at ? sched.retry_pending : null;
 
   const clearHistory = async () => {
@@ -1256,6 +1286,65 @@ export function ScraperScheduleEditor() {
                 {" "}(15 minutes after the original attempt). If it fails again the run is marked <span className="font-mono">dead</span>.
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Results breakdown — per-item outcome of the most recent run */}
+      {results.length > 0 && (
+        <div className="card p-5" data-testid="sched-results">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div>
+              <div className="font-display font-bold text-base flex items-center gap-2"><BadgeCheck size={16}/> Last run breakdown</div>
+              <div className="text-xs text-slate-500">
+                <span className="text-emerald-600 font-medium">{okResults.length} refreshed</span>
+                {" · "}
+                <span className={failedResults.length ? "text-red-600 font-medium" : "text-slate-400"}>{failedResults.length} failed</span>
+                {" · "}{results.length} total
+              </div>
+            </div>
+            {failedResults.length > 0 && (
+              <button onClick={retryAllFailed} disabled={retryingAll} className="btn btn-primary text-sm disabled:opacity-50" data-testid="sched-retry-all">
+                {retryingAll ? <Loader2 size={14} className="animate-spin"/> : <RefreshCw size={14}/>} Retry all failed ({failedResults.length})
+              </button>
+            )}
+          </div>
+
+          <div className="grid gap-2">
+            {/* Failed first so they're front-and-centre */}
+            {[...failedResults, ...okResults].map((r) => {
+              const isRetrying = retryingIds.includes(r.id) || (retryingAll && !r.ok);
+              return (
+                <div key={r.id || r.item_id} className={`flex items-center gap-3 rounded-xl border hairline p-3 ${r.ok ? "bg-white" : "bg-red-50/40"}`} data-testid={`sched-result-row-${r.item_id}`}>
+                  {r.image
+                    ? <img src={r.image} alt="" className="w-10 h-10 rounded-lg object-cover border hairline shrink-0"/>
+                    : <div className="w-10 h-10 rounded-lg bg-slate-100 grid place-items-center text-slate-300 shrink-0"><Store size={16}/></div>}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate" title={r.title}>{r.title || `Item ${r.item_id}`}</div>
+                    <div className="text-[11px] font-mono text-slate-400 truncate">
+                      #{r.item_id}
+                      {!r.ok && r.error && <span className="text-red-500"> · {r.error}</span>}
+                    </div>
+                  </div>
+                  {r.ok
+                    ? (r.sold
+                        ? <span className="chip text-[10px]" style={{ background: "#fef3c7", color: "#92400e" }}><Zap size={10}/> Sold</span>
+                        : <span className="chip chip-success text-[10px]"><BadgeCheck size={10}/> Refreshed</span>)
+                    : <span className="chip text-[10px]" style={{ background: "#fee2e2", color: "#b91c1c" }}><XCircle size={10}/> Failed</span>}
+                  {!r.ok && (
+                    <button
+                      onClick={() => retryItem(r.id)}
+                      disabled={isRetrying}
+                      className="btn btn-ghost !py-1.5 !px-2.5 text-xs shrink-0 disabled:opacity-50"
+                      data-testid={`sched-retry-item-${r.item_id}`}
+                      title="Re-fetch this item"
+                    >
+                      {isRetrying ? <Loader2 size={13} className="animate-spin"/> : <RefreshCw size={13}/>} Retry
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

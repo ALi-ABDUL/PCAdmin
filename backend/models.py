@@ -357,6 +357,10 @@ SCRAPER_SCHEDULE_DEFAULTS: dict = {
     # `schedule_id` naming which schedule fired it.
     # Each entry: {id, started_at, finished_at, duration_seconds, status, attempt, trigger, stats, error, schedule_id}
     "run_history": [],
+    # Per-item breakdown of the MOST RECENT run only (not kept per history row
+    # to avoid bloating the singleton doc). Each entry:
+    # {id, item_id, title, url, image, ok, sold, error, at}
+    "last_run_results": [],
     # Set when a scheduled run fails and a retry is queued for 15 min later.
     # Shape: {"retry_at": iso, "original_run_id": id, "trigger": "scheduled"|"manual", "schedule_id": id}
     "retry_pending": None,

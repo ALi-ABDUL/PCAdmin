@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_update_schedule_entry', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_link_customer_to_portal_account', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
+__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_scrape_one_item', '_retry_scrape_items', '_summarise_results', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_update_schedule_entry', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_link_customer_to_portal_account', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
 
 
 import bcrypt
@@ -176,23 +176,79 @@ async def _ensure_order_references_backfilled() -> None:
     if count:
         logger.info(f"backfilled reference on {count} orders")
 
-async def _refresh_all_items(method: str = "auto", scrapingbee_key: Optional[str] = None, scraperapi_key: Optional[str] = None) -> dict:
-    """Re-scrape every stored item; detects sold status + updates delivery estimate."""
+_ITEM_RESULT_PROJECTION = {"_id": 0, "id": 1, "url": 1, "item_id": 1, "title": 1, "images": 1}
+
+
+async def _scrape_one_item(it: dict, method: str = "auto", scrapingbee_key: Optional[str] = None, scraperapi_key: Optional[str] = None) -> dict:
+    """Re-scrape a single stored item and return a per-item result row used by
+    the Scraper Schedule results breakdown + retry endpoints."""
     from server import scrape  # late import to avoid circular dependency
-    items = await db.items.find({}, {"_id": 0, "id": 1, "url": 1, "item_id": 1}).to_list(1000)
-    ok = 0; sold = 0; failed = 0
+    base = {
+        "id": it.get("id"),
+        "item_id": it.get("item_id"),
+        "title": it.get("title"),
+        "url": it.get("url"),
+        "image": (it.get("images") or [None])[0],
+    }
+    try:
+        r = ScrapeRequest(url=it["url"], method=method, scrapingbee_key=scrapingbee_key, scraperapi_key=scraperapi_key, save=True)
+        res = await scrape(r)
+        sold = bool(res.get("item", {}).get("is_sold"))
+        if not base.get("title"):
+            base["title"] = res.get("item", {}).get("title")
+        return {**base, "ok": True, "sold": sold, "error": None, "at": datetime.now(timezone.utc).isoformat()}
+    except Exception as e:
+        logger.info(f"refresh item {it.get('item_id')} failed: {e}")
+        return {**base, "ok": False, "sold": False, "error": f"{type(e).__name__}: {e}"[:300], "at": datetime.now(timezone.utc).isoformat()}
+
+
+def _summarise_results(results: list) -> dict:
+    ok = sum(1 for r in results if r.get("ok"))
+    sold = sum(1 for r in results if r.get("sold"))
+    failed = sum(1 for r in results if not r.get("ok"))
+    return {"refreshed": ok, "sold_found": sold, "failed": failed, "total": len(results)}
+
+
+async def _refresh_all_items(method: str = "auto", scrapingbee_key: Optional[str] = None, scraperapi_key: Optional[str] = None) -> dict:
+    """Re-scrape every stored item; detects sold status + updates delivery estimate.
+    Returns aggregate counts PLUS a per-item `results` list."""
+    items = await db.items.find({}, _ITEM_RESULT_PROJECTION).to_list(1000)
+    results = []
     for it in items:
-        try:
-            r = ScrapeRequest(url=it["url"], method=method, scrapingbee_key=scrapingbee_key, scraperapi_key=scraperapi_key, save=True)
-            res = await scrape(r)
-            if res.get("item", {}).get("is_sold"):
-                sold += 1
-            ok += 1
-        except Exception as e:
-            failed += 1
-            logger.info(f"refresh-all: {it.get('item_id')} failed: {e}")
+        results.append(await _scrape_one_item(it, method=method, scrapingbee_key=scrapingbee_key, scraperapi_key=scraperapi_key))
         await asyncio.sleep(1.2)  # be gentle to eBay
-    return {"refreshed": ok, "sold_found": sold, "failed": failed, "total": len(items)}
+    return {**_summarise_results(results), "results": results}
+
+
+async def _retry_scrape_items(ids: list, method: str = "auto") -> dict:
+    """Re-scrape a specific set of items by id and merge the fresh outcomes into
+    `last_run_results`, recomputing `last_run_stats`. Powers the per-item Retry
+    and Retry-All-Failed buttons."""
+    ids = [i for i in ids if i]
+    docs = await db.items.find({"id": {"$in": ids}}, _ITEM_RESULT_PROJECTION).to_list(1000)
+    updated = []
+    for it in docs:
+        updated.append(await _scrape_one_item(it, method=method))
+        await asyncio.sleep(0.8)
+    sched = await _get_scraper_schedule()
+    lrr = list(sched.get("last_run_results") or [])
+    by_id = {u["id"]: u for u in updated}
+    seen = set()
+    for i, r in enumerate(lrr):
+        if r.get("id") in by_id:
+            lrr[i] = by_id[r["id"]]
+            seen.add(r.get("id"))
+    for uid, u in by_id.items():
+        if uid not in seen:
+            lrr.append(u)
+    stats = _summarise_results(lrr)
+    await db.scraper_schedule.update_one(
+        {"id": "singleton"},
+        {"$set": {"last_run_results": lrr, "last_run_stats": stats, "last_run_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"results": lrr, "stats": stats, "retried": len(updated)}
+
 
 async def _get_scraper_schedule() -> dict:
     doc = await db.scraper_schedule.find_one({"id": "singleton"}, {"_id": 0})
@@ -302,6 +358,9 @@ async def _refresh_all_and_record(method: str = "auto", trigger: str = "schedule
         logger.exception(f"scraper schedule: run crashed · {error}")
     finished = datetime.now(timezone.utc)
     duration = (finished - started).total_seconds()
+    # Split the per-item results out of the summary: they're stored once in
+    # `last_run_results`, NOT embedded in every history row (would bloat the doc).
+    results = summary.pop("results", None) if summary else None
     status = _classify_run(summary, error)
     # If this is a retry that also failed, mark it 'dead' so the UI can highlight the give-up.
     if status == "failed" and attempt >= 2:
@@ -328,7 +387,7 @@ async def _refresh_all_and_record(method: str = "auto", trigger: str = "schedule
     # mirror for backwards compat + per-entry stamp).
     await db.scraper_schedule.update_one(
         {"id": "singleton"},
-        {"$set": {"last_run_at": finished.isoformat(), "last_run_stats": summary}},
+        {"$set": {"last_run_at": finished.isoformat(), "last_run_stats": summary, "last_run_results": results or []}},
         upsert=True,
     )
     if schedule_id:

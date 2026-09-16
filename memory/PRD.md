@@ -1927,3 +1927,23 @@ Notification Bell deep-links) — zero regressions detected.
 - Test-ids: `order-payment-card`, `order-payment-method`, `order-payment-method-*`,
   `order-payment-status-badge`, `order-payment-status-toggle`. Verified via screenshot
   (badge + chips render, toggle flips Paid↔Pending and persists).
+
+
+## Jun 2026 — Scraper Schedule: per-item results breakdown + retry
+- **Backend:** `_refresh_all_items` now returns a per-item `results` list
+  (`{id, item_id, title, url, image, ok, sold, error, at}`) via a new
+  `_scrape_one_item` helper. `_refresh_all_and_record` stores the latest run's
+  results in `scraper_schedule.last_run_results` (kept OUT of each history row to
+  avoid doc bloat). New helper `_retry_scrape_items(ids)` re-scrapes specific items
+  and merges fresh outcomes back into `last_run_results`, recomputing `last_run_stats`.
+- **New endpoints:** `POST /api/scraper/retry-item` `{id}` (retry one) and
+  `POST /api/scraper/retry-failed` (retry every failed item; idempotent → `retried:0`
+  when none). Both return the updated schedule + results + stats.
+- **Frontend** (`ScraperScheduleEditor` in `pages/Store.jsx`): new "Last run breakdown"
+  card (shown when `last_run_results` present) listing failed items first (red chip +
+  error + per-item Retry) then refreshed/sold items, with thumbnails, plus a
+  "Retry all failed (N)" button. Test-ids: `sched-results`, `sched-retry-all`,
+  `sched-result-row-{item_id}`, `sched-retry-item-{item_id}`.
+- Verified end-to-end: breakdown renders; per-item Retry and Retry-all both re-scraped
+  real eBay items successfully (failed→refreshed) and updated counts live; idempotent
+  no-failures case returns cleanly. `last_run_results` added to SCRAPER_SCHEDULE_DEFAULTS.

@@ -145,6 +145,33 @@ render as a nav menu without empty sections.
 
 Cheap liveness check for CI / uptime probes. Doesn't touch the DB.
 
+### `GET /api/store/config`
+
+Storefront branding, editable from **PCAdmin → Store Management → Store Settings →
+Store name**. Fetch this once on app load and hydrate your header/`<title>`/favicon
+from it so brand changes in PCAdmin reflect on PCStore with **no code change**.
+
+```json
+{
+  "store_name": "PrettyCheap",
+  "tagline": "Pretty Prices · Cheap Deals · Every Day",
+  "logo": "data:image/png;base64,…",        // or null → render text logo
+  "favicon": "data:image/x-icon;base64,…",  // or null
+  "tab_title": "PrettyCheap",                // use for document.title
+  "discount_badge_min_percent": 0
+}
+```
+
+Suggested PCStore usage:
+```js
+const cfg = await fetch(`${API}/api/store/config`).then(r => r.json());
+document.title = cfg.tab_title || cfg.store_name;
+if (cfg.favicon) document.querySelector("link[rel=icon]")?.setAttribute("href", cfg.favicon);
+// render cfg.store_name as the bold header, cfg.tagline as the subtitle,
+// cfg.logo (when present) as the header logo image.
+```
+
+
 ### `GET /api/products/{id}/reviews`
 
 Public reviews for a product (already exists in the admin API but is

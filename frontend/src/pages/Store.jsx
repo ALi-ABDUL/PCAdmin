@@ -1627,12 +1627,170 @@ function EmailTemplatesEditor() {
 }
 
 
+/* ------------------------- Storefront branding editor -------------------------
+ * Store Management → Store Settings → "Store name" Configure. Edits the
+ * PCStore-facing brand: store name, tagline, logo, favicon, browser tab title.
+ * Saves to /api/store-branding; PCStore reads /api/store/config dynamically.
+ * ---------------------------------------------------------------------------- */
+const MAX_BRAND_IMG_BYTES = 3 * 1024 * 1024;
+
+export function StoreBrandingEditor() {
+  const [data, setData] = useState(null);
+  const [form, setForm] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/store-branding`);
+    setData(data);
+    setForm((f) => f ?? data);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  if (!data || !form) return <div className="card p-5 text-slate-500 text-sm" data-testid="store-branding-loading">Loading…</div>;
+
+  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+
+  const pickImage = (key, label) => async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_BRAND_IMG_BYTES) {
+      toast.error(`${label} is too large`, { description: `Max 3 MB · this file is ${(file.size / 1024 / 1024).toFixed(1)} MB.` });
+      return;
+    }
+    const dataUrl = await new Promise((res, rej) => {
+      const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file);
+    });
+    set({ [key]: dataUrl });
+  };
+
+  const save = async () => {
+    if (!(form.store_name || "").trim()) { toast.error("Store name is required"); return; }
+    setBusy(true);
+    try {
+      const payload = {
+        store_name: (form.store_name || "").trim(),
+        tagline: (form.tagline || "").trim(),
+        tab_title: (form.tab_title || "").trim() || (form.store_name || "").trim(),
+        logo: form.logo || "",
+        favicon: form.favicon || "",
+      };
+      const { data } = await axios.patch(`${API}/store-branding`, payload);
+      setData(data); setForm(data);
+      toast.success("Store branding saved — live on PCStore");
+    } catch (e) {
+      toast.error("Save failed", { description: e?.response?.data?.detail || e.message });
+    } finally { setBusy(false); }
+  };
+
+  const dirty = JSON.stringify(form) !== JSON.stringify(data);
+
+  return (
+    <div className="card p-5" data-testid="store-branding-card">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-11 h-11 rounded-xl grid place-items-center shrink-0 text-white" style={{ background: "linear-gradient(135deg,#4F46E5,#EC4899)" }}>
+            <Store size={18}/>
+          </div>
+          <div className="min-w-0">
+            <div className="font-display font-bold text-base">Store name &amp; branding</div>
+            <div className="text-xs text-slate-500 mt-0.5 truncate">
+              <span className="font-medium text-slate-700">{data.store_name}</span>
+              {data.tagline ? <span> · {data.tagline}</span> : null}
+            </div>
+          </div>
+        </div>
+        <button onClick={() => setOpen((o) => !o)} className="btn btn-ghost text-sm" data-testid="store-branding-configure">
+          {open ? "Close" : "Configure"}
+        </button>
+      </div>
+
+      {open && (
+        <div className="mt-5 pt-5 border-t hairline grid gap-4" data-testid="store-branding-form">
+          <Field label="Store name (bold header on PCStore)">
+            <input value={form.store_name || ""} onChange={(e) => set({ store_name: e.target.value })} placeholder="PrettyCheap" className="input w-full px-3 py-2 text-sm" data-testid="store-branding-name"/>
+          </Field>
+          <Field label="Tagline / subtitle">
+            <input value={form.tagline || ""} onChange={(e) => set({ tagline: e.target.value })} placeholder="Pretty Prices · Cheap Deals · Every Day" className="input w-full px-3 py-2 text-sm" data-testid="store-branding-tagline"/>
+          </Field>
+          <Field label="Browser tab title">
+            <input value={form.tab_title || ""} onChange={(e) => set({ tab_title: e.target.value })} placeholder="Defaults to store name" className="input w-full px-3 py-2 text-sm" data-testid="store-branding-tabtitle"/>
+          </Field>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2">Logo</div>
+              <div className="flex items-center gap-3">
+                <div className="w-16 h-16 rounded-lg border hairline bg-slate-50 grid place-items-center overflow-hidden shrink-0">
+                  {form.logo ? <img src={form.logo} alt="logo" className="w-full h-full object-contain p-1" data-testid="store-branding-logo-preview"/> : <Store size={20} className="text-slate-300"/>}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="btn btn-primary text-xs cursor-pointer" data-testid="store-branding-logo-picker">
+                    {form.logo ? "Replace" : "Upload"} logo
+                    <input type="file" accept="image/*" className="hidden" onChange={pickImage("logo", "Logo")} data-testid="store-branding-logo-input"/>
+                  </label>
+                  {form.logo && <button onClick={() => set({ logo: "" })} className="btn btn-ghost text-xs" data-testid="store-branding-logo-clear"><Trash2 size={12}/> Remove</button>}
+                </div>
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2">Favicon</div>
+              <div className="flex items-center gap-3">
+                <div className="w-16 h-16 rounded-lg border hairline bg-slate-50 grid place-items-center overflow-hidden shrink-0">
+                  {form.favicon ? <img src={form.favicon} alt="favicon" className="w-8 h-8 object-contain" data-testid="store-branding-favicon-preview"/> : <Store size={16} className="text-slate-300"/>}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="btn btn-primary text-xs cursor-pointer" data-testid="store-branding-favicon-picker">
+                    {form.favicon ? "Replace" : "Upload"} favicon
+                    <input type="file" accept="image/*,.ico" className="hidden" onChange={pickImage("favicon", "Favicon")} data-testid="store-branding-favicon-input"/>
+                  </label>
+                  {form.favicon && <button onClick={() => set({ favicon: "" })} className="btn btn-ghost text-xs" data-testid="store-branding-favicon-clear"><Trash2 size={12}/> Remove</button>}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+            <div className="text-[11px] text-slate-400">Changes appear on PCStore immediately via <span className="font-mono">/api/store/config</span>.</div>
+            <div className="flex items-center gap-2">
+              {dirty && <span className="text-[11px] text-amber-600 font-mono">unsaved changes</span>}
+              <button onClick={save} disabled={busy || !dirty} className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed" data-testid="store-branding-save">
+                {busy ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>} Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function StoreSettingsPanel() {
+  const others = ["Legal business name", "ABN", "Contact email", "Support phone", "Business hours"];
+  return (
+    <div className="grid gap-3" data-testid="store-settings-panel">
+      <StoreBrandingEditor/>
+      {others.map((f) => (
+        <div key={f} className="card p-4 md:p-5 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-lg grid place-items-center shrink-0 bg-indigo-50 text-indigo-500"><Store size={16}/></div>
+            <div className="min-w-0"><div className="font-medium text-sm truncate">{f}</div><div className="text-[11px] text-slate-400 font-mono">Not configured</div></div>
+          </div>
+          <button className="btn btn-ghost text-xs !py-1 !px-2" disabled>Configure</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
+
 export function StoreManagement({ section, setSection }) {
   const meta = STORE_NAV.find((s) => s.id === section) || STORE_NAV[0];
   const Icon = meta.icon;
 
   const sections = {
-    "store-settings":      { hint: "Store name, brand, contact details, business hours and legal info.", fields: ["Store name","Legal business name","ABN","Contact email","Support phone","Business hours"] },
+    "store-settings":      { hint: "Your storefront brand — name, tagline, logo, favicon and tab title (shown live on PCStore) — plus contact and legal info.", fields: [], custom: <StoreSettingsPanel/> },
     "pricing-rules":       { hint: "Tiered profit rules the scraper uses when calculating sell prices for imported items.", fields: [], custom: <PricingRulesEditor/> },
     "postage-presets":     { hint: "Reusable postage options shown as a dropdown on every product. Free, Standard, or Large Item (postage + insurance).", fields: [], custom: <PostagePresetsEditor/> },
     "delivery-estimate":   { hint: "Store-wide default delivery window (in business days, weekends skipped). Every product page shows a live 'Estimated delivery between [date] and [date]' that rolls forward each day automatically.", fields: [], custom: <DeliverySettingsEditor/> },

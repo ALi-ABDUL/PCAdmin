@@ -1988,3 +1988,21 @@ Notification Bell deep-links) — zero regressions detected.
 - Verified: PATCH persists/validates (422 on out-of-range); max_attempts=1 → item
   fails straight to `dead`; disabled reflected in `_auto_retry_cfg`; card renders and
   saves (toast). Old hardcoded constants remain as fallbacks.
+
+
+## Jun 2026 — Storefront branding (Store Settings → Store name)
+- New `store_branding` singleton {store_name, tagline, logo, favicon, tab_title}
+  (`_DEFAULT_STORE_BRANDING` in models.py). Admin endpoints
+  `GET/PATCH /api/store-branding` (partial saves; logo/favicon validated as
+  data:image/… base64 or cleared with ""). Public `GET /api/store/config` returns
+  the branding for PCStore to read dynamically (documented in PCSTORE_INTEGRATION.md).
+- Frontend: Store Management → **Store Settings** is now `StoreSettingsPanel` with a
+  **Store name & branding** card (`StoreBrandingEditor`) whose **Configure** button
+  opens a form — store name, tagline/subtitle, browser tab title, logo upload +
+  favicon upload (FileReader→base64, 3 MB cap, preview + remove), single Save.
+  Remaining fields (Legal name, ABN, etc.) stay as read-only scaffolds. Test-ids:
+  `store-branding-card`, `store-branding-configure`, `store-branding-form`,
+  `store-branding-{name,tagline,tabtitle,logo-input,favicon-input,save}`.
+- Verified: admin GET/PATCH, public /store/config reflects changes, 422 on non-image
+  logo, and the Configure form renders/saves via UI (toast "live on PCStore").
+  Branding reset to clean defaults after testing.

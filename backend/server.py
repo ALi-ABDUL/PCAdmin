@@ -40,7 +40,7 @@ from models import (
     ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
     DisposableDomainsUpdate, DISPOSABLE_EMAIL_ERROR,
-    _DEFAULT_STORE_DISPLAY, StoreDisplaySettingsUpdate,
+    _DEFAULT_STORE_DISPLAY, StoreDisplaySettingsUpdate, _DEFAULT_STORE_BRANDING, StoreBrandingUpdate,
     VerifyTokenBody, ResendVerificationBody, EmailTemplatesUpdate,
     CountdownStart, BrandingUpdate,
 )
@@ -4292,6 +4292,67 @@ async def store_health():
     """Cheap liveness check for PCStore to sanity-test connectivity + CORS
     from its own environment without hitting a data endpoint."""
     return {"ok": True, "service": "PCAdmin storefront API", "version": 1}
+
+
+@api_router.get("/store/config")
+async def store_config():
+    """Public storefront branding/config for PCStore — store name, tagline,
+    logo, favicon and browser tab title. PCStore reads this on load so brand
+    changes in PCAdmin reflect immediately without any code change."""
+    b = await _get_store_branding()
+    display = await _get_store_display()
+    return {
+        "store_name": b.get("store_name"),
+        "tagline": b.get("tagline"),
+        "logo": b.get("logo"),
+        "favicon": b.get("favicon"),
+        "tab_title": b.get("tab_title") or b.get("store_name"),
+        "discount_badge_min_percent": int(display.get("discount_badge_min_percent", 0) or 0),
+    }
+
+
+
+async def _get_store_branding() -> dict:
+    """Storefront branding singleton (name, tagline, logo, favicon, tab title).
+    Read publicly by PCStore via /api/store/config and edited from
+    Store Management → Store Settings → Store name."""
+    doc = await db.store_branding.find_one({"_id": "singleton"}, {"_id": 0})
+    base = {k: v for k, v in _DEFAULT_STORE_BRANDING.items() if k != "_id"}
+    if not doc:
+        await db.store_branding.update_one({"_id": "singleton"}, {"$set": base}, upsert=True)
+        return dict(base)
+    return {**base, **doc}
+
+
+def _validate_data_image(value, label):
+    v = (value or "").strip()
+    if v and not v.startswith("data:image/"):
+        raise HTTPException(status_code=422, detail=f"{label} must be a data:image/… URL")
+    return v or None
+
+
+@api_router.get("/store-branding")
+async def get_store_branding():
+    return await _get_store_branding()
+
+
+@api_router.patch("/store-branding")
+async def patch_store_branding(body: StoreBrandingUpdate):
+    """Partial update of the storefront branding. Only keys the admin actually
+    sent are written. Images (logo/favicon) are validated data-URLs or cleared
+    when an empty string is sent explicitly."""
+    payload = body.model_dump(exclude_unset=True)
+    fields: dict = {}
+    for key in ("store_name", "tagline", "tab_title"):
+        if key in payload and payload[key] is not None:
+            fields[key] = payload[key].strip()
+    for key, label in (("logo", "Logo"), ("favicon", "Favicon")):
+        if key in payload:
+            fields[key] = _validate_data_image(payload[key], label)
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.store_branding.update_one({"_id": "singleton"}, {"$set": fields}, upsert=True)
+    return await _get_store_branding()
 
 
 @api_router.get("/store-display-settings")

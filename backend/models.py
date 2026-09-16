@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 
 
-__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate', '_DEFAULT_STORE_DISPLAY', 'StoreDisplaySettingsUpdate', 'VerifyTokenBody', 'ResendVerificationBody', 'VERIFICATION_TOKEN_TTL_HOURS', '_DEFAULT_EMAIL_TEMPLATES', 'VerificationTemplate', 'EmailTemplatesUpdate']
+__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate', '_DEFAULT_STORE_DISPLAY', 'StoreDisplaySettingsUpdate', 'VerifyTokenBody', 'ResendVerificationBody', 'VERIFICATION_TOKEN_TTL_HOURS', '_DEFAULT_EMAIL_TEMPLATES', 'VerificationTemplate', 'EmailTemplatesUpdate', '_DEFAULT_STORE_BRANDING', 'StoreBrandingUpdate']
 
 
 CATEGORIES = ["electronics", "home", "tools", "apparel", "other"]
@@ -245,6 +245,30 @@ class BrandingUpdate(BaseModel):
     name: str = Field(..., min_length=1, max_length=40)
     subtitle: Optional[str] = Field(default="", max_length=40)
     logo: Optional[str] = Field(default=None, max_length=4_500_000)  # ~3 MB base64
+
+
+# --- Storefront (PCStore) branding -----------------------------------------
+# Singleton `store_branding` doc read publicly by PCStore via /api/store/config
+# so brand changes in PCAdmin reflect on the storefront with no code changes.
+_DEFAULT_STORE_BRANDING = {
+    "_id": "singleton",
+    "store_name": "PrettyCheap",                                   # bold header text on PCStore
+    "tagline": "Pretty Prices · Cheap Deals · Every Day",          # subtitle under the name
+    "logo": None,                                                   # data:image/... base64 or null
+    "favicon": None,                                                # data:image/... base64 or null
+    "tab_title": "PrettyCheap",                                     # browser tab <title>
+}
+
+
+class StoreBrandingUpdate(BaseModel):
+    """PATCH body for `/api/store-branding`. All fields optional so partial
+    saves don't clobber untouched fields. Images are data-URLs (base64) or
+    `null` to clear, capped ~3 MB each."""
+    store_name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    tagline: Optional[str] = Field(default=None, max_length=160)
+    tab_title: Optional[str] = Field(default=None, max_length=80)
+    logo: Optional[str] = Field(default=None, max_length=4_500_000)
+    favicon: Optional[str] = Field(default=None, max_length=4_500_000)
 
 
 # AU address generator used by the demo seed + backfill for existing orders without addresses.

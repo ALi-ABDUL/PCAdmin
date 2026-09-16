@@ -580,7 +580,7 @@ async def scraper_schedule_run_now():
 async def clear_scraper_history():
     await db.scraper_schedule.update_one(
         {"id": "singleton"},
-        {"$set": {"run_history": [], "retry_pending": None}},
+        {"$set": {"run_history": [], "retry_pending": None, "failed_retry_pending": None}},
         upsert=True,
     )
     return await get_scraper_schedule()

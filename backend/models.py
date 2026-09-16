@@ -364,8 +364,15 @@ SCRAPER_SCHEDULE_DEFAULTS: dict = {
     # Set when a scheduled run fails and a retry is queued for 15 min later.
     # Shape: {"retry_at": iso, "original_run_id": id, "trigger": "scheduled"|"manual", "schedule_id": id}
     "retry_pending": None,
+    # Item-level auto-retry (2026-06): set after a scheduled run that left some
+    # items failed. The scheduler re-fetches ONLY those items a few minutes later
+    # (instead of the whole batch). Shape:
+    # {"retry_at": iso, "item_ids": [...], "attempt": int, "schedule_id": id}
+    "failed_retry_pending": None,
 }
 RETRY_DELAY_SECONDS = 15 * 60  # 15 minutes
+ITEM_RETRY_DELAY_SECONDS = 3 * 60   # auto-retry failed items ~3 min after a run
+MAX_ITEM_RETRY_ATTEMPTS = 2         # give up after this many auto-retries
 RUN_HISTORY_LIMIT = 20
 FREQ_INTERVAL_SECONDS = {
     "hourly":    60 * 60,

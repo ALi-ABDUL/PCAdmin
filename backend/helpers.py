@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_scrape_one_item', '_retry_scrape_items', '_summarise_results', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_update_schedule_entry', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_link_customer_to_portal_account', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
+__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_scrape_one_item', '_retry_scrape_items', '_summarise_results', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_run_failed_item_retry', '_update_schedule_entry', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_link_customer_to_portal_account', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
 
 
 import bcrypt
@@ -29,7 +29,7 @@ from models import (
     _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, _DAY_LETTERS,
     _SYDNEY, ORDER_STATUSES, _CATEGORY_RULES, _EBAY_BREADCRUMB_MAP,
     PUSH_SETTINGS_DEFAULTS, PUSH_CRITICAL_TYPES, _DEFAULT_PRICING_RULES,
-    SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, FREQ_INTERVAL_SECONDS,
+    SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, ITEM_RETRY_DELAY_SECONDS, MAX_ITEM_RETRY_ATTEMPTS, FREQ_INTERVAL_SECONDS,
     JWT_ALGO, JWT_ACCESS_TTL,
     Category, Customer, Notification, PricingRule, ScrapeRequest,
     PostagePreset, _DEFAULT_POSTAGE_PRESETS, DELIVERY_SETTINGS_DEFAULTS,
@@ -396,15 +396,19 @@ async def _refresh_all_and_record(method: str = "auto", trigger: str = "schedule
             "last_run_stats": summary,
         })
 
-    # Retry orchestration: only for scheduled runs, only on first-attempt failure.
-    retry_pending: Optional[dict] = None
-    if trigger == "scheduled" and status == "failed" and attempt == 1:
-        retry_at = (finished + timedelta(seconds=RETRY_DELAY_SECONDS)).isoformat()
-        retry_pending = {"retry_at": retry_at, "original_run_id": run_id, "trigger": "scheduled", "schedule_id": schedule_id}
-        logger.info(f"scraper schedule: queued retry at {retry_at} for run {run_id}")
-    # Clear retry_pending after a retry attempt (success or dead).
+    # Retry orchestration (2026-06): instead of re-running the WHOLE batch, we
+    # auto-retry ONLY the items that failed, a few minutes later. Applies to
+    # scheduled runs on their first attempt.
+    failed_ids = [r.get("id") for r in (results or []) if not r.get("ok") and r.get("id")]
+    failed_retry_pending: Optional[dict] = None
+    if trigger == "scheduled" and attempt == 1 and failed_ids:
+        retry_at = (finished + timedelta(seconds=ITEM_RETRY_DELAY_SECONDS)).isoformat()
+        failed_retry_pending = {"retry_at": retry_at, "item_ids": failed_ids, "attempt": 1, "schedule_id": schedule_id}
+        logger.info(f"scraper schedule: queued item-retry of {len(failed_ids)} failed item(s) at {retry_at}")
     await db.scraper_schedule.update_one(
-        {"id": "singleton"}, {"$set": {"retry_pending": retry_pending}}, upsert=True,
+        {"id": "singleton"},
+        {"$set": {"failed_retry_pending": failed_retry_pending, "retry_pending": None}},
+        upsert=True,
     )
 
     # Recompute next run (skip on retry — the primary schedule anchor is unchanged).
@@ -441,6 +445,55 @@ async def _update_schedule_entry(schedule_id: str, fields: dict) -> None:
         )
 
 
+async def _run_failed_item_retry(pending: dict) -> None:
+    """Auto-retry ONLY the failed items from a prior run (queued by
+    `_refresh_all_and_record`). Records a compact `item_retry` history row and
+    re-queues the still-failing subset with backoff, up to MAX_ITEM_RETRY_ATTEMPTS."""
+    ids = pending.get("item_ids") or []
+    attempt = int(pending.get("attempt", 1))
+    schedule_id = pending.get("schedule_id")
+    run_id = uuid.uuid4().hex
+    started = datetime.now(timezone.utc)
+    logger.info(f"scraper schedule: item-retry attempt {attempt} of {len(ids)} item(s)")
+    result = await _retry_scrape_items(ids)
+    finished = datetime.now(timezone.utc)
+    lrr = result.get("results") or []
+    id_set = set(ids)
+    remaining = [r.get("id") for r in lrr if not r.get("ok") and r.get("id") in id_set]
+    recovered = len(ids) - len(remaining)
+    if not remaining:
+        status = "success"
+    elif attempt >= MAX_ITEM_RETRY_ATTEMPTS:
+        status = "dead"
+    else:
+        status = "failed"
+    await _push_run_history({
+        "id": run_id,
+        "started_at": started.isoformat(),
+        "finished_at": finished.isoformat(),
+        "duration_seconds": round((finished - started).total_seconds(), 2),
+        "status": status,
+        "attempt": attempt,
+        "trigger": "item_retry",
+        "stats": {"retried": len(ids), "recovered": recovered, "still_failed": len(remaining), "total": len(lrr)},
+        "error": None,
+        "schedule_id": schedule_id,
+    })
+    if remaining and attempt < MAX_ITEM_RETRY_ATTEMPTS:
+        next_pending = {
+            "retry_at": (finished + timedelta(seconds=ITEM_RETRY_DELAY_SECONDS)).isoformat(),
+            "item_ids": remaining,
+            "attempt": attempt + 1,
+            "schedule_id": schedule_id,
+        }
+    else:
+        next_pending = None
+    await db.scraper_schedule.update_one(
+        {"id": "singleton"}, {"$set": {"failed_retry_pending": next_pending}}, upsert=True,
+    )
+    logger.info(f"scraper schedule: item-retry done · recovered={recovered} · remaining={len(remaining)} · status={status}")
+
+
 async def _scheduler_loop():
     """Poll the schedule config every minute and fire refresh-all when due (or retry when queued).
 
@@ -456,7 +509,20 @@ async def _scheduler_loop():
             sched = await _get_scraper_schedule()
             now = datetime.now(timezone.utc)
 
-            # 1) Retry orchestration (unchanged) — fires regardless of schedule enable flag.
+            # 1) Item-level auto-retry — re-fetch only the items that failed in a
+            # prior run, a few minutes later. Fires regardless of enable flag.
+            failed_retry = sched.get("failed_retry_pending")
+            if failed_retry and failed_retry.get("retry_at") and failed_retry.get("item_ids"):
+                try:
+                    due = datetime.fromisoformat(failed_retry["retry_at"]) <= now
+                except Exception:
+                    due = False
+                if due:
+                    await _run_failed_item_retry(failed_retry)
+                    sched = await _get_scraper_schedule()
+
+            # 1b) Legacy full-batch retry (older queued docs only) — kept for
+            # backwards compatibility; new runs no longer queue this.
             retry_pending = sched.get("retry_pending")
             if retry_pending and retry_pending.get("retry_at"):
                 try:

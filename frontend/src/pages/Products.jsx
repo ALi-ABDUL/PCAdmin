@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Activity, BadgeCheck, Ban, ExternalLink, ImageIcon, Loader2, Plus } from "lucide-react";
+import { Activity, BadgeCheck, Ban, ChevronDown, ChevronRight, ExternalLink, ImageIcon, Loader2, Plus } from "lucide-react";
 import { Field, StatBox, SubHero } from "../components/atoms";
 import { BackToTopButton } from "../components/BackToTopButton";
 import { ProductGrid } from "../components/ProductGrid";
+import { PriceHistoryChart } from "../components/modals/ItemModal";
 import { API, proxyImg } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 import { PRODUCT_NAV } from "../lib/nav";
@@ -76,7 +77,8 @@ export function PriceAlertsView({ items, highlightItemId, clearDeepLink, openPro
       return { it, first, last, delta, pct, changes: h.length - 1, alertAt };
     })
     .filter(Boolean)
-    .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
+    // Most recent price change first (falls back to 0 for missing timestamps).
+    .sort((a, b) => (new Date(b.alertAt).getTime() || 0) - (new Date(a.alertAt).getTime() || 0));
 
   const drops = alerts.filter(a => a.delta < 0).length;
   const rises = alerts.filter(a => a.delta > 0).length;
@@ -96,6 +98,7 @@ export function PriceAlertsView({ items, highlightItemId, clearDeepLink, openPro
   // regular navigation isn't sticky.
   const rowRefs = useRef({});
   const [pulseId, setPulseId] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
   useEffect(() => {
     if (!highlightItemId) return;
     // Wait a tick so refs are populated after the alerts render.
@@ -137,14 +140,15 @@ export function PriceAlertsView({ items, highlightItemId, clearDeepLink, openPro
       <div className="card overflow-hidden">
         {alerts.length === 0 && <div className="p-10 text-center text-slate-500">No price changes in the last 5 days. Older alerts are auto-cleared.</div>}
         <div className="overflow-x-auto"><table className="tbl">
-          <thead><tr><th>eBay AU item</th><th>Seller</th><th>First price</th><th>Latest</th><th>Change</th><th>Data points</th><th></th></tr></thead>
+          <thead><tr><th>eBay AU item</th><th>Seller</th><th>First price</th><th>Latest</th><th>Change</th><th>Last change</th><th>Trend</th><th></th></tr></thead>
           <tbody>
-            {alerts.slice(0, 100).map(({ it, first, last, delta, pct, changes }) => {
+            {alerts.slice(0, 100).map(({ it, first, last, delta, pct, changes, alertAt }) => {
               const linkedId = it.linked_product_id;
               const openProduct = () => { if (linkedId) openProductDetail?.(linkedId); };
+              const isExpanded = expandedId === it.id;
               return (
+                <Fragment key={it.id}>
                 <tr
-                  key={it.id}
                   ref={(el) => { if (el) rowRefs.current[it.item_id] = el; }}
                   data-testid="price-alert-row"
                   data-item-id={it.item_id}
@@ -166,11 +170,29 @@ export function PriceAlertsView({ items, highlightItemId, clearDeepLink, openPro
                   <td className={`font-mono font-bold ${delta > 0 ? "text-amber-600" : "text-emerald-600"}`}>
                     {delta > 0 ? "▲" : "▼"} AU ${Math.abs(delta).toFixed(2)} <span className="text-xs">({pct.toFixed(1)}%)</span>
                   </td>
-                  <td className="text-xs text-slate-500">{changes} change{changes===1?"":"s"}</td>
+                  <td className="text-xs text-slate-500 whitespace-nowrap">{alertAt ? fmtDate(alertAt) : "—"}</td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => setExpandedId(isExpanded ? null : it.id)}
+                      className="btn btn-ghost text-xs !py-1 !px-2"
+                      data-testid={`price-alert-chart-toggle-${it.item_id}`}
+                      title={isExpanded ? "Hide price chart" : "Show price history chart"}
+                    >
+                      {isExpanded ? <ChevronDown size={12}/> : <ChevronRight size={12}/>} Chart
+                    </button>
+                  </td>
                   <td onClick={(e) => e.stopPropagation()}>
                     <a href={it.url} target="_blank" rel="noreferrer" className="btn btn-ghost text-xs !py-1 !px-2" data-testid={`price-alert-view-${it.item_id}`}><ExternalLink size={12}/> View</a>
                   </td>
                 </tr>
+                {isExpanded && (
+                  <tr data-testid={`price-alert-chart-${it.item_id}`}>
+                    <td colSpan={8} className="bg-slate-50/60 !p-4">
+                      <div className="max-w-3xl"><PriceHistoryChart history={it.price_history}/></div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               );
             })}
           </tbody>

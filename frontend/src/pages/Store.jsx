@@ -1099,6 +1099,7 @@ export function ScraperScheduleEditor() {
   const results = Array.isArray(sched.last_run_results) ? sched.last_run_results : [];
   const failedResults = results.filter((r) => !r.ok);
   const okResults = results.filter((r) => r.ok);
+  const itemRetry = sched.failed_retry_pending && sched.failed_retry_pending.retry_at ? sched.failed_retry_pending : null;
   const retryPending = sched.retry_pending && sched.retry_pending.retry_at ? sched.retry_pending : null;
 
   const clearHistory = async () => {
@@ -1122,7 +1123,7 @@ export function ScraperScheduleEditor() {
     if (status === "dead")    return <span className="chip" style={{background:"#fee2e2",color:"#991b1b"}}><XCircle size={11}/> Dead · gave up</span>;
     return <span className="chip chip-neutral">{status || "—"}</span>;
   };
-  const triggerLabel = (t) => t === "manual" ? "Manual" : t === "retry" ? "Retry" : "Scheduled";
+  const triggerLabel = (t) => t === "manual" ? "Manual" : t === "retry" ? "Retry" : t === "item_retry" ? "Auto-retry" : "Scheduled";
 
   return (
     <div className="grid gap-4" data-testid="scraper-schedule">
@@ -1273,7 +1274,22 @@ export function ScraperScheduleEditor() {
         </div>
       </div>
 
-      {/* Retry pending banner */}
+      {/* Retry pending banners */}
+      {itemRetry && (
+        <div className="card p-4 border border-amber-200 bg-amber-50" data-testid="sched-item-retry-pending">
+          <div className="flex items-center gap-3">
+            <RefreshCw size={16} className="text-amber-700 animate-spin"/>
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-amber-900">Auto-retry queued for {itemRetry.item_ids?.length || 0} failed item{(itemRetry.item_ids?.length || 0) === 1 ? "" : "s"}</div>
+              <div className="text-xs text-amber-800">
+                The scheduler will re-fetch just the failed items at{" "}
+                <span className="font-mono">{fmtDate(itemRetry.retry_at)}</span>
+                {" "}(attempt {itemRetry.attempt} of {2}). You can also retry now from the breakdown below.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {retryPending && (
         <div className="card p-4 border border-amber-200 bg-amber-50" data-testid="sched-retry-pending">
           <div className="flex items-center gap-3">
@@ -1282,8 +1298,7 @@ export function ScraperScheduleEditor() {
               <div className="text-sm font-semibold text-amber-900">Retry queued</div>
               <div className="text-xs text-amber-800">
                 Last run failed. Auto-retry will fire at{" "}
-                <span className="font-mono">{fmtDate(retryPending.retry_at)}</span>
-                {" "}(15 minutes after the original attempt). If it fails again the run is marked <span className="font-mono">dead</span>.
+                <span className="font-mono">{fmtDate(retryPending.retry_at)}</span>.
               </div>
             </div>
           </div>
@@ -1385,6 +1400,16 @@ export function ScraperScheduleEditor() {
               <tbody>
                 {history.map((r) => {
                   const s = r.stats || {};
+                  const isItemRetry = r.trigger === "item_retry";
+                  // item_retry rows carry {retried, recovered, still_failed, total};
+                  // map them into the shared Refreshed/Failed columns.
+                  const refreshedCell = isItemRetry ? (s.recovered ?? 0) : (s.refreshed ?? 0);
+                  const failedCell = isItemRetry ? (s.still_failed ?? 0) : (s.failed ?? 0);
+                  const detail = r.error
+                    ? r.error
+                    : isItemRetry
+                      ? `retried ${s.retried ?? 0} · recovered ${s.recovered ?? 0} · still failing ${s.still_failed ?? 0}`
+                      : "—";
                   return (
                     <tr key={r.id + "-" + r.attempt} className="border-b last:border-b-0 hover:bg-slate-50" data-testid={`sched-history-row-${r.id}`}>
                       <td className="py-2 pr-3 font-mono text-xs text-slate-700 whitespace-nowrap">{fmtDate(r.started_at)}</td>
@@ -1393,11 +1418,11 @@ export function ScraperScheduleEditor() {
                       </td>
                       <td className="py-2 pr-3">{statusChip(r.status)}</td>
                       <td className="py-2 pr-3 font-mono text-xs">{fmtDuration(r.duration_seconds)}</td>
-                      <td className="py-2 pr-3 font-mono text-xs">{s.refreshed ?? 0}<span className="text-slate-400">/{s.total ?? 0}</span></td>
+                      <td className="py-2 pr-3 font-mono text-xs">{refreshedCell}<span className="text-slate-400">/{s.total ?? 0}</span></td>
                       <td className="py-2 pr-3 font-mono text-xs text-emerald-700">{s.sold_found ?? 0}</td>
-                      <td className="py-2 pr-3 font-mono text-xs text-rose-700">{s.failed ?? 0}</td>
-                      <td className="py-2 pr-3 text-xs text-slate-500 max-w-[280px] truncate" title={r.error || ""}>
-                        {r.error ? r.error : "—"}
+                      <td className="py-2 pr-3 font-mono text-xs text-rose-700">{failedCell}</td>
+                      <td className="py-2 pr-3 text-xs text-slate-500 max-w-[280px] truncate" title={detail}>
+                        {detail}
                       </td>
                     </tr>
                   );

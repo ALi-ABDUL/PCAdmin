@@ -1947,3 +1947,28 @@ Notification Bell deep-links) — zero regressions detected.
 - Verified end-to-end: breakdown renders; per-item Retry and Retry-all both re-scraped
   real eBay items successfully (failed→refreshed) and updated counts live; idempotent
   no-failures case returns cleanly. `last_run_results` added to SCRAPER_SCHEDULE_DEFAULTS.
+
+
+## Jun 2026 — Price Alerts chart + recency sort; Scraper item-level auto-retry
+### Price Alerts (`pages/Products.jsx` → PriceAlertsView)
+- Now sorted **most-recent price change first** (was sorted by % magnitude) via the
+  last `price_history` timestamp. Added a **"Last change"** column showing that time.
+- Each row has an expandable **Chart** toggle that reveals the reusable
+  `PriceHistoryChart` (recharts line chart of the item's price_history). Rendered only
+  when expanded. Test-ids: `price-alert-chart-toggle-{item_id}`, `price-alert-chart-{item_id}`.
+
+### Scraper item-level auto-retry (helpers.py + Store.jsx)
+- Replaced the old whole-batch 15-min retry with **item-level auto-retry**: after a
+  scheduled run that leaves failures, the scheduler re-fetches ONLY the failed items
+  ~3 min later (`ITEM_RETRY_DELAY_SECONDS`), up to `MAX_ITEM_RETRY_ATTEMPTS` (2) then
+  marks the run `dead`. State in new `failed_retry_pending` field
+  `{retry_at, item_ids, attempt, schedule_id}`.
+- New helper `_run_failed_item_retry` (records a compact `item_retry` history row:
+  `{retried, recovered, still_failed, total}` and re-queues the still-failing subset).
+  `_scheduler_loop` processes `failed_retry_pending` first each tick; legacy
+  `retry_pending` kept only for backward-compat.
+- Frontend: new amber "Auto-retry queued for N failed items" banner
+  (`sched-item-retry-pending`); run-history rows show trigger **Auto-retry** and map
+  recovered/still-failed into the Refreshed/Failed columns with a detail summary.
+- Verified: Price Alerts sort+chart via screenshot; auto-retry success/re-queue/dead
+  paths via direct helper calls (recovered→clear, unresolved→attempt2→dead); page renders.

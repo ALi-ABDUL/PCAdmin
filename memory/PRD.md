@@ -2029,3 +2029,16 @@ Notification Bell deep-links) — zero regressions detected.
   `PUT /api/store/config` (was PATCH /store-branding). Verified: PUT persists to
   store_branding, GET reflects instantly, 422 on bad image, and the UI issues the PUT
   (request captured) with success toast. Reset to defaults after test.
+
+
+## Jun 2026 — Fix: order line-items rendered as raw object (React crash)
+- Root cause: 5 orders store `items` as an ARRAY of line-item objects
+  {product_id, title, quantity, unit_price, line_total, image} (multi-item/PCStore
+  orders), but the UI rendered `items` expecting a count/summary.
+- Fixes:
+  • `CustomerDetail.jsx` orders table: `{o.items || 1}` → `{Array.isArray(o.items) ? o.items.length : (o.items || 1)}` (was crashing "Objects are not valid as a React child").
+  • `OrderDetail.jsx`: added a **Line items** card that maps `o.items` to text rows
+    (image, title, "Qty × unit_price", line_total) + an Order total footer, shown when
+    `items` is a non-empty array. The legacy single-product summary is hidden for
+    multi-item orders. `moneyCents` formats AUD as-is (values are dollars).
+- Verified on order ORD-7CBCE61D: line items render, order total shown, console error-free.

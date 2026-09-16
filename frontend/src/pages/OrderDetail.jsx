@@ -61,7 +61,8 @@ export function OrderDetailPage({ orderId, onBack }) {
         </div>
       </div>
 
-      {/* Product summary */}
+      {/* Product summary — single-product orders only (multi-item orders show the line-items list below) */}
+      {!(Array.isArray(o.items) && o.items.length > 0) && (
       <div className="card p-5">
         <div className="flex items-start gap-4 flex-wrap">
           {o.product_images?.[0] || o.image
@@ -83,6 +84,35 @@ export function OrderDetailPage({ orderId, onBack }) {
           </div>
         </div>
       </div>
+      )}
+
+      {/* Line items — multi-item orders carry an `items` array */}
+      {Array.isArray(o.items) && o.items.length > 0 && (
+        <div className="card p-5" data-testid="order-line-items">
+          <div className="font-display font-bold mb-4">Line items ({o.items.length})</div>
+          <div className="grid gap-2">
+            {o.items.map((li, i) => (
+              <div key={li.product_id || i} className="flex items-center gap-3 rounded-xl border hairline p-3" data-testid={`order-line-item-${i}`}>
+                {li.image
+                  ? <img src={proxyImg(li.image)} alt="" className="w-12 h-12 rounded-lg object-cover border hairline shrink-0"/>
+                  : <div className="w-12 h-12 rounded-lg bg-slate-100 grid place-items-center text-slate-300 shrink-0"><ImageIcon size={16}/></div>}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium truncate" title={li.title}>{li.title || "Untitled item"}</div>
+                  <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                    Qty {li.quantity ?? 1} × {moneyCents(li.unit_price)}
+                    {li.product_id ? <span className="text-slate-400"> · #{String(li.product_id).slice(0, 8)}</span> : null}
+                  </div>
+                </div>
+                <div className="font-mono font-bold text-indigo-600 shrink-0">{moneyCents(li.line_total ?? (li.unit_price || 0) * (li.quantity || 1))}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 pt-3 border-t hairline flex items-center justify-between">
+            <span className="text-[10px] text-slate-400 font-mono uppercase tracking-widest">Order total</span>
+            <span className="font-mono font-bold text-2xl text-indigo-600" data-testid="order-line-items-total">{moneyCents(o.total)}</span>
+          </div>
+        </div>
+      )}
 
       {/* Status tracker */}
       <div className="card p-5">

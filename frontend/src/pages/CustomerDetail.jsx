@@ -166,7 +166,7 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted, onMessageSen
                     </button>
                   </td>
                   <td><StatusChip status={o.status}/></td>
-                  <td>{o.items || 1}</td>
+                  <td>{Array.isArray(o.items) ? o.items.length : (o.items || 1)}</td>
                   <td className="font-mono font-bold">{moneyCents(o.total)}</td>
                   <td className="text-xs text-slate-500">{fmtDate(o.created_at)}</td>
                 </tr>

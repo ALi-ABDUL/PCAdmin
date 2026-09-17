@@ -2042,3 +2042,28 @@ Notification Bell deep-links) — zero regressions detected.
     `items` is a non-empty array. The legacy single-product summary is hidden for
     multi-item orders. `moneyCents` formats AUD as-is (values are dollars).
 - Verified on order ORD-7CBCE61D: line items render, order total shown, console error-free.
+
+
+## Jun 2026 — Postcode Delivery Estimate (Shipping Methods)
+- New singleton `postcode_delivery_settings` (models `POSTCODE_DELIVERY_DEFAULTS`,
+  `POSTCODE_DELIVERY_ZONES`, `PostcodeDeliveryUpdate`): {enabled, auto_detect_location,
+  origin_state (default QLD), zones{same_state, adjacent_state, interstate, remote} each
+  {min_days, max_days}} defaults 1-2 / 2-3 / 3-5 / 5-7 business days.
+- Backend endpoints (server.py):
+  • `GET /api/postcode-delivery-settings` / `PATCH /api/postcode-delivery-settings`
+    (zone range validation: max ≥ min; origin_state upper-cased).
+  • `GET /api/postcode-delivery-estimate?postcode=XXXX` — AU postcode→state resolver +
+    zone classifier (remote wins first, then same/adjacent/interstate). Returns
+    {enabled, postcode, state, origin_state, zone, min_days, max_days}. Public — PCStore
+    consumes this on the product modal.
+- helpers.py: `_get_postcode_delivery_settings`, `_au_state_for_postcode`,
+  `_is_remote_postcode`, `_classify_delivery_zone`, `_AU_STATE_ADJACENCY`. Remote =
+  NT (all), WA ≥6640, QLD ≥4700.
+- Frontend: `ShippingMethodsPanel` in Store.jsx replaces the shipping-methods scaffold —
+  a working "Postcode Delivery Estimate" card (Configure expands an inline form with
+  enable toggle, auto-detect toggle, origin-state select, 4 editable zone day-ranges,
+  Save) plus the carrier scaffolds kept read-only below. Added to BACKUP_COLLECTIONS.
+- PCSTORE_INTEGRATION.md §6 documents the estimate API for the PCStore team.
+- Verified: all 4 zones classify correctly via curl (4511→same, 2000→adjacent, 6000→
+  interstate, 0800/4870→remote), PATCH persists, invalid range rejected 400, admin UI
+  form renders (screenshot). PCStore product-modal widget NOT wired here (separate app).

@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 
 
-__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate', '_DEFAULT_STORE_DISPLAY', 'StoreDisplaySettingsUpdate', 'VerifyTokenBody', 'ResendVerificationBody', 'VERIFICATION_TOKEN_TTL_HOURS', '_DEFAULT_EMAIL_TEMPLATES', 'VerificationTemplate', 'EmailTemplatesUpdate', '_DEFAULT_STORE_BRANDING', 'StoreBrandingUpdate']
+__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'POSTCODE_DELIVERY_DEFAULTS', 'POSTCODE_DELIVERY_ZONES', 'PostcodeDeliveryUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate', '_DEFAULT_STORE_DISPLAY', 'StoreDisplaySettingsUpdate', 'VerifyTokenBody', 'ResendVerificationBody', 'VERIFICATION_TOKEN_TTL_HOURS', '_DEFAULT_EMAIL_TEMPLATES', 'VerificationTemplate', 'EmailTemplatesUpdate', '_DEFAULT_STORE_BRANDING', 'StoreBrandingUpdate']
 
 
 CATEGORIES = ["electronics", "home", "tools", "apparel", "other"]
@@ -874,6 +874,35 @@ class DeliverySettingsUpdate(BaseModel):
     default_max_days: Optional[int] = None
     cutoff_enabled: Optional[bool] = None
     cutoff_hhmm: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Postcode Delivery Estimate (Shipping Methods › Postcode Delivery Estimate)
+# Zone-based delivery windows that PCStore reads to show a per-postcode
+# estimate on the product detail modal. Day ranges are in business days.
+# Zones are computed relative to the store's `origin_state`.
+# ---------------------------------------------------------------------------
+POSTCODE_DELIVERY_DEFAULTS: dict = {
+    "id": "singleton",
+    "enabled": True,
+    "auto_detect_location": False,
+    "origin_state": "QLD",  # store home state; zones are computed relative to it
+    "zones": {
+        "same_state":     {"min_days": 1, "max_days": 2},
+        "adjacent_state": {"min_days": 2, "max_days": 3},
+        "interstate":     {"min_days": 3, "max_days": 5},
+        "remote":         {"min_days": 5, "max_days": 7},
+    },
+}
+
+POSTCODE_DELIVERY_ZONES = ["same_state", "adjacent_state", "interstate", "remote"]
+
+
+class PostcodeDeliveryUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    auto_detect_location: Optional[bool] = None
+    origin_state: Optional[str] = None
+    zones: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------

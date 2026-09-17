@@ -241,7 +241,43 @@ same customer email.
 
 ---
 
-## 6. Images
+## 6. Postcode delivery estimate
+
+The storefront product modal can show a live "delivery to your postcode"
+window. Admins configure the zone windows under **Store Management →
+Shipping Methods → Postcode Delivery Estimate**.
+
+**Read the config (optional, for showing the auto-detect prompt / disabled state):**
+
+```
+GET /api/postcode-delivery-settings
+→ { enabled, auto_detect_location, origin_state,
+    zones: { same_state:{min_days,max_days}, adjacent_state:{…},
+             interstate:{…}, remote:{…} } }
+```
+
+**Resolve an estimate for a shopper's postcode (the main call):**
+
+```
+GET /api/postcode-delivery-estimate?postcode=2000
+→ { enabled, postcode:"2000", state:"NSW", origin_state:"QLD",
+    zone:"adjacent_state", min_days:2, max_days:5 }
+```
+
+- The backend maps the AU postcode → state, then classifies the zone
+  (`same_state` / `adjacent_state` / `interstate` / `remote`) relative to
+  the store's `origin_state`. Remote (NT, far WA, outback QLD) always wins.
+- `min_days` / `max_days` are **business days**. Render something like
+  *"Delivered to 2000 (NSW) in 2–5 business days"*.
+- If `enabled` is `false`, hide the estimate.
+- If `auto_detect_location` is `true`, PCStore may request browser
+  geolocation, reverse-geocode to a postcode, and pre-fill the input.
+- A non-AU / unknown postcode returns `400` / `404` — fall back to the
+  store-wide `/api/delivery-settings` window.
+
+---
+
+## 7. Images
 
 Product images come straight from eBay's CDN
 (`https://i.ebayimg.com/…`) and are safe to embed directly in `<img>`
@@ -252,7 +288,7 @@ If eBay ever blocks hotlinking, you can route through the built-in
 
 ---
 
-## 7. Sample React fetch hook
+## 8. Sample React fetch hook
 
 Drop this into PCStore for a copy-paste starting point:
 
@@ -291,7 +327,7 @@ export async function apiPost(path, body, token) {
 
 ---
 
-## 8. Things NOT to call from PCStore
+## 9. Things NOT to call from PCStore
 
 These are admin-only routes protected by the Country Access middleware
 and (in most cases) the RBAC session. Calling them from a public
@@ -310,7 +346,7 @@ PCAdmin owner to add it — don't reach for admin routes.
 
 ---
 
-## 9. Environment variables cheat-sheet
+## 10. Environment variables cheat-sheet
 
 | Var                     | Set in                | Purpose                                              |
 | ----------------------- | --------------------- | ---------------------------------------------------- |
@@ -319,4 +355,4 @@ PCAdmin owner to add it — don't reach for admin routes.
 
 ---
 
-Last updated: 2026-02-27.
+Last updated: 2026-06.

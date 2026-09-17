@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, MapPin, Plus, RefreshCw, Store, Truck, Trash2, X, XCircle, Zap } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, MapPin, Package, Plus, RefreshCw, Store, Trash2, X, XCircle, Zap } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
@@ -1786,11 +1786,6 @@ export function StoreSettingsPanel() {
 
 
 
-const SHIPPING_CARRIERS = [
-  "Australia Post — Parcel Post", "Australia Post — Express", "Sendle",
-  "Aramex", "Local delivery", "Click & collect", "Free shipping threshold",
-];
-
 const POSTCODE_ZONE_META = [
   { key: "same_state",     label: "Same state",     hint: "Delivery within the store's home state" },
   { key: "adjacent_state", label: "Adjacent state", hint: "A neighbouring state or territory" },
@@ -1933,24 +1928,16 @@ function ShippingMethodsPanel() {
         )}
       </div>
 
-      {/* Carrier scaffolds — kept as-is until wired up */}
-      {SHIPPING_CARRIERS.map((f, i) => (
-        <div key={f} className="card p-4 md:p-5 flex items-center justify-between gap-4 group hover:shadow-md transition-shadow">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-lg grid place-items-center shrink-0 bg-indigo-50 text-indigo-500"><Truck size={16}/></div>
-            <div className="min-w-0">
-              <div className="font-medium text-sm truncate">{f}</div>
-              <div className="text-[11px] text-slate-400 font-mono">Not configured</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <label className="flex items-center gap-2 text-[11px] font-mono uppercase text-slate-500 cursor-pointer">
-              <input type="checkbox" defaultChecked={i < 2} className="accent-indigo-600 w-3.5 h-3.5"/>Enabled
-            </label>
-            <button className="btn btn-ghost text-xs !py-1 !px-2">Configure</button>
-          </div>
-        </div>
-      ))}
+      {/* Carrier scaffolds removed — Postage Presets & Delivery Estimate folded in below */}
+      <div className="pt-1">
+        <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2"><Package size={13}/> Postage Presets</div>
+        <PostagePresetsEditor/>
+      </div>
+
+      <div className="pt-1">
+        <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2"><Calendar size={13}/> Delivery Estimate</div>
+        <DeliverySettingsEditor/>
+      </div>
     </div>
   );
 }
@@ -1963,11 +1950,9 @@ export function StoreManagement({ section, setSection }) {
   const sections = {
     "store-settings":      { hint: "Your storefront brand — name, tagline, logo, favicon and tab title (shown live on PCStore) — plus contact and legal info.", fields: [], custom: <StoreSettingsPanel/> },
     "pricing-rules":       { hint: "Tiered profit rules the scraper uses when calculating sell prices for imported items.", fields: [], custom: <PricingRulesEditor/> },
-    "postage-presets":     { hint: "Reusable postage options shown as a dropdown on every product. Free, Standard, or Large Item (postage + insurance).", fields: [], custom: <PostagePresetsEditor/> },
-    "delivery-estimate":   { hint: "Store-wide default delivery window (in business days, weekends skipped). Every product page shows a live 'Estimated delivery between [date] and [date]' that rolls forward each day automatically.", fields: [], custom: <DeliverySettingsEditor/> },
     "scraper-schedule":    { hint: "Automate the eBay re-fetch: add one or more schedules, each with its own start time, frequency and optional stop date — or run one right now.", fields: [], custom: <ScraperScheduleEditor/> },
     "payment-gateway":     { hint: "Enable/disable payment providers and configure their credentials.", fields: ["Stripe","PayPal","Apple Pay","Google Pay","Afterpay","Zip Pay","Bank transfer","Cash on delivery"] },
-    "shipping-methods":    { hint: "Zones, carriers, rates and free-shipping thresholds. Configure the Postcode Delivery Estimate PCStore shows on each product page.", fields: [], custom: <ShippingMethodsPanel/> },
+    "shipping-methods":    { hint: "Everything delivery: the per-postcode estimate PCStore shows on each product, your reusable postage presets, and the store-wide delivery window.", fields: [], custom: <ShippingMethodsPanel/> },
     "tax-rates":           { hint: "GST and location-based tax rules.", fields: ["Australia — GST 10%","New Zealand — GST 15%","B2B / ABN entries"] },
     "checkout-settings":   { hint: "Fine-tune the buyer journey at checkout.", fields: ["Guest checkout","Require phone","Address auto-complete","Order note field","Marketing opt-in","Terms & conditions box"] },
     "email-notifications": { hint: "Admin alerts + transactional emails sent to customers. Configure the Resend API key and per-channel toggles here.", fields: [], custom: <PushNotificationSettings/> },

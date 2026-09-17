@@ -2067,3 +2067,14 @@ Notification Bell deep-links) — zero regressions detected.
 - Verified: all 4 zones classify correctly via curl (4511→same, 2000→adjacent, 6000→
   interstate, 0800/4870→remote), PATCH persists, invalid range rejected 400, admin UI
   form renders (screenshot). PCStore product-modal widget NOT wired here (separate app).
+
+
+## Jun 2026 — Consolidate Shipping & Delivery under Shipping Methods
+- Removed the standalone "Postage Presets" and "Delivery Estimate" sidebar items from
+  STORE_NAV; their editors (`PostagePresetsEditor`, `DeliverySettingsEditor`) now render
+  inside `ShippingMethodsPanel` under labelled subsections, alongside the Postcode
+  Delivery Estimate card.
+- Deleted the 7 carrier scaffolds (Australia Post Parcel/Express, Sendle, Aramex, Local
+  delivery, Click & collect, Free shipping threshold) entirely — SHIPPING_CARRIERS const
+  and its render removed. Orphaned sections-map keys (postage-presets, delivery-estimate)
+  cleaned up. Everything else intact. Frontend-only; verified via screenshot.

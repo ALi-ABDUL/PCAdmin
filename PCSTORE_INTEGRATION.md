@@ -277,7 +277,26 @@ GET /api/postcode-delivery-estimate?postcode=2000
 
 ---
 
-## 7. Images
+## 7. Customer Support "Get Help" link
+
+The storefront customer-account dropdown shows a "Get Help" link. Admins
+configure it under **Store Management → Site Menus → Customer Support**.
+
+```
+GET /api/site-menus
+→ { get_help: { enabled, label, link_type:"url"|"page", url, page },
+    pages: [ { slug, label }, … ] }
+```
+
+- If `get_help.enabled` is `false`, hide the link.
+- Render `get_help.label` (defaults to "Get Help").
+- If `link_type === "url"`, point the link at `get_help.url` (external).
+- If `link_type === "page"`, point it at the store page whose slug is
+  `get_help.page` (match against the `pages` list — e.g. `/faq`, `/contact`).
+
+---
+
+## 8. Images
 
 Product images come straight from eBay's CDN
 (`https://i.ebayimg.com/…`) and are safe to embed directly in `<img>`
@@ -288,7 +307,7 @@ If eBay ever blocks hotlinking, you can route through the built-in
 
 ---
 
-## 8. Sample React fetch hook
+## 9. Sample React fetch hook
 
 Drop this into PCStore for a copy-paste starting point:
 
@@ -327,7 +346,7 @@ export async function apiPost(path, body, token) {
 
 ---
 
-## 9. Things NOT to call from PCStore
+## 10. Things NOT to call from PCStore
 
 These are admin-only routes protected by the Country Access middleware
 and (in most cases) the RBAC session. Calling them from a public
@@ -346,7 +365,7 @@ PCAdmin owner to add it — don't reach for admin routes.
 
 ---
 
-## 10. Environment variables cheat-sheet
+## 11. Environment variables cheat-sheet
 
 | Var                     | Set in                | Purpose                                              |
 | ----------------------- | --------------------- | ---------------------------------------------------- |

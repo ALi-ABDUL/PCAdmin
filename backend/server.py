@@ -37,6 +37,7 @@ from models import (
     _DEFAULT_PRICING_RULES, BulkProductIds,
     PostagePresetBase, PostagePreset, PostagePresetUpdate, POSTAGE_PRESET_KINDS,
     DeliverySettingsUpdate, PostcodeDeliveryUpdate, POSTCODE_DELIVERY_ZONES,
+    SITE_PAGES, SITE_PAGE_SLUGS, SiteMenusUpdate,
     ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
     DisposableDomainsUpdate, DISPOSABLE_EMAIL_ERROR,
@@ -56,7 +57,7 @@ from helpers import (
     _get_credential, _push_channel_status, _notif_is_critical, _send_email, _send_telegram, 
     _format_notification_html, _push_notification, _emit_notification, 
     _emit_price_change_notifications, _auto_archive_if_out_of_stock, calc_pricing, _ensure_pricing_rules_seeded, 
-    _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings, _get_postcode_delivery_settings, _classify_delivery_zone, _delete_categories_if_empty,
+    _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings, _get_postcode_delivery_settings, _classify_delivery_zone, _get_site_menus, _delete_categories_if_empty,
     _ensure_main_admin_seeded, _default_seo,
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
@@ -2116,6 +2117,43 @@ async def postcode_delivery_estimate(postcode: str):
 
 
 # ---------------------------------------------------------------------------
+# Site Menus (Store Management › Site Menus)
+# Powers the storefront "Customer Support" menu. PCStore reads `get_help` to
+# wire up the "Get Help" link in its customer-account dropdown.
+# ---------------------------------------------------------------------------
+@api_router.get("/site-menus")
+async def get_site_menus():
+    data = await _get_site_menus()
+    data["pages"] = SITE_PAGES  # available page destinations for the admin UI
+    return data
+
+
+@api_router.patch("/site-menus")
+async def update_site_menus(body: SiteMenusUpdate):
+    if body.get_help is None:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    existing = await _get_site_menus()
+    gh = {**existing["get_help"]}
+    for k, v in body.get_help.model_dump().items():
+        if v is not None:
+            gh[k] = v
+    if gh.get("link_type") not in ("url", "page"):
+        raise HTTPException(status_code=400, detail="link_type must be 'url' or 'page'")
+    if gh["link_type"] == "page" and gh.get("page") not in SITE_PAGE_SLUGS:
+        raise HTTPException(status_code=400, detail=f"Unknown page: {gh.get('page')}")
+    if gh["link_type"] == "url" and not str(gh.get("url") or "").strip():
+        raise HTTPException(status_code=400, detail="A URL is required when link type is 'url'")
+    await db.site_menus.update_one(
+        {"id": "singleton"},
+        {"$set": {"get_help": gh, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    data = await _get_site_menus()
+    data["pages"] = SITE_PAGES
+    return data
+
+
+# ---------------------------------------------------------------------------
 # Admin Accounts (Admin Settings › Accounts)
 # ---------------------------------------------------------------------------
 
@@ -2234,7 +2272,7 @@ async def login_admin_account(body: dict = Body(...)):
 BACKUP_COLLECTIONS = [
     "products", "orders", "customers", "customer_accounts",
     "categories", "suppliers", "reviews", "messages",
-    "pricing_rules", "postage_presets", "delivery_settings", "postcode_delivery_settings",
+    "pricing_rules", "postage_presets", "delivery_settings", "postcode_delivery_settings", "site_menus",
     "settings", "coupons", "notifications", "transactions",
     "returns", "abandoned_carts",
 ]

@@ -2078,3 +2078,18 @@ Notification Bell deep-links) — zero regressions detected.
   delivery, Click & collect, Free shipping threshold) entirely — SHIPPING_CARRIERS const
   and its render removed. Orphaned sections-map keys (postage-presets, delivery-estimate)
   cleaned up. Everything else intact. Frontend-only; verified via screenshot.
+
+
+## Jun 2026 — Site Menus: Customer Support "Get Help" link
+- New singleton `site_menus` (models `SITE_MENUS_DEFAULTS`, `SITE_PAGES`,
+  `SITE_PAGE_SLUGS`, `GetHelpLinkBody`, `SiteMenusUpdate`): get_help {enabled, label,
+  link_type "url"|"page", url, page}. Default page=faq.
+- Backend: `GET /api/site-menus` (public; returns get_help + available `pages` list) and
+  `PATCH /api/site-menus` (validates link_type, page slug, non-empty URL when url type).
+  helper `_get_site_menus`. Added `site_menus` to BACKUP_COLLECTIONS.
+- Frontend: `SiteMenusPanel` replaces the site-menus scaffold — a working "Customer
+  Support" card (Configure expands: enable toggle, label input, URL/Page destination
+  toggle with url input or page select, Save) plus the other menu scaffolds kept read-only.
+- PCSTORE_INTEGRATION.md §7 documents the get_help API for the account-dropdown link.
+- Verified: curl (GET seeds, PATCH url/page persist, bad page → 400, empty url → 400) and
+  admin UI screenshot. PCStore dropdown wiring is in the separate PCStore app.

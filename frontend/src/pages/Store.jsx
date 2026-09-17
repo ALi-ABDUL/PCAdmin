@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, MapPin, Package, Plus, RefreshCw, Store, Trash2, X, XCircle, Zap } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, MapPin, Menu, Package, Plus, RefreshCw, Store, Trash2, X, XCircle, Zap } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
@@ -1943,6 +1943,137 @@ function ShippingMethodsPanel() {
 }
 
 
+const SITE_MENU_SCAFFOLDS = [
+  "Main navigation", "Footer — Shop", "Footer — Support",
+  "Footer — Legal", "Mobile drawer", "Utility bar",
+];
+
+function SiteMenusPanel() {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/site-menus`);
+    setData(data);
+    setDraft({ ...data.get_help });
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    if (draft.link_type === "url" && !String(draft.url || "").trim())
+      return toast.error("Enter a URL for the Get Help link");
+    setBusy(true);
+    try {
+      const { data: res } = await axios.patch(`${API}/site-menus`, {
+        get_help: {
+          enabled: draft.enabled,
+          label: (draft.label || "Get Help").trim(),
+          link_type: draft.link_type,
+          url: draft.url || "",
+          page: draft.page || "faq",
+        },
+      });
+      setData(res);
+      setDraft({ ...res.get_help });
+      toast.success("Customer Support menu saved");
+    } catch (e) {
+      toast.error("Save failed", { description: e?.response?.data?.detail?.slice(0, 200) || e.message });
+    } finally { setBusy(false); }
+  };
+
+  const gh = data?.get_help;
+  const pages = data?.pages || [];
+  const destLabel = gh
+    ? (gh.link_type === "url"
+        ? (gh.url || "no URL set")
+        : (pages.find(p => p.slug === gh.page)?.label || gh.page))
+    : "…";
+
+  return (
+    <div className="grid gap-3" data-testid="site-menus-panel">
+      {/* Customer Support — the one working, configurable menu */}
+      <div className="card p-4 md:p-5" data-testid="customer-support-card">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-lg grid place-items-center shrink-0 text-white" style={{ background: "linear-gradient(135deg,#4F46E5,#EC4899)" }}><HelpCircle size={16}/></div>
+            <div className="min-w-0">
+              <div className="font-medium text-sm truncate">Customer Support</div>
+              <div className="text-[11px] text-slate-400 font-mono truncate">Get Help → {destLabel}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className={`chip ${gh?.enabled ? "chip-success" : "chip-neutral"} font-mono text-[10px]`} data-testid="customer-support-status-chip">{gh?.enabled ? "ENABLED" : "OFF"}</span>
+            <button className="btn btn-ghost text-xs !py-1 !px-2" onClick={() => setOpen(o => !o)} data-testid="customer-support-configure-btn">{open ? "Close" : "Configure"}</button>
+          </div>
+        </div>
+
+        {open && draft && (
+          <div className="mt-4 pt-4 border-t hairline grid gap-4" data-testid="customer-support-form">
+            <div className="text-xs text-slate-500">PCStore reads this to wire up the "Get Help" link in the customer-account dropdown on the storefront.</div>
+
+            <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer" data-testid="get-help-enabled-toggle">
+              <input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft(d => ({ ...d, enabled: e.target.checked }))} className="accent-indigo-600 mt-1 w-4 h-4"/>
+              <div className="flex-1">
+                <div className="text-sm font-medium">Show the "Get Help" link</div>
+                <div className="text-xs text-slate-500 mt-0.5">Display this link in the storefront customer-account dropdown.</div>
+              </div>
+              <span className={`chip ${draft.enabled ? "chip-success" : "chip-neutral"} font-mono text-[10px] shrink-0`}>{draft.enabled ? "ON" : "OFF"}</span>
+            </label>
+
+            <Field label="Link label">
+              <input className="input w-full px-3 py-2" value={draft.label} onChange={(e) => setDraft(d => ({ ...d, label: e.target.value }))} placeholder="Get Help" data-testid="get-help-label-input"/>
+            </Field>
+
+            <div className="grid gap-2">
+              <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Destination</div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setDraft(d => ({ ...d, link_type: "url" }))} className={`btn text-xs ${draft.link_type === "url" ? "btn-primary" : "btn-ghost"}`} data-testid="get-help-type-url">External URL</button>
+                <button type="button" onClick={() => setDraft(d => ({ ...d, link_type: "page" }))} className={`btn text-xs ${draft.link_type === "page" ? "btn-primary" : "btn-ghost"}`} data-testid="get-help-type-page">Store page</button>
+              </div>
+
+              {draft.link_type === "url" ? (
+                <Field label="URL">
+                  <input className="input w-full px-3 py-2 font-mono text-sm" value={draft.url} onChange={(e) => setDraft(d => ({ ...d, url: e.target.value }))} placeholder="https://help.yourstore.com" data-testid="get-help-url-input"/>
+                </Field>
+              ) : (
+                <Field label="Page">
+                  <select className="input w-full px-3 py-2" value={draft.page} onChange={(e) => setDraft(d => ({ ...d, page: e.target.value }))} data-testid="get-help-page-select">
+                    {pages.map(p => <option key={p.slug} value={p.slug}>{p.label}</option>)}
+                  </select>
+                </Field>
+              )}
+            </div>
+
+            <div className="flex justify-end">
+              <button className="btn btn-primary text-sm" onClick={save} disabled={busy} data-testid="get-help-save-btn">
+                {busy ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>}
+                {busy ? "Saving…" : "Save settings"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Other menus — scaffolds, kept intact */}
+      {SITE_MENU_SCAFFOLDS.map((f) => (
+        <div key={f} className="card p-4 md:p-5 flex items-center justify-between gap-4 group hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-lg grid place-items-center shrink-0 bg-indigo-50 text-indigo-500"><Menu size={16}/></div>
+            <div className="min-w-0">
+              <div className="font-medium text-sm truncate">{f}</div>
+              <div className="text-[11px] text-slate-400 font-mono">Not configured</div>
+            </div>
+          </div>
+          <button className="btn btn-ghost text-xs !py-1 !px-2">Configure</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 export function StoreManagement({ section, setSection }) {
   const meta = STORE_NAV.find((s) => s.id === section) || STORE_NAV[0];
   const Icon = meta.icon;
@@ -1958,7 +2089,7 @@ export function StoreManagement({ section, setSection }) {
     "email-notifications": { hint: "Admin alerts + transactional emails sent to customers. Configure the Resend API key and per-channel toggles here.", fields: [], custom: <PushNotificationSettings/> },
     "email-templates":     { hint: "Customise the account-verification email customers receive when they sign up, plus the PCStore link the activation button points to.", fields: [], custom: <EmailTemplatesEditor/> },
     "popup-messages":      { hint: "On-site banners, promos and pop-ups.", fields: ["Announcement bar","Welcome popup","Exit-intent offer","Free-shipping banner","Cookie consent","Age gate"] },
-    "site-menus":          { hint: "Header, footer and mobile navigation menus.", fields: ["Main navigation","Footer — Shop","Footer — Support","Footer — Legal","Mobile drawer","Utility bar"] },
+    "site-menus":          { hint: "Header, footer and mobile navigation menus. Configure the Customer Support 'Get Help' link PCStore shows in the account dropdown.", fields: [], custom: <SiteMenusPanel/> },
     "pages":               { hint: "Static content pages (About, Contact, Policies…).", fields: ["Home","About us","Contact","Shipping policy","Returns policy","Privacy policy","Terms of service","FAQ"] },
     "locations":           { hint: "Physical stores, warehouses and pickup points.", fields: ["Bellara HQ, QLD","Sydney warehouse, NSW","Melbourne showroom, VIC","Pickup: 3rd party locker"] },
     "seo-settings":        { hint: "Global SEO defaults, sitemaps and social cards.", fields: ["Meta title template","Meta description default","Open Graph image","Twitter card","Sitemap URL","robots.txt"] },

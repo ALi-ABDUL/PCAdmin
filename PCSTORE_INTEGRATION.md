@@ -201,15 +201,22 @@ via `PATCH /api/security/disposable-domains`) return
 
 | method | path                        | body / auth                          | returns                                         |
 | ------ | --------------------------- | ------------------------------------ | ----------------------------------------------- |
-| `POST` | `/api/portal/register`      | `{ email, password, name? }`         | `{ token, customer }`                           |
+| `POST` | `/api/portal/register`      | `{ email, password, name?, first_name?, last_name? }` | `{ token, customer }`              |
 | `POST` | `/api/portal/login`         | `{ email, password }`                | `{ token, customer }`                           |
 | `GET`  | `/api/portal/me`            | Bearer token                          | `{ customer }`                                  |
+| `PATCH`| `/api/portal/me`            | Bearer token, `{ first_name?, last_name?, name?, phone? }` | `{ customer }`             |
 | `GET`  | `/api/portal/orders`        | Bearer token                          | `{ orders: [...], total }` (each row tagged with `can_review` + `already_reviewed`) |
 | `POST` | `/api/portal/reviews`       | Bearer token, `{ product_id, rating, title, body }` | verified review                    |
 | `GET`  | `/api/portal/my-reviews`    | Bearer token                          | reviews written by this customer                 |
 | `POST` | `/api/reviews/{rid}/vote`   | Bearer token, `{ vote: "helpful"\|"not_helpful"\|"clear" }` | vote counts |
 
 Password minimum length is 6 characters.
+
+**Customer name fields:** the profile stores `first_name` and `last_name`
+separately (plus a derived `name`). PCStore should split the shopper's full
+name and send `first_name` / `last_name` to `PATCH /api/portal/me`; the
+backend keeps `name` in sync automatically. `GET /api/portal/me` returns all
+three.
 
 ---
 

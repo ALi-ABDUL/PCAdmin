@@ -1438,6 +1438,11 @@ async def portal_register(body: PortalRegisterBody):
         )
     display_name = (body.name or order.get("customer_name") or email.split("@")[0]).strip()
     _first, _last = _split_name(display_name)
+    # PCStore may also submit first/last explicitly — honour them when present.
+    if (body.first_name or "").strip() or (body.last_name or "").strip():
+        _first = (body.first_name or "").strip() or _first
+        _last = (body.last_name or "").strip() or _last
+        display_name = _compose_name(_first, _last, display_name)
     doc = {
         "id": str(uuid.uuid4()),
         "email": email,

@@ -562,6 +562,8 @@ class PortalRegisterBody(BaseModel):
     email: str
     password: str
     name: Optional[str] = ""
+    first_name: Optional[str] = ""
+    last_name: Optional[str] = ""
 
 
 class PortalLoginBody(BaseModel):

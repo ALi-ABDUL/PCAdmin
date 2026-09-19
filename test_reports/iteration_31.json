@@ -1,0 +1,34 @@
+{
+  "summary": "Verified customer first_name/last_name schema end-to-end: backend CRUD name<->first/last coherence, portal register/verify/login + PATCH /portal/me mirror to customers, and email greeting first-name helper. Frontend UI: separate First/Last inputs on Create Customer + Customer Detail Profile confirmed, combined name renders in list rows and detail header. 6/6 backend pytest cases pass; frontend flow (create -> list -> detail -> edit -> save -> header update) confirmed via Playwright with observed POST/PATCH 200 responses.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [
+    {"screen": "Layout (multiple pages)", "issues": ["Console hydration warning: <span> cannot be a child of <option> — not caused by this feature but observed on every page load. Consider fixing in the select rendering upstream."]}
+  ]},
+  "verified_behaviors": [
+    "POST /api/customers with {first_name,last_name,name:''} -> composes name 'First Last' and persists first_name/last_name.",
+    "POST /api/customers with only {name:'Grace Hopper'} -> auto-splits to first_name='Grace', last_name='Hopper'.",
+    "PATCH /api/customers/{id} with {name:'Ada Byron King'} -> resyncs first_name='Ada', last_name='Byron King'; PATCH with {first_name,last_name} recomposes name.",
+    "Portal full flow: order create -> POST /api/portal/register (activation_link returned, email not configured) -> POST /api/portal/verify -> POST /api/portal/login -> GET /api/portal/me shows first/last (split from register name). PATCH /api/portal/me with {first_name,last_name} updates account and mirrors into customers row (verified via GET /api/customers). PATCH /api/portal/me with only {name:'Some Full Name'} splits correctly.",
+    "helpers._greeting_first_name uses explicit first_name when present, else first token of customer_name; empty -> 'there'. send_customer_order_confirmation composes 'Hi <FirstName>,' via this helper (code path confirmed).",
+    "Frontend Create Customer form exposes data-testid='cus-first-name' and 'cus-last-name'; successful POST /api/customers observed; new row appears in All Customers with combined name (via custName helper).",
+    "Frontend Customer Detail Profile exposes data-testid='customer-first-name-input' and 'customer-last-name-input'; edited to 'EditFirst'/'EditLast', Save triggers PATCH /api/customers/{id} 200, and header re-renders to 'EditFirst EditLast'."
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_customer_first_last_name.py",
+    "/app/test_reports/pytest/pytest_first_last.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PortalRegisterBody (models.py) does NOT accept first_name/last_name — only `name`. Server-side portal_register splits `name` into first/last, so this works, but if PCStore ever submits first/last during registration they would be silently ignored. Consider adding optional first_name/last_name to PortalRegisterBody for symmetry with PortalProfileUpdate.",
+    "Persistent hydration console warning: '<span> cannot be a child of <option>' — appears on all screens (Layout component). Not blocking, but should be cleaned up."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_customer_first_last_name.py (new)"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% (create+list+detail+save flow)"},
+  "test_credentials": "qa@prettycheap.com.au / QaTest123!",
+  "seed_data_creation": "Test-created customers (TEST_fl_* and one UI-created 'AliceQA uifl78618') were deleted at the end of each run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend pytest at /app/backend/tests/test_customer_first_last_name.py can be re-run. Portal register accepts only {email,password,name}, not first/last — encoded that assumption in the test. Products list endpoint response wrapper: unwrap items/products or raw list. Order creation uses OrderCreate schema {product_id, quantity, ...} — not items[]."
+}

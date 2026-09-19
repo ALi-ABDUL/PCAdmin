@@ -2093,3 +2093,25 @@ Notification Bell deep-links) — zero regressions detected.
 - PCSTORE_INTEGRATION.md §7 documents the get_help API for the account-dropdown link.
 - Verified: curl (GET seeds, PATCH url/page persist, bad page → 400, empty url → 400) and
   admin UI screenshot. PCStore dropdown wiring is in the separate PCStore app.
+
+
+## Jun 2026 — Customer first_name / last_name split
+- Schema: CustomerBase now has `first_name` + `last_name` (plus legacy derived `name`).
+  Added `PortalProfileUpdate` model; PortalRegisterBody accepts optional first/last.
+  CustomerUpdate accepts first/last.
+- Backend keeps name <-> first/last coherent everywhere: create_customer, update_customer,
+  _rebuild_customers_from_orders (splits customer_name, backfills legacy rows),
+  _link_customer_to_portal_account, portal_register. Helpers `_split_name`,
+  `_compose_name`, `_greeting_first_name` in helpers.py.
+- NEW endpoint `PATCH /api/portal/me` (portal_update_me): customer self-service profile
+  update — splits/saves first/last, resyncs name, mirrors to the customers row. GET/verify
+  responses now include first/last.
+- Emails: order confirmation / status / cancellation / welcome greet with first name via
+  `_greeting_first_name` (was full name).
+- Frontend: Create Customer + Customer Detail Profile show separate First/Last inputs
+  (testids cus-first-name, cus-last-name, customer-first-name-input, customer-last-name-input);
+  `custName(c)` helper renders combined name in lists/headers.
+- Tested: testing_agent iteration_31 — 6/6 backend pytest + full frontend flow PASS.
+  Test file: /app/backend/tests/test_customer_first_last_name.py.
+- Note (pre-existing, unrelated): console hydration warning "<span> cannot be a child of
+  <option>" appears app-wide — not introduced by this change.

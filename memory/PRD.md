@@ -2185,3 +2185,16 @@ Notification Bell deep-links) — zero regressions detected.
   specifics from `p` (those cards save independently). Verified via screenshots: preview
   reflects unsaved title, and Publish committed unsaved title + flipped Hidden→Visible.
 - Frontend-only; no backend change (uses existing PATCH /api/products/{id}).
+
+
+## Jun 2026 — Delivery estimate inside product preview
+- StorePreviewLightbox now shows the postcode delivery estimate (mirrors PCStore) below
+  Add-to-cart: a postcode input that calls GET /api/postcode-delivery-estimate on 4 digits
+  and renders "Delivered to {postcode} ({state}) in {min}–{max} business days".
+- Respects GET /api/postcode-delivery-settings: widget only shows when enabled; when
+  disabled, shows a muted admin note (data-testid preview-delivery-disabled). Mentions
+  auto-detect when the setting is on. Testids: preview-delivery, preview-postcode-input,
+  preview-delivery-result, preview-delivery-error.
+- Frontend-only; uses existing endpoints. Verified via screenshot (QLD origin: 2000→NSW
+  adjacent = 2–3 days). Note: restored store postcode settings to enabled/origin QLD
+  (a prior test had left them disabled/SA).

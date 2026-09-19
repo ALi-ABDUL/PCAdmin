@@ -1,0 +1,26 @@
+{
+  "summary": "Tested variant-aware pricing for /api/cart (guest+JWT) and /api/orders (single + multi-line). All 7 pytest cases pass — variant_price correctly overrides base price, subtotals/line_totals are correct, cart replacement semantics work, guest & JWT carts are keyed independently (sess: vs cust:), and 400/404 edge cases behave. Multi-line orders set top-level variant fields to null while per-line variant fields are recorded on order.items. Frontend OrderDetail.jsx renders a chip with data-testid=order-line-item-variant-{i} when variant_type/variant_option present (verified by code inspection).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_variant_cart_and_orders.py",
+    "/app/test_reports/pytest/variant_cart_orders.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py line 3005: _cart_key raises HTTPException(400) inside a plain helper — works but couples the helper to HTTP; acceptable given single call sites.",
+    "Cart line stores unit_price (rounded) but line_total is computed from unrounded unit_price*qty then rounded — matches order line behaviour and is correct for money math within 2dp.",
+    "OrderCreate: no explicit validation that variant_price >= 0 or quantity >= 1 on line items; trusting inputs. Low priority — same behaviour existed before.",
+    "server.py: file is ~4800 lines; still recommended (per prior reviews) to split into routers per domain (orders, cart, portal, scraper, etc.)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_variant_cart_and_orders.py (new)"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "code-review only (not runtime tested)"},
+  "test_credentials": "Not needed for these public storefront endpoints. JWT test creates its own customer via order+register+verify flow using activation_link.",
+  "seed_data_creation": "Created ephemeral customer accounts qa+cartjwt_*@example.com and single ephemeral order (deleted in fixture teardown). Any residual carts (guest session_ids & cust:qa+cartjwt_*) contain no items (emptied at end of tests). Order stock decrements were done with quantity=1 on the highest-stock products (top 3 by stock). Ephemeral orders created by tests were DELETE'd in test cleanup.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend variant cart/orders feature verified end-to-end. If retesting, run: pytest backend/tests/test_variant_cart_and_orders.py -o addopts= -v. The pytest.ini enables xdist by default; the -o addopts= flag disables it to avoid worker collection issues when combined with single-file runs. Fresh customer accounts are minted per run so no state carries over.",
+  "rca of the issue": "N/A — no issues found."
+}

@@ -2148,3 +2148,24 @@ Notification Bell deep-links) — zero regressions detected.
   so PCStore can grey out sold-out options.
 - Verified: PATCH persists both keys, storefront GET reflects them, and UI toggle→save→view
   round-trip confirmed via screenshot.
+
+
+## Jun 2026 — Variant-aware cart & orders
+- Models: OrderCreate now has optional product_id + variant_type/variant_option/variant_price
+  + optional multi-line items[] (OrderLineInput). New CartLineInput / CartUpdate.
+- NEW cart (server.py): `GET /api/cart` + `PATCH /api/cart` (replace-whole-cart). Identity =
+  customer JWT when a valid Bearer token is present, else guest `session_id` (helper
+  `_optional_customer_email` never raises; `_cart_key` -> cust:{email} | sess:{id}, 400 if
+  neither). Each line's unit_price/line_total uses variant_price when supplied (else base
+  price); returns subtotal. Stored in `carts` collection.
+- POST /api/orders refactored (helper `_build_order_line`): accepts single-product (with
+  variant fields) OR multi-line items[]. total/cost/profit summed across lines; every
+  order.items[] line records variant_type/variant_option/variant_price + unit_price +
+  line_total. Top-level variant fields set for single-line, null for multi-line. 400 if no
+  product_id/items, 404 if a product is missing. Stock decremented + low-stock/auto-archive
+  per line.
+- Frontend OrderDetail.jsx: line items show a variant chip (data-testid order-line-item-variant-N).
+- PCSTORE_INTEGRATION.md §5 rewritten with cart + variant order bodies.
+- Tested: testing_agent iteration_32 — 7/7 backend pytest PASS (guest+JWT carts, replace
+  semantics, single+multi variant orders, 400/404 edges). Test file:
+  /app/backend/tests/test_variant_cart_and_orders.py.

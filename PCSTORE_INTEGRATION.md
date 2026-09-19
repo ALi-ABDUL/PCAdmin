@@ -220,31 +220,59 @@ three.
 
 ---
 
-## 5. Placing orders
+## 5. Cart & placing orders
 
-PCStore's checkout should `POST /api/orders` with:
+### Cart (variant-aware)
 
-```json
+The cart is keyed by the logged-in customer when a Bearer token is sent,
+otherwise by a guest `session_id` you generate. `PATCH /api/cart` **replaces
+the whole cart** with the `items` you send; each line carries the chosen
+variant so the cart charges the variant price, not the base price.
+
+```
+PATCH /api/cart            (Bearer token optional)
 {
-  "customer_name": "Ada Lovelace",
-  "customer_email": "ada@example.com",
-  "product_id": "9c937958-…",
-  "quantity": 1,
-  "shipping_address": {
-    "line1": "1 George St",
-    "suburb": "Sydney",
-    "state": "NSW",
-    "postcode": "2000",
-    "country": "AU"
-  },
-  "total": 320.0,
-  "status": "paid"
+  "session_id": "guest-abc",           // required for guests; omit when logged in
+  "items": [
+    { "product_id": "9c937958-…", "quantity": 2,
+      "variant_type": "Colour", "variant_option": "Black", "variant_price": 49.5 }
+  ]
 }
+→ { key, session_id, customer_email, items: [ { …, unit_price, line_total } ], subtotal }
+
+GET /api/cart?session_id=guest-abc      (or send the Bearer token, no session_id)
 ```
 
-Server assigns `id`, `reference` (like `AB12-CD34`), and `created_at`.
-The order is then discoverable via `GET /api/portal/orders` for the
-same customer email.
+`variant_price` overrides the base product price for that line. Omit the
+variant fields for products without variants.
+
+### Placing orders
+
+`POST /api/orders` — single product **or** a whole cart in one call. Variant
+fields are recorded on every order line item so the correct amount is charged
+and shown in order history.
+
+```json
+// single product with a chosen variant
+{ "customer_name": "Ada", "customer_email": "ada@example.com",
+  "product_id": "9c937958-…", "quantity": 1,
+  "variant_type": "Colour", "variant_option": "Black", "variant_price": 49.5,
+  "status": "paid" }
+
+// OR a multi-line cart checkout
+{ "customer_name": "Ada", "customer_email": "ada@example.com", "status": "paid",
+  "items": [
+    { "product_id": "9c937958-…", "quantity": 1, "variant_type": "Size",
+      "variant_option": "L", "variant_price": 59.0 },
+    { "product_id": "aa11bb22-…", "quantity": 3 }
+  ] }
+```
+
+The server computes `total` from the (variant) line prices — don't rely on a
+client-sent total. Each `order.items[]` entry includes `variant_type`,
+`variant_option`, `variant_price`, `unit_price` and `line_total`. Server
+assigns `id`, `reference` (like `AB12-CD34`), and `created_at`. Orders are
+discoverable via `GET /api/portal/orders` for the same customer email.
 
 ---
 

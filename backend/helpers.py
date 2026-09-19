@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_scrape_one_item', '_retry_scrape_items', '_summarise_results', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_auto_retry_cfg', '_run_failed_item_retry', '_update_schedule_entry', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_link_customer_to_portal_account', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_get_postcode_delivery_settings', '_au_state_for_postcode', '_classify_delivery_zone', '_get_site_menus', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
+__all__ = ['_rand_au_address', '_slug', '_split_name', '_compose_name', '_greeting_first_name', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_refresh_all_items', '_scrape_one_item', '_retry_scrape_items', '_summarise_results', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_auto_retry_cfg', '_run_failed_item_retry', '_update_schedule_entry', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_link_customer_to_portal_account', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_get_postcode_delivery_settings', '_au_state_for_postcode', '_classify_delivery_zone', '_get_site_menus', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
 
 
 import bcrypt
@@ -55,6 +55,30 @@ def _rand_au_address(rng: random.Random, full_name: str) -> dict:
 
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-") or "cat"
+
+
+def _split_name(full: str) -> tuple[str, str]:
+    """Split a combined display name into (first_name, last_name)."""
+    parts = (full or "").strip().split()
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], " ".join(parts[1:])
+
+
+def _compose_name(first: str, last: str, fallback: str = "") -> str:
+    """Join first/last into a display name, falling back when both are empty."""
+    combined = f"{(first or '').strip()} {(last or '').strip()}".strip()
+    return combined or (fallback or "").strip()
+
+
+def _greeting_first_name(record: dict, name_key: str = "customer_name") -> str:
+    """First name for an email greeting, from explicit first_name or a split name."""
+    fn = (record.get("first_name") or "").strip()
+    if fn:
+        return fn
+    return _split_name(record.get(name_key) or "")[0] or "there"
 
 
 def _default_seo(title: str, description: str, category: Optional[str] = None) -> dict:
@@ -854,17 +878,22 @@ async def _rebuild_customers_from_orders():
         e["total_spend"] += float(o.get("total") or 0)
     n = 0
     for key, agg in by_email.items():
+        first, last = _split_name(agg["name"])
         existing = await db.customers.find_one({"email": agg["email"]}, {"_id": 0}) if agg["email"] else None
         if not existing:
             c = Customer(
-                name=agg["name"], email=agg["email"],
+                name=agg["name"], first_name=first, last_name=last, email=agg["email"],
                 status="active", type="registered",
                 orders_count=agg["orders_count"], total_spend=round(agg["total_spend"], 2),
             )
             await db.customers.insert_one(c.model_dump())
             n += 1
         else:
-            await db.customers.update_one({"id": existing["id"]}, {"$set": {"orders_count": agg["orders_count"], "total_spend": round(agg["total_spend"], 2), "updated_at": datetime.now(timezone.utc).isoformat()}})
+            upd = {"orders_count": agg["orders_count"], "total_spend": round(agg["total_spend"], 2), "updated_at": datetime.now(timezone.utc).isoformat()}
+            # Backfill first/last on legacy rows that only carry a combined name.
+            if not existing.get("first_name") and not existing.get("last_name"):
+                upd["first_name"], upd["last_name"] = _split_name(existing.get("name") or agg["name"])
+            await db.customers.update_one({"id": existing["id"]}, {"$set": upd})
     return n
 
 async def _link_customer_to_portal_account(email: str, account: dict, verified: bool = False) -> None:
@@ -890,6 +919,13 @@ async def _link_customer_to_portal_account(email: str, account: dict, verified: 
         portal_fields["portal_verified_at"] = now
     existing = await db.customers.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}, {"_id": 0})
     if existing:
+        # Backfill first/last from the account (or a split name) on legacy rows.
+        if not existing.get("first_name") and not existing.get("last_name"):
+            f = account.get("first_name") or _split_name(existing.get("name") or account.get("name") or "")[0]
+            l = account.get("last_name") or _split_name(existing.get("name") or account.get("name") or "")[1]
+            if f or l:
+                portal_fields["first_name"] = f
+                portal_fields["last_name"] = l
         await db.customers.update_one({"id": existing["id"]}, {"$set": portal_fields})
         return
     # No customer row yet — aggregate this email's orders for accurate stats.
@@ -899,8 +935,12 @@ async def _link_customer_to_portal_account(email: str, account: dict, verified: 
     ]).to_list(1)
     orders_count = int(agg[0]["count"]) if agg else 0
     total_spend = round(float(agg[0]["spend"]), 2) if agg else 0.0
+    _first = account.get("first_name") or _split_name(account.get("name") or "")[0]
+    _last = account.get("last_name") or _split_name(account.get("name") or "")[1]
     cust = Customer(
         name=account.get("name") or email.split("@")[0],
+        first_name=_first,
+        last_name=_last,
         email=email,
         status="active",
         type="registered",
@@ -1219,7 +1259,7 @@ async def send_customer_order_confirmation(order: dict) -> str:
     subject = f"Order confirmed · #{(order.get('reference') or order.get('id') or '')[:16]}"
     html = _customer_email_html(
         title="Thanks — we've received your order",
-        intro=f"Hi {order.get('customer_name') or 'there'}, thank you for shopping with us. "
+        intro=f"Hi {_greeting_first_name(order)}, thank you for shopping with us. "
               "We'll email you again as soon as it ships.",
         rows=[
             ("Order",     order.get("reference") or (order.get("id") or "")[:8]),
@@ -1242,7 +1282,7 @@ async def send_customer_order_status_update(order: dict, old_status: str, new_st
     subject = f"Your order {friendly} · #{(order.get('reference') or order.get('id') or '')[:16]}"
     html = _customer_email_html(
         title=f"Your order {friendly}",
-        intro=f"Hi {order.get('customer_name') or 'there'}, an update on your recent order.",
+        intro=f"Hi {_greeting_first_name(order)}, an update on your recent order.",
         rows=[
             ("Order",     order.get("reference") or (order.get("id") or "")[:8]),
             ("Item",      order.get("product_title") or "—"),
@@ -1258,7 +1298,7 @@ async def send_customer_order_cancellation(order: dict) -> str:
     subject = f"Order cancelled · #{(order.get('reference') or order.get('id') or '')[:16]}"
     html = _customer_email_html(
         title="Your order has been cancelled",
-        intro=f"Hi {order.get('customer_name') or 'there'}, we've cancelled your recent order. "
+        intro=f"Hi {_greeting_first_name(order)}, we've cancelled your recent order. "
               "Any charge will be refunded to your original payment method within a few business days.",
         rows=[
             ("Order",     order.get("reference") or (order.get("id") or "")[:8]),
@@ -1272,7 +1312,7 @@ async def send_customer_order_cancellation(order: dict) -> str:
 
 async def send_customer_welcome_email(customer: dict) -> str:
     to = customer.get("email") or ""
-    name = customer.get("name") or customer.get("full_name") or "there"
+    name = _greeting_first_name(customer, name_key="name")
     subject = "Welcome to PCAdmin 🎉"
     html = _customer_email_html(
         title=f"Welcome, {name}!",

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { BadgeCheck, ChevronLeft, Circle, Loader2, Mail, MessageSquare, PackagePlus, Phone, Reply, ShoppingBag, Trash2 } from "lucide-react";
 import { Field, StatusChip } from "../components/atoms";
 import { MessageCustomerDialog } from "../components/MessageCustomerDialog";
-import { CustomerAvatar } from "./Customers";
+import { CustomerAvatar, custName } from "./Customers";
 import { API, proxyImg } from "../lib/api";
 import { fmtDate, fmtLongDateTime, moneyCents } from "../lib/format";
 
@@ -27,7 +27,8 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted, onMessageSen
       setThread(data.thread || []);
       setTimeline(data.timeline || []);
       setF({
-        name: data.customer.name || "",
+        first_name: data.customer.first_name || "",
+        last_name: data.customer.last_name || "",
         email: data.customer.email || "",
         phone: data.customer.phone || "",
         status: data.customer.status || "active",
@@ -55,7 +56,7 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted, onMessageSen
   };
 
   const del = async () => {
-    if (!window.confirm(`Delete ${c.name}? This can't be undone.`)) return;
+    if (!window.confirm(`Delete ${custName(c)}? This can't be undone.`)) return;
     try { await axios.delete(`${API}/customers/${customerId}`); toast.success("Deleted"); onDeleted?.(); }
     catch { toast.error("Delete failed"); }
   };
@@ -95,7 +96,7 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted, onMessageSen
       <div className="card p-5 flex items-center gap-4 flex-wrap" data-testid="customer-detail-identity">
         <CustomerAvatar c={c} size={56}/>
         <div className="min-w-0 flex-1">
-          <div className="text-xl font-display font-bold truncate">{c.name}</div>
+          <div className="text-xl font-display font-bold truncate">{custName(c)}</div>
           <div className="text-xs text-slate-500 font-mono truncate flex items-center gap-3 flex-wrap mt-0.5">
             {c.email && <span className="inline-flex items-center gap-1"><Mail size={11}/> {c.email}</span>}
             {c.phone && <span className="inline-flex items-center gap-1"><Phone size={11}/> {c.phone}</span>}
@@ -129,7 +130,8 @@ export function CustomerDetailPage({ customerId, onBack, onDeleted, onMessageSen
       <div className="card p-5">
         <div className="font-display font-bold mb-3">Profile</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Field label="Name"><input className="input w-full px-3 py-2" value={f.name} onChange={(e) => setField("name", e.target.value)} data-testid="customer-name-input"/></Field>
+          <Field label="First name"><input className="input w-full px-3 py-2" value={f.first_name} onChange={(e) => setField("first_name", e.target.value)} data-testid="customer-first-name-input"/></Field>
+          <Field label="Last name"><input className="input w-full px-3 py-2" value={f.last_name} onChange={(e) => setField("last_name", e.target.value)} data-testid="customer-last-name-input"/></Field>
           <Field label="Email"><input className="input w-full px-3 py-2 font-mono text-sm" value={f.email} onChange={(e) => setField("email", e.target.value)} data-testid="customer-email-input"/></Field>
           <Field label="Phone"><input className="input w-full px-3 py-2 font-mono text-sm" value={f.phone} onChange={(e) => setField("phone", e.target.value)} data-testid="customer-phone-input"/></Field>
           <Field label="Status">

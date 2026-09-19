@@ -29,7 +29,7 @@ from models import (
     OrderCreate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, ItemBulkAction, 
     RefreshAllRequest, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
     FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ScheduleEntryBody, ScraperSchedulesReplaceBody, AutoRetryConfigBody, ORDER_STATUSES, ReturnRequest, 
-    AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate,
+    AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate, PortalProfileUpdate,
     CouponBase, Coupon, ReviewBase, Review, JWT_ALGO, JWT_ACCESS_TTL, PortalRegisterBody, 
     PortalLoginBody, PortalReviewBody, PortalReviewVoteBody, MessageBase, Message, StockMove, 
     _CATEGORY_RULES, _EBAY_BREADCRUMB_MAP, Notification, PUSH_SETTINGS_DEFAULTS, 
@@ -47,7 +47,7 @@ from models import (
 )
 from countries import COUNTRIES, COUNTRY_CODES
 from helpers import (
-    _rand_au_address, _slug, _product_code_base, _generate_unique_product_code, 
+    _rand_au_address, _slug, _split_name, _compose_name, _product_code_base, _generate_unique_product_code, 
     _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _refresh_all_items, _retry_scrape_items, 
     _get_scraper_schedule, _compute_next_run, _compute_next_run_for, _classify_run, _push_run_history, 
     _refresh_all_and_record, _update_schedule_entry, _scheduler_loop, _ensure_categories_seeded, _ensure_ebay_category, _now_iso, 
@@ -1257,7 +1257,13 @@ async def message_customer(cid: str, body: dict):
 
 @api_router.post("/customers", response_model=Customer)
 async def create_customer(body: CustomerBase):
-    c = Customer(**body.model_dump())
+    data = body.model_dump()
+    # Keep name / first_name / last_name coherent regardless of what was sent.
+    if (data.get("first_name") or data.get("last_name")) and not data.get("name"):
+        data["name"] = _compose_name(data.get("first_name"), data.get("last_name"))
+    if not (data.get("first_name") or data.get("last_name")):
+        data["first_name"], data["last_name"] = _split_name(data.get("name") or "")
+    c = Customer(**data)
     await db.customers.insert_one(c.model_dump())
     # Re-creating a customer clears any prior delete tombstone for their identity.
     key = (c.email or c.name or "").strip().lower()
@@ -1278,9 +1284,17 @@ async def create_customer(body: CustomerBase):
 async def update_customer(cid: str, body: CustomerUpdate):
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     if not fields: raise HTTPException(status_code=400, detail="No fields")
+    # Keep name <-> first/last coherent when either side is edited.
+    existing = await db.customers.find_one({"id": cid}, {"_id": 0})
+    if existing is None: raise HTTPException(status_code=404, detail="Not found")
+    if "first_name" in fields or "last_name" in fields:
+        fn = fields.get("first_name", existing.get("first_name") or "")
+        ln = fields.get("last_name", existing.get("last_name") or "")
+        fields["name"] = _compose_name(fn, ln, existing.get("name") or "")
+    elif "name" in fields:
+        fields["first_name"], fields["last_name"] = _split_name(fields["name"])
     fields["updated_at"] = datetime.now(timezone.utc).isoformat()
-    r = await db.customers.update_one({"id": cid}, {"$set": fields})
-    if r.matched_count == 0: raise HTTPException(status_code=404, detail="Not found")
+    await db.customers.update_one({"id": cid}, {"$set": fields})
     return await db.customers.find_one({"id": cid}, {"_id": 0})
 
 
@@ -1423,10 +1437,13 @@ async def portal_register(body: PortalRegisterBody):
             detail="We couldn't find any orders for this email. Only customers with existing orders can register.",
         )
     display_name = (body.name or order.get("customer_name") or email.split("@")[0]).strip()
+    _first, _last = _split_name(display_name)
     doc = {
         "id": str(uuid.uuid4()),
         "email": email,
         "name": display_name,
+        "first_name": _first,
+        "last_name": _last,
         "password_hash": _hash_password(body.password),
         "verified": False,
         "verified_at": None,
@@ -1472,7 +1489,7 @@ async def portal_verify(body: VerifyTokenBody):
     await _link_customer_to_portal_account(email, acct, verified=True)
     await send_customer_welcome_email(acct)
     token = _issue_token(email)
-    return {"verified": True, "token": token, "customer": {"id": acct["id"], "email": email, "name": acct.get("name", "")}}
+    return {"verified": True, "token": token, "customer": {"id": acct["id"], "email": email, "name": acct.get("name", ""), "first_name": acct.get("first_name", ""), "last_name": acct.get("last_name", "")}}
 
 
 @api_router.get("/portal/verify")
@@ -1520,6 +1537,39 @@ async def portal_login(body: PortalLoginBody):
 @api_router.get("/portal/me")
 async def portal_me(current: dict = Depends(get_current_customer)):
     return {"customer": current}
+
+
+@api_router.patch("/portal/me")
+async def portal_update_me(body: PortalProfileUpdate, current: dict = Depends(get_current_customer)):
+    """Customer self-service profile update. PCStore splits the full name and
+    saves first_name/last_name here; we keep the legacy `name` in sync and
+    mirror the change onto the PCAdmin customers row."""
+    email = current["email"]
+    updates: dict = {}
+    if body.first_name is not None or body.last_name is not None:
+        fn = (body.first_name if body.first_name is not None else current.get("first_name") or "").strip()
+        ln = (body.last_name if body.last_name is not None else current.get("last_name") or "").strip()
+        updates["first_name"] = fn
+        updates["last_name"] = ln
+        updates["name"] = _compose_name(fn, ln, current.get("name") or email.split("@")[0])
+    elif body.name is not None:
+        full = body.name.strip()
+        fn, ln = _split_name(full)
+        updates["first_name"] = fn
+        updates["last_name"] = ln
+        updates["name"] = full or email.split("@")[0]
+    if body.phone is not None:
+        updates["phone"] = body.phone.strip()
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.customer_accounts.update_one({"email": email}, {"$set": updates})
+    await db.customers.update_one(
+        {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+        {"$set": updates},
+    )
+    acct = await db.customer_accounts.find_one({"email": email}, {"_id": 0, "password_hash": 0})
+    return {"customer": acct}
 
 
 @api_router.get("/portal/orders")

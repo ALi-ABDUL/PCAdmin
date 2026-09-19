@@ -91,26 +91,32 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
       {section === "reviews"    && <ReviewsView reviews={reviews} reload={() => axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews))}/>}
       {section === "orders"     && <CustomerOrdersView/>}
       {section === "wishlist"   && <ScaffoldList label="Wishlist items" hint="Customers can save products they love to buy later." rows={["Empty for now — hook up when storefront ships."]}/>}
-      {section === "addresses"  && <ScaffoldList label="Saved addresses" hint="Shipping & billing addresses per customer." rows={list.slice(0,5).map(c => `${c.name} · ${[c.city, c.state, c.country].filter(Boolean).join(", ") || "no address"}`)}/>}
+      {section === "addresses"  && <ScaffoldList label="Saved addresses" hint="Shipping & billing addresses per customer." rows={list.slice(0,5).map(c => `${custName(c)} · ${[c.city, c.state, c.country].filter(Boolean).join(", ") || "no address"}`)}/>}
       {section === "activity"   && <CustomerActivity list={list}/>}
       {section === "notes"      && <NotesView list={list} onChanged={load}/>}
     </div>
   );
 }
 
+export function custName(c) {
+  const combined = [c?.first_name, c?.last_name].filter(Boolean).join(" ").trim();
+  return combined || c?.name || "";
+}
+
 export function CustomerAvatar({ c, size = 36 }) {
-  const initials = (c.name || "").split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
+  const initials = custName(c).split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
   return <div className="rounded-full grid place-items-center text-white font-bold shrink-0" style={{ width: size, height: size, background: "linear-gradient(135deg,#4F46E5,#EC4899)", fontSize: size * 0.34 }}>{initials || "C"}</div>;
 }
 
 export function CreateCustomer({ onCreated }) {
-  const empty = { name:"", email:"", phone:"", country:"Australia", state:"", city:"", address:"", postcode:"", status:"active", type:"registered", tags:[], notes:"" };
+  const empty = { first_name:"", last_name:"", email:"", phone:"", country:"Australia", state:"", city:"", address:"", postcode:"", status:"active", type:"registered", tags:[], notes:"" };
   const [f, setF] = useState(empty); const [saving, setSaving] = useState(false);
   const save = async () => {
-    if (!f.name.trim()) return toast.error("Name is required");
+    if (!f.first_name.trim()) return toast.error("First name is required");
+    const name = `${f.first_name.trim()} ${f.last_name.trim()}`.trim();
     setSaving(true);
     try {
-      await axios.post(`${API}/customers`, { ...f, tags: typeof f.tags === "string" ? f.tags.split(",").map(t=>t.trim()).filter(Boolean) : f.tags });
+      await axios.post(`${API}/customers`, { ...f, name, tags: typeof f.tags === "string" ? f.tags.split(",").map(t=>t.trim()).filter(Boolean) : f.tags });
       toast.success("Customer created"); setF(empty); onCreated();
     } catch (e) { toast.error("Failed", { description: e?.response?.data?.detail?.slice(0,200) }); }
     finally { setSaving(false); }
@@ -119,7 +125,8 @@ export function CreateCustomer({ onCreated }) {
   return (
     <div className="card p-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Field label="Name *"><input className="input px-3 py-2 w-full" value={f.name} onChange={(e)=>setF({...f, name:e.target.value})} data-testid="cus-name"/></Field>
+        <Field label="First name *"><input className="input px-3 py-2 w-full" value={f.first_name} onChange={(e)=>setF({...f, first_name:e.target.value})} data-testid="cus-first-name"/></Field>
+        <Field label="Last name"><input className="input px-3 py-2 w-full" value={f.last_name} onChange={(e)=>setF({...f, last_name:e.target.value})} data-testid="cus-last-name"/></Field>
         <Field label="Email"><input type="email" className="input px-3 py-2 w-full" value={f.email} onChange={(e)=>setF({...f, email:e.target.value})}/></Field>
         <Field label="Phone"><input className="input px-3 py-2 w-full" value={f.phone} onChange={(e)=>setF({...f, phone:e.target.value})}/></Field>
         <Field label="Status"><select className="input px-3 py-2 w-full" value={f.status} onChange={(e)=>setF({...f, status:e.target.value})}>{["pending","active","blocked"].map(s=><option key={s}>{s}</option>)}</select></Field>
@@ -165,7 +172,7 @@ export function ImportCustomers({ onImported }) {
 
 export function CustomerTable({ list, total, q, setQ, sortField, sortDir, toggleSort, page = 1, setPage, pageSize = 50, setPageSize, onChanged, onOpen }) {
   const setStatus = async (c, status) => { await axios.patch(`${API}/customers/${c.id}`, { status }); onChanged(); };
-  const del = async (c) => { if (!window.confirm(`Delete ${c.name}?`)) return; await axios.delete(`${API}/customers/${c.id}`); toast.success("Deleted"); onChanged(); };
+  const del = async (c) => { if (!window.confirm(`Delete ${custName(c)}?`)) return; await axios.delete(`${API}/customers/${c.id}`); toast.success("Deleted"); onChanged(); };
   const stop = (e) => e.stopPropagation();
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -221,7 +228,7 @@ export function CustomerTable({ list, total, q, setQ, sortField, sortDir, toggle
                       />
                     )}
                   </div>
-                  <div className="min-w-0"><div className="text-sm font-medium truncate max-w-[240px]">{c.name}</div><div className="text-[11px] text-slate-400 truncate">{c.email || "—"}</div></div>
+                  <div className="min-w-0"><div className="text-sm font-medium truncate max-w-[240px]" data-testid={`cus-row-name-${c.id}`}>{custName(c)}</div><div className="text-[11px] text-slate-400 truncate">{c.email || "—"}</div></div>
                 </div>
               </td>
               <td className="font-mono text-xs text-slate-500">{c.code}</td>
@@ -308,7 +315,7 @@ export function TopCustomers({ list }) {
           <div key={c.id} className="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-lg">
             <div className="w-8 h-8 grid place-items-center rounded-md font-display font-bold text-white text-xs" style={{ background: `linear-gradient(135deg,#4F46E5,#EC4899)`, opacity: 1 - i*0.08 }}>{i + 1}</div>
             <CustomerAvatar c={c} size={32}/>
-            <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate">{c.name}</div><div className="text-xs text-slate-500 truncate">{c.email || "—"} · {c.orders_count} orders</div></div>
+            <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate">{custName(c)}</div><div className="text-xs text-slate-500 truncate">{c.email || "—"} · {c.orders_count} orders</div></div>
             <div className="font-mono font-bold text-indigo-600">{moneyCents(c.total_spend)}</div>
           </div>
         ))}
@@ -434,7 +441,7 @@ export function CustomerActivity({ list }) {
       {rows.length === 0 && <div className="p-10 text-center text-slate-500">No activity</div>}
       {rows.map(c => (
         <div key={c.id} className="p-4 border-b hairline last:border-0 flex items-center gap-3">
-          <CustomerAvatar c={c} size={32}/><div className="flex-1 min-w-0"><div className="text-sm"><span className="font-medium">{c.name}</span> <span className="text-slate-500">joined</span></div><div className="text-[11px] text-slate-400 font-mono">{fmtDate(c.created_at)}</div></div><span className="chip chip-neutral">{c.status}</span>
+          <CustomerAvatar c={c} size={32}/><div className="flex-1 min-w-0"><div className="text-sm"><span className="font-medium">{custName(c)}</span> <span className="text-slate-500">joined</span></div><div className="text-[11px] text-slate-400 font-mono">{fmtDate(c.created_at)}</div></div><span className="chip chip-neutral">{c.status}</span>
         </div>
       ))}
     </div>
@@ -450,7 +457,7 @@ export function NotesView({ list, onChanged }) {
   const save = async () => { await axios.patch(`${API}/customers/${cust.id}`, { notes: note }); toast.success("Note saved"); onChanged(); };
   return (
     <div className="card p-5 grid gap-3">
-      <select value={id} onChange={(e)=>setId(e.target.value)} className="input px-3 py-2 max-w-md">{list.map(c => <option key={c.id} value={c.id}>{c.name} · {c.email}</option>)}</select>
+      <select value={id} onChange={(e)=>setId(e.target.value)} className="input px-3 py-2 max-w-md">{list.map(c => <option key={c.id} value={c.id}>{custName(c)} · {c.email}</option>)}</select>
       <textarea className="input px-3 py-2 w-full h-40" value={note} onChange={(e)=>setNote(e.target.value)} placeholder="Internal notes about this customer…"/>
       <div className="flex justify-end"><button onClick={save} className="btn btn-primary text-sm">Save note</button></div>
     </div>

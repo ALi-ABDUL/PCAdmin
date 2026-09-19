@@ -26,7 +26,7 @@ from scraper import (
 from models import (
     CATEGORIES, SEED_CATEGORIES, ScrapeRequest, ScrapedItem, WatchlistToggle, ProductCreate, 
     Product, ProductUpdate, ShippingAddress, _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, 
-    OrderCreate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, ItemBulkAction, 
+    OrderCreate, OrderLineInput, CartLineInput, CartUpdate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, ItemBulkAction, 
     RefreshAllRequest, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
     FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ScheduleEntryBody, ScraperSchedulesReplaceBody, AutoRetryConfigBody, ORDER_STATUSES, ReturnRequest, 
     AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate, PortalProfileUpdate,
@@ -52,7 +52,7 @@ from helpers import (
     _get_scraper_schedule, _compute_next_run, _compute_next_run_for, _classify_run, _push_run_history, 
     _refresh_all_and_record, _update_schedule_entry, _scheduler_loop, _ensure_categories_seeded, _ensure_ebay_category, _now_iso, 
     _seed_transactions_and_returns, _rebuild_customers_from_orders, _link_customer_to_portal_account, _shape_review, _jwt_secret, 
-    _hash_password, _verify_password, _issue_token, get_current_customer, _has_purchased, 
+    _hash_password, _verify_password, _issue_token, get_current_customer, _optional_customer_email, _has_purchased, 
     _seller_id, _build_sellers, _match_rules, _guess_category, _get_push_settings, _mask, 
     _get_credential, _push_channel_status, _notif_is_critical, _send_email, _send_telegram, 
     _format_notification_html, _push_notification, _emit_notification, 
@@ -2882,21 +2882,68 @@ def _derive_payment_status(status: str) -> str:
     return "paid" if status in PAID_LIKE_STATUSES else "pending"
 
 
+def _build_order_line(p: dict, qty: int, vtype=None, voption=None, vprice=None) -> dict:
+    """Build a single order line item, using the variant price when supplied
+    instead of the base product price."""
+    unit_price = float(vprice) if vprice is not None else float(p.get("price") or 0)
+    unit_cost = float(p.get("cost") or 0)
+    return {
+        "product_id": p["id"],
+        "title": p.get("title"),
+        "image": (p.get("images") or [None])[0],
+        "quantity": qty,
+        "variant_type": vtype,
+        "variant_option": voption,
+        "variant_price": (float(vprice) if vprice is not None else None),
+        "unit_price": round(unit_price, 2),
+        "unit_cost": round(unit_cost, 2),
+        "line_total": round(unit_price * qty, 2),
+        "cost_total": round(unit_cost * qty, 2),
+    }
+
+
 @api_router.post("/orders")
 async def create_order(body: OrderCreate):
-    p = await db.products.find_one({"id": body.product_id}, {"_id": 0})
-    if not p:
-        raise HTTPException(status_code=404, detail="Product not found")
-    total = round((p.get("price") or 0) * body.quantity, 2)
-    cost_total = round((p.get("cost") or 0) * body.quantity, 2)
+    # Resolve the line inputs: a multi-line `items` array (whole-cart checkout)
+    # takes precedence; otherwise fall back to the single-product fields.
+    if body.items:
+        line_inputs = body.items
+    elif body.product_id:
+        line_inputs = [OrderLineInput(
+            product_id=body.product_id, quantity=body.quantity,
+            variant_type=body.variant_type, variant_option=body.variant_option,
+            variant_price=body.variant_price,
+        )]
+    else:
+        raise HTTPException(status_code=400, detail="Provide either product_id or a non-empty items array")
+
+    lines: list[dict] = []
+    for li in line_inputs:
+        p = await db.products.find_one({"id": li.product_id}, {"_id": 0})
+        if not p:
+            raise HTTPException(status_code=404, detail=f"Product not found: {li.product_id}")
+        lines.append(_build_order_line(p, li.quantity, li.variant_type, li.variant_option, li.variant_price))
+
+    total = round(sum(l["line_total"] for l in lines), 2)
+    cost_total = round(sum(l["cost_total"] for l in lines), 2)
+    total_qty = sum(l["quantity"] for l in lines)
+    first = lines[0]
+    multi = len(lines) > 1
+
     order = {
         "id": str(uuid.uuid4()),
-        "reference": p.get("product_code"),
-        "product_id": p["id"],
-        "product_title": p.get("title"),
-        "quantity": body.quantity,
-        "unit_price": p.get("price"),
-        "unit_cost": p.get("cost"),
+        "reference": (await db.products.find_one({"id": first["product_id"]}, {"_id": 0, "product_code": 1}) or {}).get("product_code"),
+        # Top-level fields mirror the first line for backward compatibility with
+        # the single-product Orders views; full detail lives in `items`.
+        "product_id": first["product_id"],
+        "product_title": first["title"],
+        "quantity": total_qty,
+        "unit_price": first["unit_price"],
+        "unit_cost": first["unit_cost"],
+        "variant_type": None if multi else first["variant_type"],
+        "variant_option": None if multi else first["variant_option"],
+        "variant_price": None if multi else first["variant_price"],
+        "items": lines,
         "total": total,
         "cost_total": cost_total,
         "profit": round(total - cost_total, 2),
@@ -2909,39 +2956,103 @@ async def create_order(body: OrderCreate):
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.orders.insert_one(order)
-    await db.products.update_one(
-        {"id": p["id"]},
-        {"$inc": {"sold_count": body.quantity, "stock": -body.quantity}},
-    )
-    # Notification: new order received
+
+    # Decrement stock per line + low-stock/out-of-stock housekeeping per product.
+    for l in lines:
+        await db.products.update_one(
+            {"id": l["product_id"]},
+            {"$inc": {"sold_count": l["quantity"], "stock": -l["quantity"]}},
+        )
     await _emit_notification(
         type="new_order",
         title="New order received",
-        body=f"{order['customer_name']} · ${total:.2f} · {order['product_title']}",
+        body=f"{order['customer_name']} · ${total:.2f} · {('%d items' % len(lines)) if multi else order['product_title']}",
         order_id=order["id"],
-        product_id=p["id"],
+        product_id=first["product_id"],
         product_title=order["product_title"],
-        image=(p.get("images") or [None])[0],
-        data={"customer_name": order["customer_name"], "total": total, "quantity": body.quantity},
+        image=first.get("image"),
+        data={"customer_name": order["customer_name"], "total": total, "quantity": total_qty},
     )
-    # Low-stock check after decrement
-    updated = await db.products.find_one({"id": p["id"]}, {"_id": 0, "stock": 1, "title": 1, "images": 1})
-    if updated and (updated.get("stock") or 0) <= 3 and (updated.get("stock") or 0) > 0:
-        await _emit_notification(
-            type="low_stock",
-            title="Product low on stock",
-            body=f"{updated.get('title')} · {updated.get('stock')} left",
-            product_id=p["id"],
-            product_title=updated.get("title"),
-            image=(updated.get("images") or [None])[0],
-            data={"stock": updated.get("stock")},
-        )
-    # Auto-archive if this purchase pushed the product to zero stock.
-    await _auto_archive_if_out_of_stock(p["id"])
+    for l in lines:
+        updated = await db.products.find_one({"id": l["product_id"]}, {"_id": 0, "stock": 1, "title": 1, "images": 1})
+        if updated and 0 < (updated.get("stock") or 0) <= 3:
+            await _emit_notification(
+                type="low_stock",
+                title="Product low on stock",
+                body=f"{updated.get('title')} · {updated.get('stock')} left",
+                product_id=l["product_id"],
+                product_title=updated.get("title"),
+                image=(updated.get("images") or [None])[0],
+                data={"stock": updated.get("stock")},
+            )
+        await _auto_archive_if_out_of_stock(l["product_id"])
     order.pop("_id", None)
-    # Customer email: order confirmation (gated by customer_order_confirmation toggle)
     await send_customer_order_confirmation(order)
     return order
+
+
+# ---------------------------------------------------------------------------
+# Cart (variant-aware). Identified by the logged-in customer (JWT) when
+# present, else a guest `session_id`. PATCH replaces the whole cart with the
+# provided line items; each line's price uses the chosen variant price when
+# supplied instead of the base product price.
+# ---------------------------------------------------------------------------
+def _cart_key(email: Optional[str], session_id: Optional[str]) -> str:
+    if email:
+        return f"cust:{email}"
+    if session_id:
+        return f"sess:{session_id}"
+    raise HTTPException(status_code=400, detail="A session_id is required for a guest cart")
+
+
+async def _build_cart_line(li: CartLineInput) -> dict:
+    p = await db.products.find_one({"id": li.product_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail=f"Product not found: {li.product_id}")
+    qty = max(1, int(li.quantity or 1))
+    unit_price = float(li.variant_price) if li.variant_price is not None else float(p.get("price") or 0)
+    return {
+        "product_id": p["id"],
+        "title": p.get("title"),
+        "image": (p.get("images") or [None])[0],
+        "quantity": qty,
+        "variant_type": li.variant_type,
+        "variant_option": li.variant_option,
+        "variant_price": (float(li.variant_price) if li.variant_price is not None else None),
+        "unit_price": round(unit_price, 2),
+        "line_total": round(unit_price * qty, 2),
+    }
+
+
+async def _get_cart(key: str) -> dict:
+    doc = await db.carts.find_one({"key": key}, {"_id": 0})
+    if not doc:
+        return {"key": key, "items": [], "subtotal": 0.0}
+    return doc
+
+
+@api_router.get("/cart")
+async def get_cart(session_id: Optional[str] = None, authorization: Optional[str] = Header(None)):
+    email = await _optional_customer_email(authorization)
+    return await _get_cart(_cart_key(email, session_id))
+
+
+@api_router.patch("/cart")
+async def update_cart(body: CartUpdate, authorization: Optional[str] = Header(None)):
+    email = await _optional_customer_email(authorization)
+    key = _cart_key(email, body.session_id)
+    lines = [await _build_cart_line(li) for li in body.items]
+    subtotal = round(sum(l["line_total"] for l in lines), 2)
+    doc = {
+        "key": key,
+        "session_id": body.session_id,
+        "customer_email": email,
+        "items": lines,
+        "subtotal": subtotal,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.carts.update_one({"key": key}, {"$set": doc}, upsert=True)
+    return await _get_cart(key)
 
 
 @api_router.get("/orders")

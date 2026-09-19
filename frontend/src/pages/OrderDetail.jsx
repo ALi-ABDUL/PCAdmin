@@ -98,6 +98,11 @@ export function OrderDetailPage({ orderId, onBack }) {
                   : <div className="w-12 h-12 rounded-lg bg-slate-100 grid place-items-center text-slate-300 shrink-0"><ImageIcon size={16}/></div>}
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium truncate" title={li.title}>{li.title || "Untitled item"}</div>
+                  {(li.variant_type || li.variant_option) && (
+                    <div className="mt-0.5" data-testid={`order-line-item-variant-${i}`}>
+                      <span className="chip chip-neutral !text-[10px]">{[li.variant_type, li.variant_option].filter(Boolean).join(": ")}</span>
+                    </div>
+                  )}
                   <div className="text-[11px] text-slate-500 font-mono mt-0.5">
                     Qty {li.quantity ?? 1} × {moneyCents(li.unit_price)}
                     {li.product_id ? <span className="text-slate-400"> · #{String(li.product_id).slice(0, 8)}</span> : null}

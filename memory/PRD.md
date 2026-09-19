@@ -2169,3 +2169,19 @@ Notification Bell deep-links) — zero regressions detected.
 - Tested: testing_agent iteration_32 — 7/7 backend pytest PASS (guest+JWT carts, replace
   semantics, single+multi variant orders, 400/404 edges). Test file:
   /app/backend/tests/test_variant_cart_and_orders.py.
+
+
+## Jun 2026 — Product edit "Preview" + "Publish"
+- Added a "Preview" button in the product edit top action bar (next to Save,
+  data-testid product-preview-btn). Opens StorePreviewLightbox — a storefront-style
+  product-detail lightbox rendering the CURRENT (unsaved) form state: image gallery
+  (hero + thumbnails), title, price with strikethrough original + discount %, variants
+  grouped by type as selectable chips (sold-out greyed/struck via in_stock/stock_status),
+  Add-to-cart (visual), description, and a specifications table.
+- Bottom "Publish" button (data-testid preview-publish-btn) sets the product active/visible
+  AND saves the full form (title/price/etc.) via persist({active:true}), then closes.
+- Refactored save() into buildSaveBody()+persist(extra); save=()=>persist(), publish=persist({active:true}).
+- Preview pulls title/price/original_price/description from form state `f`; images/variants/
+  specifics from `p` (those cards save independently). Verified via screenshots: preview
+  reflects unsaved title, and Publish committed unsaved title + flipped Hidden→Visible.
+- Frontend-only; no backend change (uses existing PATCH /api/products/{id}).

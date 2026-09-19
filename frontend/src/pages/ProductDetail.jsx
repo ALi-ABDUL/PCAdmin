@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, ExternalLink, Home, Layout, Loader2, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
+import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, Eye, ExternalLink, Home, Layout, Loader2, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
@@ -22,6 +22,7 @@ export function ProductDetailPage({ productId, onBack }) {
   const [showCatPopover, setShowCatPopover] = useState(false);
   const [imgDialog, setImgDialog] = useState({ open: false, mode: "add", idx: null, current: "" });
   const [lightboxIdx, setLightboxIdx] = useState(null);   // opens full-size viewer at index
+  const [previewOpen, setPreviewOpen] = useState(false);  // storefront preview lightbox
 
   const load = useCallback(async () => {
     const [prod, rev] = await Promise.all([
@@ -60,56 +61,67 @@ export function ProductDetailPage({ productId, onBack }) {
   useEffect(() => { axios.get(`${API}/delivery-settings`).then(r => setDeliveryDefaults(r.data || { default_min_days: 3, default_max_days: 7 })); }, []);
 
   const setField = (k, v) => { setF(prev => ({ ...prev, [k]: v })); setDirty(true); };
-  const save = async () => {
+  const buildSaveBody = () => {
+    const selectedPreset = presets.find(x => x.id === f.postage_preset_id);
+    const body = {
+      title: f.title, sku: f.sku, category: f.category,
+      price: Number(f.price), cost: Number(f.cost), stock: Number(f.stock),
+      original_price: f.original_price === "" || f.original_price === null ? null : Number(f.original_price),
+      active: !!f.active, description: f.description,
+      meta_title: (f.meta_title || "").trim(),
+      meta_description: (f.meta_description || "").slice(0, 160),
+      url_slug: (f.url_slug || "").trim(),
+      image_alt_text: (f.image_alt_text || "").trim(),
+      tags: Array.isArray(f.tags) ? f.tags : [],
+    };
+    // Only include postage fields when the admin has actually chosen a preset.
+    // A blank selection leaves whatever was already stored on the product
+    // (typically the scraped `postage` string) untouched.
+    if (f.postage_preset_id) {
+      body.postage_preset_id = f.postage_preset_id;
+      if (selectedPreset?.kind === "free") {
+        body.postage_amount = 0;
+        body.postage_insurance_amount = 0;
+      } else if (selectedPreset?.kind === "large_item") {
+        body.postage_amount = Number(f.postage_amount) || 0;
+        body.postage_insurance_amount = Number(f.postage_insurance_amount) || 0;
+      } else {
+        body.postage_amount = Number(f.postage_amount) || 0;
+        body.postage_insurance_amount = 0;
+      }
+    }
+    body.custom_delivery_window = !!f.custom_delivery_window;
+    if (f.custom_delivery_window) {
+      body.delivery_min_days = Number(f.delivery_min_days) || 0;
+      body.delivery_max_days = Number(f.delivery_max_days) || 0;
+      if (body.delivery_max_days < body.delivery_min_days) {
+        toast.error("Max delivery days must be greater than or equal to min days");
+        return null;
+      }
+    }
+    return body;
+  };
+
+  const persist = async (extra = {}) => {
+    const body = buildSaveBody();
+    if (!body) return false;
+    Object.assign(body, extra);
     setSaving(true);
     try {
-      const selectedPreset = presets.find(x => x.id === f.postage_preset_id);
-      const body = {
-        title: f.title, sku: f.sku, category: f.category,
-        price: Number(f.price), cost: Number(f.cost), stock: Number(f.stock),
-        original_price: f.original_price === "" || f.original_price === null ? null : Number(f.original_price),
-        active: !!f.active, description: f.description,
-        meta_title: (f.meta_title || "").trim(),
-        meta_description: (f.meta_description || "").slice(0, 160),
-        url_slug: (f.url_slug || "").trim(),
-        image_alt_text: (f.image_alt_text || "").trim(),
-        tags: Array.isArray(f.tags) ? f.tags : [],
-      };
-      // Only include postage fields when the admin has actually chosen a preset.
-      // A blank selection leaves whatever was already stored on the product
-      // (typically the scraped `postage` string) untouched.
-      if (f.postage_preset_id) {
-        body.postage_preset_id = f.postage_preset_id;
-        if (selectedPreset?.kind === "free") {
-          body.postage_amount = 0;
-          body.postage_insurance_amount = 0;
-        } else if (selectedPreset?.kind === "large_item") {
-          body.postage_amount = Number(f.postage_amount) || 0;
-          body.postage_insurance_amount = Number(f.postage_insurance_amount) || 0;
-        } else {
-          // "standard" or unknown → single amount, insurance cleared
-          body.postage_amount = Number(f.postage_amount) || 0;
-          body.postage_insurance_amount = 0;
-        }
-      }
-      // Custom delivery window: only send min/max when the toggle is ON so
-      // turning it OFF cleanly reverts the product to the store-wide default
-      // (the frontend uses `custom_delivery_window` to pick which to show).
-      body.custom_delivery_window = !!f.custom_delivery_window;
-      if (f.custom_delivery_window) {
-        body.delivery_min_days = Number(f.delivery_min_days) || 0;
-        body.delivery_max_days = Number(f.delivery_max_days) || 0;
-        if (body.delivery_max_days < body.delivery_min_days) {
-          setSaving(false);
-          return toast.error("Max delivery days must be greater than or equal to min days");
-        }
-      }
       await axios.patch(`${API}/products/${productId}`, body);
-      toast.success("Saved");
+      toast.success(extra.active ? "Published to storefront" : "Saved");
       await load();
+      return true;
     } catch (e) {
       toast.error("Save failed", { description: e?.response?.data?.detail });
+      return false;
     } finally { setSaving(false); }
+  };
+
+  const save = () => persist();
+  const publish = async () => {
+    const ok = await persist({ active: true });
+    if (ok) setPreviewOpen(false);
   };
   const del = async () => {
     if (!window.confirm(`Delete "${p.title}"? This can't be undone.`)) return;
@@ -204,6 +216,7 @@ export function ProductDetailPage({ productId, onBack }) {
             )}
           </div>
           <button onClick={del} className="btn btn-danger text-sm" data-testid="product-delete-btn"><Trash2 size={13}/> Delete</button>
+          <button onClick={() => setPreviewOpen(true)} className="btn btn-ghost text-sm" data-testid="product-preview-btn"><Eye size={13}/> Preview</button>
           <button onClick={save} disabled={!dirty || saving} className="btn btn-primary text-sm" data-testid="product-save-btn">
             {saving ? <Loader2 className="animate-spin" size={13}/> : <BadgeCheck size={13}/>} Save
           </button>
@@ -417,6 +430,22 @@ export function ProductDetailPage({ productId, onBack }) {
         idx={lightboxIdx}
         onClose={() => setLightboxIdx(null)}
         onNav={(next) => setLightboxIdx(next)}
+      />
+      <StorePreviewLightbox
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        onPublish={publish}
+        publishing={saving}
+        product={{
+          title: f.title,
+          price: Number(f.price) || 0,
+          original_price: f.original_price === "" || f.original_price == null ? null : Number(f.original_price),
+          description: f.description,
+          images: p.images || [],
+          variants: p.variants || [],
+          specifics: p.specifics || {},
+          active: !!f.active,
+        }}
       />
     </div>
   );
@@ -981,6 +1010,149 @@ export function TagsField({ tags, onChange }) {
     </Field>
   );
 }
+
+/* ---------------------- Storefront preview lightbox ------------------------
+ * Renders the product the way the PCStore product-detail lightbox would, from
+ * the admin's CURRENT (possibly unsaved) form state. The Publish button at the
+ * bottom sets the product active/visible and saves it.
+ * ------------------------------------------------------------------------- */
+function StorePreviewLightbox({ open, onClose, onPublish, publishing, product }) {
+  const [sel, setSel] = useState(0);
+  const [chosen, setChosen] = useState({});
+  useEffect(() => { if (open) { setSel(0); setChosen({}); } }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  if (!open) return null;
+
+  const imgs = product.images || [];
+  const hero = imgs[sel] || imgs[0];
+  const hasDiscount = product.original_price != null && product.original_price > product.price;
+  const discount = hasDiscount ? Math.round((1 - product.price / product.original_price) * 100) : 0;
+  const byType = (product.variants || []).reduce((acc, v) => {
+    const t = v.type || "Options";
+    (acc[t] = acc[t] || []).push(v);
+    return acc;
+  }, {});
+  const specs = Object.entries(product.specifics || {});
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-start md:items-center justify-center p-2 md:p-8 overflow-y-auto" onClick={onClose} data-testid="product-preview-lightbox">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl my-auto overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        {/* Preview ribbon */}
+        <div className="flex items-center justify-between px-5 py-2.5 bg-slate-900 text-white">
+          <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest"><Eye size={13}/> Storefront preview {product.active ? "" : "· currently hidden"}</div>
+          <button onClick={onClose} className="text-white/70 hover:text-white w-8 h-8 grid place-items-center rounded-full hover:bg-white/10" aria-label="Close" data-testid="preview-close"><X size={16}/></button>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-6 p-5 md:p-7">
+          {/* Gallery */}
+          <div>
+            <div className="aspect-square rounded-xl overflow-hidden bg-slate-100 border hairline grid place-items-center">
+              {hero ? <img src={imgFull(hero)} alt={product.title} className="w-full h-full object-contain"/> : <div className="text-slate-400 text-sm">No image</div>}
+            </div>
+            {imgs.length > 1 && (
+              <div className="flex gap-2 mt-3 overflow-x-auto pb-1" data-testid="preview-thumbs">
+                {imgs.map((src, i) => (
+                  <button key={i} onClick={() => setSel(i)} className={`w-16 h-16 rounded-lg overflow-hidden border-2 shrink-0 transition-colors ${i === sel ? "border-indigo-500" : "border-transparent hover:border-slate-300"}`}>
+                    <img src={imgThumb(src)} alt="" className="w-full h-full object-cover"/>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Details */}
+          <div className="min-w-0">
+            <h1 className="text-2xl font-display font-bold leading-tight" data-testid="preview-title">{product.title || "Untitled product"}</h1>
+
+            <div className="flex items-baseline gap-3 mt-3" data-testid="preview-price">
+              <span className="text-3xl font-bold text-indigo-600">{moneyCents(product.price)}</span>
+              {hasDiscount && <span className="text-lg text-slate-400 line-through">{moneyCents(product.original_price)}</span>}
+              {hasDiscount && <span className="chip chip-success !text-xs">-{discount}%</span>}
+            </div>
+
+            {/* Variants */}
+            {Object.keys(byType).length > 0 && (
+              <div className="mt-5 space-y-4" data-testid="preview-variants">
+                {Object.entries(byType).map(([type, opts]) => (
+                  <div key={type}>
+                    <div className="text-xs font-mono uppercase tracking-widest text-slate-500 mb-1.5">{type}</div>
+                    <div className="flex flex-wrap gap-2">
+                      {opts.map((v, i) => {
+                        const inStock = v.in_stock != null ? !!v.in_stock : (v.stock_status ? v.stock_status === "live" : true);
+                        const active = chosen[type] === v.option;
+                        return (
+                          <button
+                            key={`${v.option}-${i}`}
+                            disabled={!inStock}
+                            onClick={() => setChosen(c => ({ ...c, [type]: v.option }))}
+                            className={`px-3 py-1.5 rounded-lg border text-sm transition-colors ${
+                              !inStock ? "border-slate-200 text-slate-300 line-through cursor-not-allowed"
+                              : active ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                              : "border-slate-300 hover:border-indigo-400"}`}
+                            title={inStock ? "" : "Sold out"}
+                            data-testid={`preview-variant-${type}-${v.option}`}
+                          >
+                            {v.option}{v.price != null ? ` · ${moneyCents(v.price)}` : ""}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button className="btn btn-primary w-full mt-6 !py-3 opacity-90 cursor-default" tabIndex={-1} data-testid="preview-add-to-cart">Add to cart</button>
+
+            {/* Description */}
+            {product.description && (
+              <div className="mt-6">
+                <div className="text-sm font-bold mb-1">Description</div>
+                <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-line" data-testid="preview-description">{product.description}</p>
+              </div>
+            )}
+
+            {/* Specifications */}
+            {specs.length > 0 && (
+              <div className="mt-6" data-testid="preview-specifications">
+                <div className="text-sm font-bold mb-2">Specifications</div>
+                <div className="border hairline rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {specs.map(([k, val], i) => (
+                        <tr key={k} className={i % 2 ? "bg-slate-50" : ""}>
+                          <td className="px-3 py-2 text-slate-500 font-medium w-2/5 align-top">{k}</td>
+                          <td className="px-3 py-2 text-slate-700">{String(val)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Publish bar */}
+        <div className="sticky bottom-0 flex items-center justify-between gap-3 px-5 md:px-7 py-3 border-t hairline bg-white">
+          <div className="text-xs text-slate-500">{product.active ? "This product is live on the storefront." : "Publishing makes this product active and visible to shoppers."}</div>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="btn btn-ghost text-sm" data-testid="preview-cancel-btn">Close</button>
+            <button onClick={onPublish} disabled={publishing} className="btn btn-primary text-sm shadow-lg" data-testid="preview-publish-btn">
+              {publishing ? <Loader2 className="animate-spin" size={14}/> : <Rocket size={14}/>} Publish
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 // Turn the variants array into stable rows the admin can edit/add/delete.
 // Unknown keys (currency, stock_status, sku from the scraper) are preserved

@@ -4275,6 +4275,12 @@ def _shape_storefront_product(p: dict, discount_min: int = 0) -> dict:
                 "option": v.get("option"),
                 "price": v.get("price"),
                 "compare_at_price": v.get("compare_at_price"),
+                "in_stock": (
+                    bool(v.get("in_stock"))
+                    if v.get("in_stock") is not None
+                    else (v.get("stock_status", "live") == "live")
+                ),
+                "stock_status": v.get("stock_status") or ("live" if v.get("in_stock", True) else "out_of_stock"),
             }
             for v in (p.get("variants") or [])
         ],

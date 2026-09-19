@@ -987,13 +987,15 @@ export function TagsField({ tags, onChange }) {
 // via `_rest` so re-saving from the admin doesn't drop scraped metadata.
 function variantsToRows(variants) {
   return (variants || []).map((v, i) => {
-    const { type, option, price, compare_at_price, ...rest } = v || {};
+    const { type, option, price, compare_at_price, in_stock, stock_status, ...rest } = v || {};
+    const stocked = in_stock != null ? !!in_stock : (stock_status ? stock_status === "live" : true);
     return {
       id: `var-${i}-${type || ""}-${option || ""}`,
       type: type || "",
       option: option || "",
       price: price != null ? String(price) : "",
       compare_at_price: compare_at_price != null ? String(compare_at_price) : "",
+      in_stock: stocked,
       _rest: rest,
     };
   });
@@ -1008,7 +1010,7 @@ export function ProductVariantsCard({ product, onUpdated }) {
   useEffect(() => { if (!editing) setRows(variantsToRows(variants)); }, [product?.id, JSON.stringify(variants), editing]);
 
   const patchRow = (id, patch) => setRows((rs) => rs.map((r) => r.id === id ? { ...r, ...patch } : r));
-  const addRow = () => setRows((rs) => [...rs, { id: `var-new-${Date.now()}-${rs.length}`, type: "", option: "", price: "", compare_at_price: "", _rest: {} }]);
+  const addRow = () => setRows((rs) => [...rs, { id: `var-new-${Date.now()}-${rs.length}`, type: "", option: "", price: "", compare_at_price: "", in_stock: true, _rest: {} }]);
   const removeRow = (id) => setRows((rs) => rs.filter((r) => r.id !== id));
 
   const save = async () => {
@@ -1021,7 +1023,8 @@ export function ProductVariantsCard({ product, onUpdated }) {
       const compare = r.compare_at_price === "" ? null : Number(r.compare_at_price);
       if (price != null && Number.isNaN(price)) return toast.error(`"${option || type}" has an invalid sale price`);
       if (compare != null && Number.isNaN(compare)) return toast.error(`"${option || type}" has an invalid compare-at price`);
-      out.push({ ...(r._rest || {}), type, option, price, compare_at_price: compare });
+      const in_stock = !!r.in_stock;
+      out.push({ ...(r._rest || {}), type, option, price, compare_at_price: compare, in_stock, stock_status: in_stock ? "live" : "out_of_stock" });
     }
     setSaving(true);
     try {
@@ -1065,17 +1068,26 @@ export function ProductVariantsCard({ product, onUpdated }) {
 
       {editing ? (
         <div>
-          <div className="hidden md:grid grid-cols-[minmax(110px,1fr)_minmax(110px,1fr)_120px_140px_auto] gap-2 text-[10px] font-mono uppercase tracking-widest text-slate-400 px-1 mb-1">
-            <div>Variant type</div><div>Option</div><div>Sale price</div><div>Compare-at</div><div></div>
+          <div className="hidden md:grid grid-cols-[minmax(100px,1fr)_minmax(100px,1fr)_110px_120px_120px_auto] gap-2 text-[10px] font-mono uppercase tracking-widest text-slate-400 px-1 mb-1">
+            <div>Variant type</div><div>Option</div><div>Sale price</div><div>Compare-at</div><div>Availability</div><div></div>
           </div>
           <div className="grid gap-2">
             {rows.length === 0 && <div className="text-sm text-slate-500 italic">No rows. Add one to get started.</div>}
             {rows.map((r, idx) => (
-              <div key={r.id} className="grid grid-cols-2 md:grid-cols-[minmax(110px,1fr)_minmax(110px,1fr)_120px_140px_auto] gap-2 items-center" data-testid={`variant-edit-row-${idx}`}>
+              <div key={r.id} className="grid grid-cols-2 md:grid-cols-[minmax(100px,1fr)_minmax(100px,1fr)_110px_120px_120px_auto] gap-2 items-center" data-testid={`variant-edit-row-${idx}`}>
                 <input value={r.type} onChange={(e) => patchRow(r.id, { type: e.target.value })} placeholder="Colour" className="input px-3 py-1.5 text-sm" data-testid={`variant-type-${idx}`}/>
                 <input value={r.option} onChange={(e) => patchRow(r.id, { option: e.target.value })} placeholder="Black" className="input px-3 py-1.5 text-sm" data-testid={`variant-option-${idx}`}/>
                 <input value={r.price} onChange={(e) => patchRow(r.id, { price: e.target.value })} placeholder="99.00" type="number" min="0" step="0.01" className="input px-3 py-1.5 text-sm font-mono" data-testid={`variant-price-${idx}`}/>
                 <input value={r.compare_at_price} onChange={(e) => patchRow(r.id, { compare_at_price: e.target.value })} placeholder="129.00" type="number" min="0" step="0.01" className="input px-3 py-1.5 text-sm font-mono" data-testid={`variant-compare-${idx}`}/>
+                <button
+                  type="button"
+                  onClick={() => patchRow(r.id, { in_stock: !r.in_stock })}
+                  className={`chip !py-1 justify-center ${r.in_stock ? "chip-success" : "chip-danger"}`}
+                  title="Toggle availability"
+                  data-testid={`variant-stock-toggle-${idx}`}
+                >
+                  {r.in_stock ? <><CheckCircle2 size={11}/> In stock</> : <><Ban size={11}/> Sold out</>}
+                </button>
                 <button onClick={() => removeRow(r.id)} className="btn btn-danger !p-2" title="Delete variant" data-testid={`variant-delete-${idx}`}><Trash2 size={13}/></button>
               </div>
             ))}
@@ -1085,16 +1097,24 @@ export function ProductVariantsCard({ product, onUpdated }) {
       ) : (
         <div className="border hairline rounded-lg overflow-hidden">
           <table className="tbl">
-            <thead><tr><th>Type</th><th>Option</th><th className="text-right">Sale price</th><th className="text-right">Compare-at</th></tr></thead>
+            <thead><tr><th>Type</th><th>Option</th><th className="text-right">Sale price</th><th className="text-right">Compare-at</th><th>Availability</th></tr></thead>
             <tbody>
-              {variants.map((v, idx) => (
-                <tr key={`${v.type}-${idx}-${v.option}`} data-testid={`variant-view-row-${idx}`}>
-                  <td className="font-mono text-xs text-slate-600">{v.type || "—"}</td>
-                  <td className="text-sm">{v.option || "—"}</td>
-                  <td className="text-right font-mono text-indigo-600 font-bold">{v.price != null ? moneyCents(v.price) : "—"}</td>
-                  <td className="text-right font-mono text-slate-400 line-through">{v.compare_at_price != null ? moneyCents(v.compare_at_price) : "—"}</td>
-                </tr>
-              ))}
+              {variants.map((v, idx) => {
+                const inStock = v.in_stock != null ? !!v.in_stock : (v.stock_status ? v.stock_status === "live" : true);
+                return (
+                  <tr key={`${v.type}-${idx}-${v.option}`} data-testid={`variant-view-row-${idx}`} className={inStock ? "" : "opacity-60"}>
+                    <td className="font-mono text-xs text-slate-600">{v.type || "—"}</td>
+                    <td className={`text-sm ${inStock ? "" : "line-through text-slate-400"}`}>{v.option || "—"}</td>
+                    <td className="text-right font-mono text-indigo-600 font-bold">{v.price != null ? moneyCents(v.price) : "—"}</td>
+                    <td className="text-right font-mono text-slate-400 line-through">{v.compare_at_price != null ? moneyCents(v.compare_at_price) : "—"}</td>
+                    <td>
+                      {inStock
+                        ? <span className="chip chip-success !text-[10px]"><CheckCircle2 size={10}/> In stock</span>
+                        : <span className="chip chip-danger !text-[10px]"><Ban size={10}/> Sold out</span>}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

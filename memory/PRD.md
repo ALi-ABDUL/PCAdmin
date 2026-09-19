@@ -2136,3 +2136,15 @@ Notification Bell deep-links) — zero regressions detected.
   so the transparent bar no longer intercepts clicks on the Add-variant / Save buttons.
 - Verified: PATCH persists + round-trips (admin & storefront APIs) via curl; full UI flow
   (edit -> add variant -> save -> view with strikethrough) via screenshot.
+
+
+## Jun 2026 — Per-variant stock/availability
+- Each product variant now carries `in_stock` (bool) + `stock_status` ("live"/"out_of_stock").
+  ProductVariantsCard: added an Availability toggle chip in edit mode (In stock / Sold out,
+  testid variant-stock-toggle-N) and a status chip column in view mode; sold-out rows render
+  greyed + struck-through. variantsToRows derives in_stock from existing in_stock or legacy
+  stock_status; save writes both keys.
+- Storefront API `_shape_storefront_product` now returns per-variant `in_stock` + `stock_status`
+  so PCStore can grey out sold-out options.
+- Verified: PATCH persists both keys, storefront GET reflects them, and UI toggle→save→view
+  round-trip confirmed via screenshot.

@@ -219,7 +219,7 @@ export function ProductCreate({ onCreated }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Field label="Title *" className="md:col-span-2"><input className="input px-3 py-2 w-full" value={f.title} onChange={(e)=>setF({...f, title:e.target.value})}/></Field>
         <Field label="SKU"><input className="input px-3 py-2 w-full font-mono" value={f.sku} onChange={(e)=>setF({...f, sku:e.target.value})}/></Field>
-        <Field label="Category"><select className="input px-3 py-2 w-full" value={f.category} onChange={(e)=>setF({...f, category:e.target.value})}>{cats.map(c=><option key={c.slug} value={c.slug}>{c.group} · {c.name}</option>)}</select></Field>
+        <Field label="Category"><select className="input px-3 py-2 w-full" value={f.category} onChange={(e)=>setF({...f, category:e.target.value})}>{cats.map(c=><option key={c.slug} value={c.slug}>{`${c.group} · ${c.name}`}</option>)}</select></Field>
         <Field label="Price (AUD)"><input type="number" className="input px-3 py-2 w-full font-mono" value={f.price} onChange={(e)=>setF({...f, price:e.target.value})}/></Field>
         <Field label="Cost (AUD)"><input type="number" className="input px-3 py-2 w-full font-mono" value={f.cost} onChange={(e)=>setF({...f, cost:e.target.value})}/></Field>
         <Field label="Stock"><input type="number" className="input px-3 py-2 w-full font-mono" value={f.stock} onChange={(e)=>setF({...f, stock:e.target.value})}/></Field>
@@ -319,7 +319,7 @@ export function StockAdjustPage({ list, kind, title }) {
   };
   return (
     <div className="card p-6 grid gap-3 max-w-2xl">
-      <Field label="Product"><select value={pid} onChange={(e)=>setPid(e.target.value)} className="input px-3 py-2 w-full">{list.map(x=><option key={x.id} value={x.id}>{x.title} · stock {x.stock??0}</option>)}</select></Field>
+      <Field label="Product"><select value={pid} onChange={(e)=>setPid(e.target.value)} className="input px-3 py-2 w-full">{list.map(x=><option key={x.id} value={x.id}>{`${x.title} · stock ${x.stock??0}`}</option>)}</select></Field>
       <Field label={kind === "adjustment" ? "Delta (+/-)" : "New stock value"}><input type="number" value={delta} onChange={(e)=>setDelta(e.target.value)} className="input px-3 py-2 w-full font-mono"/></Field>
       <Field label="Reason / reference"><input value={reason} onChange={(e)=>setReason(e.target.value)} className="input px-3 py-2 w-full" placeholder="Damage / return / stock-take etc."/></Field>
       <div className="flex justify-end"><button onClick={apply} className="btn btn-primary"><Activity size={14}/> Apply</button></div>

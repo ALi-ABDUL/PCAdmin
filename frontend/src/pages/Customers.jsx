@@ -196,7 +196,7 @@ export function CustomerTable({ list, total, q, setQ, sortField, sortDir, toggle
             data-testid="cus-page-size"
             aria-label="Customers per page"
           >
-            {[50, 100, 150, 200].map(n => <option key={n} value={n}>{n} / page</option>)}
+            {[50, 100, 150, 200].map(n => <option key={n} value={n}>{`${n} / page`}</option>)}
           </select>
         </div>
       </div>
@@ -457,7 +457,7 @@ export function NotesView({ list, onChanged }) {
   const save = async () => { await axios.patch(`${API}/customers/${cust.id}`, { notes: note }); toast.success("Note saved"); onChanged(); };
   return (
     <div className="card p-5 grid gap-3">
-      <select value={id} onChange={(e)=>setId(e.target.value)} className="input px-3 py-2 max-w-md">{list.map(c => <option key={c.id} value={c.id}>{custName(c)} · {c.email}</option>)}</select>
+      <select value={id} onChange={(e)=>setId(e.target.value)} className="input px-3 py-2 max-w-md">{list.map(c => <option key={c.id} value={c.id}>{`${custName(c)} · ${c.email}`}</option>)}</select>
       <textarea className="input px-3 py-2 w-full h-40" value={note} onChange={(e)=>setNote(e.target.value)} placeholder="Internal notes about this customer…"/>
       <div className="flex justify-end"><button onClick={save} className="btn btn-primary text-sm">Save note</button></div>
     </div>

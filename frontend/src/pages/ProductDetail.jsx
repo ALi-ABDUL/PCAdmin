@@ -177,8 +177,6 @@ export function ProductDetailPage({ productId, onBack }) {
   if (!p) return <div className="text-slate-500 py-24 text-center">loading product…</div>;
 
   const badge = statusBadge(p);
-  const variants = p.variants || [];
-  const variantsByType = variants.reduce((acc, v) => { (acc[v.type] = acc[v.type] || []).push(v); return acc; }, {});
   const avg = p.average_rating || 0;
   const margin = f.price ? ((Number(f.price) - Number(f.cost || 0)) / Number(f.price)) * 100 : 0;
 
@@ -292,34 +290,9 @@ export function ProductDetailPage({ productId, onBack }) {
         </div>
       </div>
 
-      {/* Variants */}
-      {variants.length > 0 && (
-        <div className="card p-5" data-testid="product-detail-variants">
-          <div className="font-display font-bold mb-3">Variants · <span className="text-slate-500 font-mono text-sm">{variants.length}</span></div>
-          <div className="border hairline rounded-lg overflow-hidden">
-            <table className="tbl">
-              <thead><tr><th>Type</th><th>Option</th><th className="text-right">Price</th><th>Status</th><th>SKU</th></tr></thead>
-              <tbody>
-                {Object.entries(variantsByType).flatMap(([type, rows]) =>
-                  rows.map((v, idx) => (
-                    <tr key={`${type}-${idx}-${v.option}`}>
-                      {idx === 0 ? <td rowSpan={rows.length} className="align-top font-mono text-xs text-slate-600 border-r hairline bg-slate-50">{type}</td> : null}
-                      <td className="text-sm">{v.option}</td>
-                      <td className="text-right font-mono text-indigo-600 font-bold">{v.price != null ? moneyCents(v.price) : "—"}</td>
-                      <td>
-                        {v.stock_status === "live"
-                          ? <span className="chip chip-success !text-[10px]"><CheckCircle2 size={10}/> In stock</span>
-                          : <span className="chip chip-danger !text-[10px]"><Ban size={10}/> Out of stock</span>}
-                      </td>
-                      <td className="font-mono text-xs text-slate-500">{v.sku || "—"}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {/* Product Variants — editable, separate from Specifications. Saved as an
+          array on the product and exposed via the product API for PCStore. */}
+      <ProductVariantsCard product={p} onUpdated={(fresh) => setP(fresh)}/>
 
       {/* Editable fields */}
       <div className="card p-5">
@@ -330,7 +303,7 @@ export function ProductDetailPage({ productId, onBack }) {
           <Field label="Category">
             <select className="input w-full px-3 py-2" value={f.category} onChange={(e) => setField("category", e.target.value)} data-testid="product-category-select">
               {cats.length === 0 && <option value="other">Other</option>}
-              {cats.map(c => <option key={c.slug} value={c.slug}>{c.group} · {c.name}</option>)}
+              {cats.map(c => <option key={c.slug} value={c.slug}>{`${c.group} · ${c.name}`}</option>)}
             </select>
           </Field>
           <Field label="Sell price (AUD)"><input type="number" className="input w-full px-3 py-2 font-mono" value={f.price} onChange={(e) => setField("price", e.target.value)} data-testid="product-price-input"/></Field>
@@ -425,9 +398,9 @@ export function ProductDetailPage({ productId, onBack }) {
       )}
 
       {/* Sticky footer save */}
-      <div className="sticky bottom-4 flex items-center justify-end gap-2 py-2 z-20">
-        <button onClick={onBack} className="btn btn-ghost text-sm">Cancel</button>
-        <button onClick={save} disabled={!dirty || saving} className="btn btn-primary text-sm shadow-lg" data-testid="product-save-btn-footer">
+      <div className="sticky bottom-4 flex items-center justify-end gap-2 py-2 z-20 pointer-events-none">
+        <button onClick={onBack} className="btn btn-ghost text-sm pointer-events-auto">Cancel</button>
+        <button onClick={save} disabled={!dirty || saving} className="btn btn-primary text-sm shadow-lg pointer-events-auto" data-testid="product-save-btn-footer">
           {saving ? <Loader2 className="animate-spin" size={13}/> : <BadgeCheck size={13}/>} Save changes
         </button>
       </div>
@@ -719,10 +692,11 @@ export function PostagePresetField({ presets, product, f, setF, setDirty }) {
           <option value="">— Not selected (use scraped postage below) —</option>
           {presets.map(pr => (
             <option key={pr.id} value={pr.id}>
-              {pr.name}
-              {pr.kind === "free"       ? "  ·  Free"
+              {`${pr.name}${
+                pr.kind === "free"       ? "  ·  Free"
                 : pr.kind === "large_item" ? `  ·  $${Number(pr.postage_amount).toFixed(2)} + $${Number(pr.insurance_amount).toFixed(2)} insurance`
-                : `  ·  $${Number(pr.postage_amount).toFixed(2)}`}
+                : `  ·  $${Number(pr.postage_amount).toFixed(2)}`
+              }`}
             </option>
           ))}
         </select>
@@ -1005,6 +979,127 @@ export function TagsField({ tags, onChange }) {
         Press Enter or comma to add · Backspace on empty input removes the last chip
       </div>
     </Field>
+  );
+}
+
+// Turn the variants array into stable rows the admin can edit/add/delete.
+// Unknown keys (currency, stock_status, sku from the scraper) are preserved
+// via `_rest` so re-saving from the admin doesn't drop scraped metadata.
+function variantsToRows(variants) {
+  return (variants || []).map((v, i) => {
+    const { type, option, price, compare_at_price, ...rest } = v || {};
+    return {
+      id: `var-${i}-${type || ""}-${option || ""}`,
+      type: type || "",
+      option: option || "",
+      price: price != null ? String(price) : "",
+      compare_at_price: compare_at_price != null ? String(compare_at_price) : "",
+      _rest: rest,
+    };
+  });
+}
+
+export function ProductVariantsCard({ product, onUpdated }) {
+  const variants = product?.variants || [];
+  const [editing, setEditing] = useState(false);
+  const [rows, setRows] = useState(() => variantsToRows(variants));
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { if (!editing) setRows(variantsToRows(variants)); }, [product?.id, JSON.stringify(variants), editing]);
+
+  const patchRow = (id, patch) => setRows((rs) => rs.map((r) => r.id === id ? { ...r, ...patch } : r));
+  const addRow = () => setRows((rs) => [...rs, { id: `var-new-${Date.now()}-${rs.length}`, type: "", option: "", price: "", compare_at_price: "", _rest: {} }]);
+  const removeRow = (id) => setRows((rs) => rs.filter((r) => r.id !== id));
+
+  const save = async () => {
+    const out = [];
+    for (const r of rows) {
+      const type = (r.type || "").trim();
+      const option = (r.option || "").trim();
+      if (!type && !option) continue;  // drop fully-blank rows
+      const price = r.price === "" ? null : Number(r.price);
+      const compare = r.compare_at_price === "" ? null : Number(r.compare_at_price);
+      if (price != null && Number.isNaN(price)) return toast.error(`"${option || type}" has an invalid sale price`);
+      if (compare != null && Number.isNaN(compare)) return toast.error(`"${option || type}" has an invalid compare-at price`);
+      out.push({ ...(r._rest || {}), type, option, price, compare_at_price: compare });
+    }
+    setSaving(true);
+    try {
+      const { data } = await axios.patch(`${API}/products/${product.id}`, { variants: out });
+      toast.success("Variants saved");
+      onUpdated?.(data);
+      setEditing(false);
+    } catch (e) {
+      toast.error("Could not save variants", { description: e?.response?.data?.detail || e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Empty state
+  if (!editing && variants.length === 0) {
+    return (
+      <div className="card p-5" data-testid="product-variants">
+        <div className="flex items-center justify-between mb-3">
+          <div className="font-display font-bold">Product Variants</div>
+          <button onClick={() => { setRows([]); addRow(); setEditing(true); }} className="btn btn-primary text-xs" data-testid="variants-add-first"><Plus size={12}/> Add variants</button>
+        </div>
+        <div className="text-sm text-slate-500 italic">No variants yet — add options like Colour · Black, Size · Large, or Storage · 128GB, each with its own price.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card p-5" data-testid="product-variants">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="font-display font-bold">Product Variants · <span className="text-slate-500 font-mono text-sm">{variants.length}</span></div>
+        {editing ? (
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setEditing(false); setRows(variantsToRows(variants)); }} className="btn btn-ghost text-xs" disabled={saving} data-testid="variants-cancel"><X size={12}/> Cancel</button>
+            <button onClick={save} className="btn btn-primary text-xs" disabled={saving} data-testid="variants-save">{saving ? <Loader2 className="animate-spin" size={12}/> : <Save size={12}/>} Save</button>
+          </div>
+        ) : (
+          <button onClick={() => setEditing(true)} className="btn btn-ghost text-xs" data-testid="variants-edit"><Pencil size={12}/> Edit</button>
+        )}
+      </div>
+
+      {editing ? (
+        <div>
+          <div className="hidden md:grid grid-cols-[minmax(110px,1fr)_minmax(110px,1fr)_120px_140px_auto] gap-2 text-[10px] font-mono uppercase tracking-widest text-slate-400 px-1 mb-1">
+            <div>Variant type</div><div>Option</div><div>Sale price</div><div>Compare-at</div><div></div>
+          </div>
+          <div className="grid gap-2">
+            {rows.length === 0 && <div className="text-sm text-slate-500 italic">No rows. Add one to get started.</div>}
+            {rows.map((r, idx) => (
+              <div key={r.id} className="grid grid-cols-2 md:grid-cols-[minmax(110px,1fr)_minmax(110px,1fr)_120px_140px_auto] gap-2 items-center" data-testid={`variant-edit-row-${idx}`}>
+                <input value={r.type} onChange={(e) => patchRow(r.id, { type: e.target.value })} placeholder="Colour" className="input px-3 py-1.5 text-sm" data-testid={`variant-type-${idx}`}/>
+                <input value={r.option} onChange={(e) => patchRow(r.id, { option: e.target.value })} placeholder="Black" className="input px-3 py-1.5 text-sm" data-testid={`variant-option-${idx}`}/>
+                <input value={r.price} onChange={(e) => patchRow(r.id, { price: e.target.value })} placeholder="99.00" type="number" min="0" step="0.01" className="input px-3 py-1.5 text-sm font-mono" data-testid={`variant-price-${idx}`}/>
+                <input value={r.compare_at_price} onChange={(e) => patchRow(r.id, { compare_at_price: e.target.value })} placeholder="129.00" type="number" min="0" step="0.01" className="input px-3 py-1.5 text-sm font-mono" data-testid={`variant-compare-${idx}`}/>
+                <button onClick={() => removeRow(r.id)} className="btn btn-danger !p-2" title="Delete variant" data-testid={`variant-delete-${idx}`}><Trash2 size={13}/></button>
+              </div>
+            ))}
+          </div>
+          <button onClick={addRow} className="btn btn-ghost text-xs mt-3" data-testid="variants-add-row"><Plus size={12}/> Add variant</button>
+        </div>
+      ) : (
+        <div className="border hairline rounded-lg overflow-hidden">
+          <table className="tbl">
+            <thead><tr><th>Type</th><th>Option</th><th className="text-right">Sale price</th><th className="text-right">Compare-at</th></tr></thead>
+            <tbody>
+              {variants.map((v, idx) => (
+                <tr key={`${v.type}-${idx}-${v.option}`} data-testid={`variant-view-row-${idx}`}>
+                  <td className="font-mono text-xs text-slate-600">{v.type || "—"}</td>
+                  <td className="text-sm">{v.option || "—"}</td>
+                  <td className="text-right font-mono text-indigo-600 font-bold">{v.price != null ? moneyCents(v.price) : "—"}</td>
+                  <td className="text-right font-mono text-slate-400 line-through">{v.compare_at_price != null ? moneyCents(v.compare_at_price) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 

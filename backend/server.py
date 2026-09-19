@@ -4269,6 +4269,15 @@ def _shape_storefront_product(p: dict, discount_min: int = 0) -> dict:
         "in_stock": (p.get("stock") or 0) > 0 and (p.get("stock_status") or "live") == "live",
         "stock_status": p.get("stock_status", "live"),
         "tags": p.get("tags") or [],
+        "variants": [
+            {
+                "type": v.get("type"),
+                "option": v.get("option"),
+                "price": v.get("price"),
+                "compare_at_price": v.get("compare_at_price"),
+            }
+            for v in (p.get("variants") or [])
+        ],
         "specifics": p.get("specifics") or {},
         "postage": p.get("postage"),
         "postage_amount": p.get("postage_amount"),

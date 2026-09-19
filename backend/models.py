@@ -197,6 +197,7 @@ class ProductUpdate(BaseModel):
     stock_status: Optional[str] = None
     archived: Optional[bool] = None
     specifics: Optional[dict] = None
+    variants: Optional[List[dict]] = None  # [{type, option, price, compare_at_price, ...}]
     postage: Optional[str] = None
     delivery_speed: Optional[str] = None
     delivery_date_range: Optional[str] = None

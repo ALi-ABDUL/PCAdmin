@@ -63,7 +63,7 @@ export function Pagination({
           data-testid={`${testPrefix}-page-size`}
           aria-label="Rows per page"
         >
-          {sizes.map(n => <option key={n} value={n}>{n} / page</option>)}
+          {sizes.map(n => <option key={n} value={n}>{`${n} / page`}</option>)}
         </select>
       </div>
       {total > 0 && (

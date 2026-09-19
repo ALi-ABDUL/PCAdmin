@@ -2115,3 +2115,24 @@ Notification Bell deep-links) — zero regressions detected.
   Test file: /app/backend/tests/test_customer_first_last_name.py.
 - Note (pre-existing, unrelated): console hydration warning "<span> cannot be a child of
   <option>" appears app-wide — not introduced by this change.
+
+
+## Jun 2026 — Product Variants editor + option-warning cleanup
+- Product Variants: editable section on the product edit page (ProductVariantsCard in
+  ProductDetail.jsx), separate from Specifications. Each variant = {type, option, price
+  (sale), compare_at_price (optional strikethrough)}; add/remove/multiple rows; own Edit/
+  Save. Preserves scraped extra keys (currency/stock_status/sku) via _rest on existing rows.
+- Backend: `variants` added to ProductUpdate (was missing) so PATCH /api/products/{id}
+  persists them; already on Product model. Storefront shaper `_shape_storefront_product`
+  now exposes a normalised `variants` array (GET /api/store/products/{id}) for PCStore.
+  Testids: variants-edit/save/cancel/add-row, variant-type-N/option-N/price-N/compare-N,
+  variant-view-row-N.
+- Fixed app-wide React hydration warning "<span> cannot be a child of <option>": the dev
+  source-map instrumentation wraps mixed text+expression option children in a
+  display:contents span. Converted all mixed-content <option> children to single template-
+  literal expressions (Pagination.jsx, Customers.jsx, Products.jsx, ProductDetail.jsx,
+  ProductEditModal.jsx). Verified 0 warnings on customers-list and product-detail pages.
+- Also made the ProductDetail sticky footer pointer-events-none (buttons pointer-events-auto)
+  so the transparent bar no longer intercepts clicks on the Add-variant / Save buttons.
+- Verified: PATCH persists + round-trips (admin & storefront APIs) via curl; full UI flow
+  (edit -> add variant -> save -> view with strikethrough) via screenshot.

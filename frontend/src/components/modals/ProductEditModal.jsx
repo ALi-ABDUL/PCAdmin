@@ -48,7 +48,7 @@ export function ProductEditModal({ product, categories = [], onClose, onSaved })
           <Field label="Category">
             <select className="input w-full px-3 py-2" value={f.category||"other"} onChange={(e)=>setF({...f, category:e.target.value})}>
               {categories.length === 0 && <option value="other">Other</option>}
-              {categories.map(c=><option key={c.slug} value={c.slug}>{c.group} · {c.name}</option>)}
+              {categories.map(c=><option key={c.slug} value={c.slug}>{`${c.group} · ${c.name}`}</option>)}
             </select>
           </Field>
           <Field label="Price (AUD)"><input type="number" className="input w-full px-3 py-2 font-mono" value={f.price||0} onChange={(e)=>setF({...f, price:e.target.value})}/></Field>

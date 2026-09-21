@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, MapPin, Menu, Package, Plus, RefreshCw, Store, Trash2, X, XCircle, Zap } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, Menu, Package, Plus, RefreshCw, Store, Trash2, X, XCircle, Zap } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
@@ -1786,149 +1786,9 @@ export function StoreSettingsPanel() {
 
 
 
-const POSTCODE_ZONE_META = [
-  { key: "same_state",     label: "Same state",     hint: "Delivery within the store's home state" },
-  { key: "adjacent_state", label: "Adjacent state", hint: "A neighbouring state or territory" },
-  { key: "interstate",     label: "Interstate",     hint: "Any other state / capital-city metro" },
-  { key: "remote",         label: "Remote areas",   hint: "NT, far WA & outback QLD postcodes" },
-];
-
-const AU_STATES = ["NSW", "VIC", "QLD", "SA", "WA", "TAS", "ACT", "NT"];
-
 function ShippingMethodsPanel() {
-  const [open, setOpen] = useState(false);
-  const [settings, setSettings] = useState(null);
-  const [draft, setDraft] = useState(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    const { data } = await axios.get(`${API}/postcode-delivery-settings`);
-    setSettings(data);
-    setDraft({
-      enabled: !!data.enabled,
-      auto_detect_location: !!data.auto_detect_location,
-      origin_state: data.origin_state || "QLD",
-      zones: JSON.parse(JSON.stringify(data.zones || {})),
-    });
-  }, []);
-  useEffect(() => { load(); }, [load]);
-
-  const setZone = (key, field, value) =>
-    setDraft(d => ({ ...d, zones: { ...d.zones, [key]: { ...d.zones[key], [field]: value } } }));
-
-  const save = async () => {
-    for (const z of POSTCODE_ZONE_META) {
-      const r = draft.zones[z.key] || {};
-      if ((Number(r.max_days) || 0) < (Number(r.min_days) || 0))
-        return toast.error(`${z.label}: max days must be ≥ min days`);
-    }
-    setBusy(true);
-    try {
-      const { data } = await axios.patch(`${API}/postcode-delivery-settings`, {
-        enabled: draft.enabled,
-        auto_detect_location: draft.auto_detect_location,
-        origin_state: draft.origin_state,
-        zones: Object.fromEntries(POSTCODE_ZONE_META.map(z => [z.key, {
-          min_days: Number(draft.zones[z.key]?.min_days) || 0,
-          max_days: Number(draft.zones[z.key]?.max_days) || 0,
-        }])),
-      });
-      setSettings(data);
-      setDraft({
-        enabled: !!data.enabled, auto_detect_location: !!data.auto_detect_location,
-        origin_state: data.origin_state || "QLD", zones: JSON.parse(JSON.stringify(data.zones || {})),
-      });
-      toast.success("Postcode delivery settings saved");
-    } catch (e) {
-      toast.error("Save failed", { description: e?.response?.data?.detail?.slice(0, 200) || e.message });
-    } finally { setBusy(false); }
-  };
-
-  const statusLabel = settings
-    ? (settings.enabled ? `On · ${(settings.origin_state || "QLD")} origin` : "Disabled")
-    : "…";
-
   return (
     <div className="grid gap-3" data-testid="shipping-methods-panel">
-      {/* Postcode Delivery Estimate — the one working, configurable method */}
-      <div className="card p-4 md:p-5" data-testid="postcode-delivery-card">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-lg grid place-items-center shrink-0 text-white" style={{ background: "linear-gradient(135deg,#4F46E5,#0891B2)" }}><MapPin size={16}/></div>
-            <div className="min-w-0">
-              <div className="font-medium text-sm truncate">Postcode Delivery Estimate</div>
-              <div className="text-[11px] text-slate-400 font-mono">{statusLabel}</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className={`chip ${settings?.enabled ? "chip-success" : "chip-neutral"} font-mono text-[10px]`} data-testid="postcode-delivery-status-chip">{settings?.enabled ? "ENABLED" : "OFF"}</span>
-            <button className="btn btn-ghost text-xs !py-1 !px-2" onClick={() => setOpen(o => !o)} data-testid="postcode-delivery-configure-btn">
-              {open ? "Close" : "Configure"}
-            </button>
-          </div>
-        </div>
-
-        {open && draft && (
-          <div className="mt-4 pt-4 border-t hairline grid gap-4" data-testid="postcode-delivery-form">
-            <div className="text-xs text-slate-500">PCStore reads these zone windows to show a live "delivery to your postcode" estimate on each product page.</div>
-
-            {/* Feature toggle */}
-            <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer" data-testid="postcode-enabled-toggle">
-              <input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft(d => ({ ...d, enabled: e.target.checked }))} className="accent-indigo-600 mt-1 w-4 h-4"/>
-              <div className="flex-1">
-                <div className="text-sm font-medium">Enable postcode delivery estimate</div>
-                <div className="text-xs text-slate-500 mt-0.5">Show the per-postcode estimate on the storefront product modal.</div>
-              </div>
-              <span className={`chip ${draft.enabled ? "chip-success" : "chip-neutral"} font-mono text-[10px] shrink-0`}>{draft.enabled ? "ON" : "OFF"}</span>
-            </label>
-
-            {/* Auto-detect toggle */}
-            <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer" data-testid="postcode-autodetect-toggle">
-              <input type="checkbox" checked={draft.auto_detect_location} onChange={(e) => setDraft(d => ({ ...d, auto_detect_location: e.target.checked }))} className="accent-indigo-600 mt-1 w-4 h-4"/>
-              <div className="flex-1">
-                <div className="text-sm font-medium">Auto-detect customer location</div>
-                <div className="text-xs text-slate-500 mt-0.5">Ask for browser geolocation to pre-fill the shopper's postcode.</div>
-              </div>
-              <span className={`chip ${draft.auto_detect_location ? "chip-success" : "chip-neutral"} font-mono text-[10px] shrink-0`}>{draft.auto_detect_location ? "ON" : "OFF"}</span>
-            </label>
-
-            {/* Store origin state */}
-            <Field label="Store origin state (zones are calculated relative to this)">
-              <select className="input w-full px-3 py-2 font-mono" value={draft.origin_state} onChange={(e) => setDraft(d => ({ ...d, origin_state: e.target.value }))} data-testid="postcode-origin-state-select">
-                {AU_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </Field>
-
-            {/* Zone day ranges */}
-            <div className="grid gap-2">
-              <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Delivery windows (business days)</div>
-              {POSTCODE_ZONE_META.map(z => (
-                <div key={z.key} className="rounded-lg border hairline p-3 flex items-center justify-between gap-4" data-testid={`postcode-zone-${z.key}`}>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">{z.label}</div>
-                    <div className="text-[11px] text-slate-400">{z.hint}</div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <input type="number" min="0" max="60" step="1" className="input w-16 px-2 py-1.5 font-mono text-center" value={draft.zones[z.key]?.min_days ?? ""} onChange={(e) => setZone(z.key, "min_days", e.target.value)} data-testid={`postcode-zone-${z.key}-min`}/>
-                    <span className="text-slate-400 text-xs">to</span>
-                    <input type="number" min="0" max="60" step="1" className="input w-16 px-2 py-1.5 font-mono text-center" value={draft.zones[z.key]?.max_days ?? ""} onChange={(e) => setZone(z.key, "max_days", e.target.value)} data-testid={`postcode-zone-${z.key}-max`}/>
-                    <span className="text-[11px] text-slate-400 font-mono w-8">days</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex justify-end">
-              <button className="btn btn-primary text-sm" onClick={save} disabled={busy} data-testid="postcode-delivery-save-btn">
-                {busy ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>}
-                {busy ? "Saving…" : "Save settings"}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Carrier scaffolds removed — Postage Presets & Delivery Estimate folded in below */}
       <div className="pt-1">
         <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2"><Package size={13}/> Postage Presets</div>
         <PostagePresetsEditor/>
@@ -2083,7 +1943,7 @@ export function StoreManagement({ section, setSection }) {
     "pricing-rules":       { hint: "Tiered profit rules the scraper uses when calculating sell prices for imported items.", fields: [], custom: <PricingRulesEditor/> },
     "scraper-schedule":    { hint: "Automate the eBay re-fetch: add one or more schedules, each with its own start time, frequency and optional stop date — or run one right now.", fields: [], custom: <ScraperScheduleEditor/> },
     "payment-gateway":     { hint: "Enable/disable payment providers and configure their credentials.", fields: ["Stripe","PayPal","Apple Pay","Google Pay","Afterpay","Zip Pay","Bank transfer","Cash on delivery"] },
-    "shipping-methods":    { hint: "Everything delivery: the per-postcode estimate PCStore shows on each product, your reusable postage presets, and the store-wide delivery window.", fields: [], custom: <ShippingMethodsPanel/> },
+    "shipping-methods":    { hint: "Everything delivery: reusable postage presets and the store-wide delivery window.", fields: [], custom: <ShippingMethodsPanel/> },
     "tax-rates":           { hint: "GST and location-based tax rules.", fields: ["Australia — GST 10%","New Zealand — GST 15%","B2B / ABN entries"] },
     "checkout-settings":   { hint: "Fine-tune the buyer journey at checkout.", fields: ["Guest checkout","Require phone","Address auto-complete","Order note field","Marketing opt-in","Terms & conditions box"] },
     "email-notifications": { hint: "Admin alerts + transactional emails sent to customers. Configure the Resend API key and per-channel toggles here.", fields: [], custom: <PushNotificationSettings/> },

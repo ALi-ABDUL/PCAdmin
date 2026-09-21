@@ -62,6 +62,16 @@ class TestDeliverySettings:
         assert r.status_code == 400
 
 
+class TestPostcodeDeliveryEstimateRemoved:
+    def test_retired_postcode_routes_are_unavailable(self):
+        settings = requests.get(f"{API}/postcode-delivery-settings", timeout=15)
+        update = requests.patch(f"{API}/postcode-delivery-settings", json={}, timeout=15)
+        estimate = requests.get(f"{API}/postcode-delivery-estimate", params={"postcode": "2000"}, timeout=15)
+        assert settings.status_code == 404
+        assert update.status_code == 404
+        assert estimate.status_code == 404
+
+
 class TestSameDayCutoff:
     def test_defaults_include_cutoff(self):
         s = requests.get(f"{API}/delivery-settings", timeout=15).json()

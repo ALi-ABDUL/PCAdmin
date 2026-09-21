@@ -1019,31 +1019,11 @@ export function TagsField({ tags, onChange }) {
 function StorePreviewLightbox({ open, onClose, onPublish, publishing, product }) {
   const [sel, setSel] = useState(0);
   const [chosen, setChosen] = useState({});
-  const [pcSettings, setPcSettings] = useState(null);
-  const [pcode, setPcode] = useState("");
-  const [est, setEst] = useState(null);
-  const [estErr, setEstErr] = useState("");
-  const [estLoading, setEstLoading] = useState(false);
   useEffect(() => {
     if (open) {
-      setSel(0); setChosen({}); setPcode(""); setEst(null); setEstErr("");
-      axios.get(`${API}/postcode-delivery-settings`).then(r => setPcSettings(r.data)).catch(() => setPcSettings(null));
+      setSel(0); setChosen({});
     }
   }, [open]);
-
-  const checkPostcode = async (raw) => {
-    setEst(null); setEstErr("");
-    const digits = (raw || "").replace(/\D/g, "");
-    if (digits.length !== 4) return;
-    setEstLoading(true);
-    try {
-      const { data } = await axios.get(`${API}/postcode-delivery-estimate`, { params: { postcode: digits } });
-      if (data.enabled === false) setEstErr("Delivery estimate is turned off.");
-      else setEst(data);
-    } catch (e) {
-      setEstErr(e?.response?.data?.detail || "Couldn't estimate delivery for that postcode.");
-    } finally { setEstLoading(false); }
-  };
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -1132,42 +1112,6 @@ function StorePreviewLightbox({ open, onClose, onPublish, publishing, product })
             )}
 
             <button className="btn btn-primary w-full mt-6 !py-3 opacity-90 cursor-default" tabIndex={-1} data-testid="preview-add-to-cart">Add to cart</button>
-
-            {/* Postcode delivery estimate — mirrors what PCStore shows shoppers. */}
-            {pcSettings?.enabled && (
-              <div className="mt-5 border hairline rounded-lg p-3" data-testid="preview-delivery">
-                <div className="text-xs font-mono uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2"><Truck size={13}/> Delivery estimate</div>
-                <div className="flex items-center gap-2">
-                  <input
-                    inputMode="numeric"
-                    maxLength={4}
-                    value={pcode}
-                    onChange={(e) => { const v = e.target.value.replace(/\D/g, "").slice(0, 4); setPcode(v); checkPostcode(v); }}
-                    placeholder="Enter postcode"
-                    className="input px-3 py-2 text-sm w-40 font-mono"
-                    data-testid="preview-postcode-input"
-                  />
-                  {estLoading && <Loader2 className="animate-spin text-slate-400" size={15}/>}
-                </div>
-                {est && (
-                  <div className="text-sm text-slate-700 mt-2" data-testid="preview-delivery-result">
-                    Delivered to <b>{est.postcode}</b> ({est.state}) in <b>{est.min_days}–{est.max_days} business days</b>
-                  </div>
-                )}
-                {estErr && <div className="text-xs text-rose-500 mt-2" data-testid="preview-delivery-error">{estErr}</div>}
-                {!est && !estErr && !estLoading && (
-                  <div className="text-xs text-slate-400 mt-2">
-                    Enter an Australian postcode to see the estimated delivery window
-                    {pcSettings?.auto_detect_location ? " (auto-detect is on for shoppers)" : ""}.
-                  </div>
-                )}
-              </div>
-            )}
-            {pcSettings && !pcSettings.enabled && (
-              <div className="mt-5 text-xs text-slate-400 flex items-center gap-2" data-testid="preview-delivery-disabled">
-                <Truck size={13}/> Postcode delivery estimate is turned off — it won't show on the storefront.
-              </div>
-            )}
 
             {/* Description */}
             {product.description && (

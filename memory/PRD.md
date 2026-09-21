@@ -2215,3 +2215,18 @@ Notification Bell deep-links) — zero regressions detected.
 - Verified: `pytest -q backend/tests/test_variant_cart_and_orders.py` — **8 passed**, including
   a login merge regression that covers matching variants, distinct variants, guest-cart
   consumption, and repeated-login idempotency. Syntax check also passed.
+
+
+## Jun 2026 — Postcode Delivery Estimate removed
+- Removed the postcode-specific delivery estimate completely: its API endpoints, data model,
+  AU postcode/zone resolver, admin Shipping Methods editor, product-preview widget, PCStore
+  integration documentation, backup/export collection entry, and the retired MongoDB
+  collections `postcode_delivery_settings` / `postcode_delivery`.
+- Store-wide delivery windows and reusable postage presets remain unchanged under Shipping
+  Methods. The three retired postcode routes must return `404`; that behavior is covered by
+  `TestPostcodeDeliveryEstimateRemoved` in `backend/tests/test_delivery_settings.py`.
+- Verified: `pytest -q backend/tests/test_delivery_settings.py` — **14 passed**; frontend
+  production build passed (existing unrelated hook-dependency warnings only); browser smoke
+  test confirmed Shipping Methods renders Postage Presets + Store-wide default only. External
+  API checks returned 404 for all three retired routes and 200 for `/api/delivery-settings`;
+  both retired MongoDB collections are absent.

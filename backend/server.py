@@ -36,7 +36,7 @@ from models import (
     PUSH_CRITICAL_TYPES, PushSettingsUpdate, PricingRuleBase, PricingRule, PricingRuleUpdate, 
     _DEFAULT_PRICING_RULES, BulkProductIds,
     PostagePresetBase, PostagePreset, PostagePresetUpdate, POSTAGE_PRESET_KINDS,
-    DeliverySettingsUpdate, PostcodeDeliveryUpdate, POSTCODE_DELIVERY_ZONES,
+    DeliverySettingsUpdate,
     SITE_PAGES, SITE_PAGE_SLUGS, SiteMenusUpdate,
     ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
@@ -57,7 +57,7 @@ from helpers import (
     _get_credential, _push_channel_status, _notif_is_critical, _send_email, _send_telegram, 
     _format_notification_html, _push_notification, _emit_notification, 
     _emit_price_change_notifications, _auto_archive_if_out_of_stock, calc_pricing, _ensure_pricing_rules_seeded, 
-    _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings, _get_postcode_delivery_settings, _classify_delivery_zone, _get_site_menus, _delete_categories_if_empty,
+    _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings, _get_site_menus, _delete_categories_if_empty,
     _ensure_main_admin_seeded, _default_seo,
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
@@ -2118,65 +2118,6 @@ async def update_delivery_settings(body: DeliverySettingsUpdate):
 
 
 # ---------------------------------------------------------------------------
-# Postcode Delivery Estimate (Shipping Methods › Postcode Delivery Estimate)
-# GET/PATCH manage the settings; the /estimate endpoint is what PCStore calls
-# with a destination postcode to render the per-postcode delivery window.
-# ---------------------------------------------------------------------------
-@api_router.get("/postcode-delivery-settings")
-async def get_postcode_delivery_settings():
-    return await _get_postcode_delivery_settings()
-
-
-@api_router.patch("/postcode-delivery-settings")
-async def update_postcode_delivery_settings(body: PostcodeDeliveryUpdate):
-    fields = {k: v for k, v in body.model_dump().items() if v is not None}
-    if not fields:
-        raise HTTPException(status_code=400, detail="No fields to update")
-    if "zones" in fields:
-        existing = await _get_postcode_delivery_settings()
-        merged_zones = {**existing["zones"]}
-        for key, rng in (fields["zones"] or {}).items():
-            if key not in POSTCODE_DELIVERY_ZONES:
-                raise HTTPException(status_code=400, detail=f"Unknown zone: {key}")
-            try:
-                mn, mx = int(rng.get("min_days")), int(rng.get("max_days"))
-            except (TypeError, ValueError):
-                raise HTTPException(status_code=400, detail=f"Invalid range for {key}")
-            if mn < 0 or mx < mn:
-                raise HTTPException(status_code=400, detail=f"Max days must be ≥ min days for {key}")
-            merged_zones[key] = {"min_days": mn, "max_days": mx}
-        fields["zones"] = merged_zones
-    if "origin_state" in fields:
-        fields["origin_state"] = str(fields["origin_state"]).upper()
-    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.postcode_delivery_settings.update_one({"id": "singleton"}, {"$set": fields}, upsert=True)
-    return await _get_postcode_delivery_settings()
-
-
-@api_router.get("/postcode-delivery-estimate")
-async def postcode_delivery_estimate(postcode: str):
-    """Resolve a destination postcode to its state, zone and business-day range.
-    Public — PCStore uses this to power the product-page postcode estimate."""
-    settings = await _get_postcode_delivery_settings()
-    pc_str = re.sub(r"\D", "", postcode or "")
-    if len(pc_str) != 4:
-        raise HTTPException(status_code=400, detail="Postcode must be 4 digits")
-    zone, state = _classify_delivery_zone(settings["origin_state"], int(pc_str))
-    if not zone:
-        raise HTTPException(status_code=404, detail="Unrecognised Australian postcode")
-    rng = settings["zones"][zone]
-    return {
-        "enabled": settings["enabled"],
-        "postcode": pc_str,
-        "state": state,
-        "origin_state": settings["origin_state"],
-        "zone": zone,
-        "min_days": rng["min_days"],
-        "max_days": rng["max_days"],
-    }
-
-
-# ---------------------------------------------------------------------------
 # Site Menus (Store Management › Site Menus)
 # Powers the storefront "Customer Support" menu. PCStore reads `get_help` to
 # wire up the "Get Help" link in its customer-account dropdown.
@@ -2332,7 +2273,7 @@ async def login_admin_account(body: dict = Body(...)):
 BACKUP_COLLECTIONS = [
     "products", "orders", "customers", "customer_accounts",
     "categories", "suppliers", "reviews", "messages",
-    "pricing_rules", "postage_presets", "delivery_settings", "postcode_delivery_settings", "site_menus",
+    "pricing_rules", "postage_presets", "delivery_settings", "site_menus",
     "settings", "coupons", "notifications", "transactions",
     "returns", "abandoned_carts",
 ]

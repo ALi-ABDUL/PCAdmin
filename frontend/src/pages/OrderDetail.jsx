@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { ChevronLeft, ImageIcon, CreditCard, Wallet, Landmark, CheckCircle2, Clock } from "lucide-react";
+import { ChevronLeft, ImageIcon, CreditCard, Wallet, Landmark, CheckCircle2, Clock, PackageCheck, Truck } from "lucide-react";
 import { StatBox } from "../components/atoms";
 import { API, proxyImg } from "../lib/api";
 import { fmtDate, humaniseStatus, moneyCents } from "../lib/format";
@@ -9,6 +9,7 @@ import { ORDER_STATUSES } from "../lib/nav";
 
 export function OrderDetailPage({ orderId, onBack }) {
   const [o, setO] = useState(null);
+  const [updatingLineId, setUpdatingLineId] = useState(null);
 
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/orders/${orderId}`);
@@ -31,6 +32,20 @@ export function OrderDetailPage({ orderId, onBack }) {
     } catch { toast.error("Update failed"); }
   };
 
+  const setLineFulfillment = async (line, status) => {
+    if (!line.line_id || line.fulfillment_status === status) return;
+    setUpdatingLineId(line.line_id);
+    try {
+      const { data } = await axios.patch(`${API}/orders/${orderId}/items/${line.line_id}/fulfillment`, { status });
+      setO(data.order);
+      toast.success(`${line.title || "Item"} marked ${status}`);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Could not update item fulfilment");
+    } finally {
+      setUpdatingLineId(null);
+    }
+  };
+
   if (!o) return <div className="text-slate-500 py-24 text-center">loading order…</div>;
 
   const unitPrice = o.unit_price ?? (o.total / Math.max(1, o.quantity));
@@ -49,6 +64,13 @@ export function OrderDetailPage({ orderId, onBack }) {
   const MethodIcon = methodIcon[paymentMethod] || CreditCard;
   const isPaid = paymentStatus === "paid";
 
+  const hasLineItems = Array.isArray(o.items) && o.items.length > 0;
+  const FULFILLMENT_STATUSES = [
+    { id: "pending", label: "Pending", icon: Clock },
+    { id: "shipped", label: "Shipped", icon: Truck },
+    { id: "delivered", label: "Delivered", icon: PackageCheck },
+  ];
+
   return (
     <div className="grid gap-4 max-w-4xl mx-auto w-full" data-testid="order-detail-page">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -62,7 +84,7 @@ export function OrderDetailPage({ orderId, onBack }) {
       </div>
 
       {/* Product summary — single-product orders only (multi-item orders show the line-items list below) */}
-      {!(Array.isArray(o.items) && o.items.length > 0) && (
+      {!hasLineItems && (
       <div className="card p-5">
         <div className="flex items-start gap-4 flex-wrap">
           {o.product_images?.[0] || o.image
@@ -87,12 +109,12 @@ export function OrderDetailPage({ orderId, onBack }) {
       )}
 
       {/* Line items — multi-item orders carry an `items` array */}
-      {Array.isArray(o.items) && o.items.length > 0 && (
+      {hasLineItems && (
         <div className="card p-5" data-testid="order-line-items">
           <div className="font-display font-bold mb-4">Line items ({o.items.length})</div>
           <div className="grid gap-2">
             {o.items.map((li, i) => (
-              <div key={li.product_id || i} className="flex items-center gap-3 rounded-xl border hairline p-3" data-testid={`order-line-item-${i}`}>
+              <div key={li.line_id || `${li.product_id}-${i}`} className="flex items-center gap-3 rounded-xl border hairline p-3 flex-wrap sm:flex-nowrap" data-testid={`order-line-item-${i}`}>
                 {li.image
                   ? <img src={proxyImg(li.image)} alt="" className="w-12 h-12 rounded-lg object-cover border hairline shrink-0"/>
                   : <div className="w-12 h-12 rounded-lg bg-slate-100 grid place-items-center text-slate-300 shrink-0"><ImageIcon size={16}/></div>}
@@ -108,7 +130,31 @@ export function OrderDetailPage({ orderId, onBack }) {
                     {li.product_id ? <span className="text-slate-400"> · #{String(li.product_id).slice(0, 8)}</span> : null}
                   </div>
                 </div>
-                <div className="font-mono font-bold text-indigo-600 shrink-0">{moneyCents(li.line_total ?? (li.unit_price || 0) * (li.quantity || 1))}</div>
+                <div className="flex items-center gap-3 ml-auto shrink-0 flex-wrap justify-end">
+                  <div className="font-mono font-bold text-indigo-600">{moneyCents(li.line_total ?? (li.unit_price || 0) * (li.quantity || 1))}</div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <span className={`chip ${li.fulfillment_status === "delivered" ? "chip-success" : li.fulfillment_status === "shipped" ? "chip-primary" : "chip-neutral"} !text-[10px]`} data-testid={`order-line-item-fulfillment-status-${i}`}>
+                      {humaniseStatus(li.fulfillment_status || "pending")}
+                    </span>
+                    <div className="flex items-center gap-1" data-testid={`order-line-item-fulfillment-controls-${i}`}>
+                      {FULFILLMENT_STATUSES.map(({ id, label, icon: Icon }) => {
+                        const active = (li.fulfillment_status || "pending") === id;
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => setLineFulfillment(li, id)}
+                            disabled={active || updatingLineId === li.line_id}
+                            title={`Mark this item ${label.toLowerCase()}`}
+                            data-testid={`order-line-item-fulfillment-${i}-${id}`}
+                            className={`w-8 h-8 grid place-items-center rounded-md border transition-colors ${active ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-400 hover:border-indigo-300 hover:text-indigo-600"} disabled:cursor-default disabled:opacity-70`}
+                            aria-label={`Mark ${li.title || "item"} ${label.toLowerCase()}`}
+                          ><Icon size={14}/></button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
@@ -122,7 +168,12 @@ export function OrderDetailPage({ orderId, onBack }) {
       {/* Status tracker */}
       <div className="card p-5">
         <div className="font-display font-bold mb-3">Status</div>
-        <div className="flex flex-wrap gap-2" data-testid="order-status-tracker">
+        {hasLineItems ? (
+          <div className="flex items-center gap-3 flex-wrap" data-testid="order-status-auto-tracker">
+            <span className="chip chip-primary !text-xs !py-1 !px-3" data-testid="order-status-auto-badge">{humaniseStatus(o.status)}</span>
+            <span className="text-xs text-slate-500" data-testid="order-status-auto-note">Updates automatically once every line item has shipped or been delivered.</span>
+          </div>
+        ) : <div className="flex flex-wrap gap-2" data-testid="order-status-tracker">
           {ORDER_STATUSES.map((s) => {
             const on = s === o.status;
             return (
@@ -136,7 +187,7 @@ export function OrderDetailPage({ orderId, onBack }) {
               </button>
             );
           })}
-        </div>
+        </div>}
       </div>
 
       {/* Payment */}

@@ -2230,3 +2230,24 @@ Notification Bell deep-links) — zero regressions detected.
   test confirmed Shipping Methods renders Postage Presets + Store-wide default only. External
   API checks returned 404 for all three retired routes and 200 for `/api/delivery-settings`;
   both retired MongoDB collections are absent.
+
+
+## Jun 2026 — Per-line fulfilment status
+- Each order item now has a stable `line_id`, independent `fulfillment_status`
+  (`pending` / `shipped` / `delivered`), and item-level fulfilment history. Existing order
+  lines are backfilled safely at backend startup; new lines begin as pending. Order inputs now
+  reject zero or negative quantities.
+- New `PATCH /api/orders/{order_id}/items/{line_id}/fulfillment` updates exactly one line,
+  recalculates the aggregate order status only when all lines qualify (`shipped` when every
+  item is shipped/delivered; `delivered` when every item is delivered), and retains order
+  status history for those aggregate transitions.
+- Each line-state change calls `send_customer_order_line_status_update`, rendering an email
+  for only that changed product/variant, quantity, status, and line total. It respects the
+  existing customer status-email toggle and Resend configuration; when no recipient/key is
+  configured, the API returns the appropriate skipped result instead of sending mail.
+- Order Detail now has accessible per-line Pending / Shipped / Delivered icon controls and
+  status chips (testids `order-line-item-fulfillment-{i}-{status}`). Multi-line orders show a
+  read-only aggregate status indicator instead of manual whole-order status controls.
+- Verified: testing_agent iteration_33 passed backend and frontend coverage. Final local
+  regression (`test_order_line_fulfillment`, variant carts/orders, order timeline) passed
+  **16 tests**; frontend production build passed with pre-existing ProductDetail hook warnings.

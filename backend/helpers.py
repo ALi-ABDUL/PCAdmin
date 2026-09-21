@@ -200,6 +200,25 @@ async def _ensure_order_references_backfilled() -> None:
     if count:
         logger.info(f"backfilled reference on {count} orders")
 
+
+async def _ensure_order_line_fulfillment_backfilled() -> None:
+    """Give every legacy order line a stable ID and pending fulfilment state."""
+    cursor = db.orders.find({"items.0": {"$exists": True}}, {"_id": 0, "id": 1, "items": 1})
+    async for order in cursor:
+        changed = False
+        lines = []
+        for raw_line in order.get("items") or []:
+            line = {key: value for key, value in raw_line.items() if key != "_id"}
+            if not line.get("line_id"):
+                line["line_id"] = str(uuid.uuid4())
+                changed = True
+            if line.get("fulfillment_status") not in {"pending", "shipped", "delivered"}:
+                line["fulfillment_status"] = "pending"
+                changed = True
+            lines.append(line)
+        if changed:
+            await db.orders.update_one({"id": order["id"]}, {"$set": {"items": lines}})
+
 _ITEM_RESULT_PROJECTION = {"_id": 0, "id": 1, "url": 1, "item_id": 1, "title": 1, "images": 1}
 
 
@@ -1302,6 +1321,33 @@ async def send_customer_order_status_update(order: dict, old_status: str, new_st
             ("Item",      order.get("product_title") or "—"),
             ("Status",    new_status.replace("_", " ").title()),
             ("Total",     f"${float(order.get('total') or 0):.2f}"),
+        ],
+    )
+    return await send_customer_email("order_status_update", to, subject, html)
+
+
+async def send_customer_order_line_status_update(order: dict, line: dict, old_status: str, new_status: str) -> str:
+    """Send one transactional update for the changed fulfilment line only."""
+    to = order.get("customer_email") or ""
+    friendly = {
+        "pending": "is pending fulfilment",
+        "shipped": "has shipped",
+        "delivered": "has been delivered",
+    }.get(new_status, f"status is now {new_status}")
+    variant = ": ".join(str(value) for value in (line.get("variant_type"), line.get("variant_option")) if value)
+    item_label = line.get("title") or order.get("product_title") or "Item"
+    if variant:
+        item_label = f"{item_label} ({variant})"
+    subject = f"Your item {friendly} · #{(order.get('reference') or order.get('id') or '')[:16]}"
+    html = _customer_email_html(
+        title=f"Your item {friendly}",
+        intro=f"Hi {_greeting_first_name(order)}, an update on an item from your recent order.",
+        rows=[
+            ("Order", order.get("reference") or (order.get("id") or "")[:8]),
+            ("Item", item_label),
+            ("Quantity", str(line.get("quantity") or 1)),
+            ("Status", new_status.replace("_", " ").title()),
+            ("Item total", f"${float(line.get('line_total') or 0):.2f}"),
         ],
     )
     return await send_customer_email("order_status_update", to, subject, html)

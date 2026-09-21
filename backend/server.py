@@ -26,7 +26,7 @@ from scraper import (
 from models import (
     CATEGORIES, SEED_CATEGORIES, ScrapeRequest, ScrapedItem, WatchlistToggle, ProductCreate, 
     Product, ProductUpdate, ShippingAddress, _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, 
-    OrderCreate, OrderLineInput, CartLineInput, CartUpdate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, ItemBulkAction, 
+    OrderCreate, OrderLineInput, OrderLineFulfillmentUpdate, CartLineInput, CartUpdate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, ItemBulkAction, 
     RefreshAllRequest, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
     FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ScheduleEntryBody, ScraperSchedulesReplaceBody, AutoRetryConfigBody, ORDER_STATUSES, ReturnRequest, 
     AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate, PortalProfileUpdate,
@@ -48,7 +48,7 @@ from models import (
 from countries import COUNTRIES, COUNTRY_CODES
 from helpers import (
     _rand_au_address, _slug, _split_name, _compose_name, _product_code_base, _generate_unique_product_code, 
-    _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _refresh_all_items, _retry_scrape_items, 
+    _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _ensure_order_line_fulfillment_backfilled, _refresh_all_items, _retry_scrape_items, 
     _get_scraper_schedule, _compute_next_run, _compute_next_run_for, _classify_run, _push_run_history, 
     _refresh_all_and_record, _update_schedule_entry, _scheduler_loop, _ensure_categories_seeded, _ensure_ebay_category, _now_iso, 
     _seed_transactions_and_returns, _rebuild_customers_from_orders, _link_customer_to_portal_account, _shape_review, _jwt_secret, 
@@ -59,7 +59,7 @@ from helpers import (
     _emit_price_change_notifications, _auto_archive_if_out_of_stock, calc_pricing, _ensure_pricing_rules_seeded, 
     _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings, _get_site_menus, _delete_categories_if_empty,
     _ensure_main_admin_seeded, _default_seo,
-    send_customer_email, send_customer_order_confirmation, send_customer_order_status_update,
+    send_customer_email, send_customer_order_confirmation, send_customer_order_status_update, send_customer_order_line_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
     _customer_email_html,
     _get_email_templates, _send_verification_email, _consume_verification_token,
@@ -640,6 +640,7 @@ async def _start_scheduler():
     await _seed_transactions_and_returns()
     await _ensure_product_codes_backfilled()
     await _ensure_order_references_backfilled()
+    await _ensure_order_line_fulfillment_backfilled()
     # One-shot backfill: normalise/complete the payment fields on every order.
     # Some legacy orders had a lowercase `payment_method` (e.g. "bank_transfer")
     # and no `payment_status`; older ones had neither. Canonicalise the method
@@ -869,6 +870,52 @@ async def update_order(oid: str, body: dict):
         elif new_status == "cancelled":
             await send_customer_order_cancellation(updated)
     return updated
+
+
+@api_router.patch("/orders/{oid}/items/{line_id}/fulfillment")
+async def update_order_line_fulfillment(oid: str, line_id: str, body: OrderLineFulfillmentUpdate):
+    """Update one line item and notify the customer about that item only."""
+    order = await db.orders.find_one({"id": oid}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    lines = [{key: value for key, value in line.items() if key != "_id"} for line in (order.get("items") or [])]
+    line_index = next((index for index, line in enumerate(lines) if line.get("line_id") == line_id), None)
+    if line_index is None:
+        raise HTTPException(status_code=404, detail="Order line item not found")
+
+    line = lines[line_index]
+    old_status = line.get("fulfillment_status") or "pending"
+    new_status = body.status
+    if old_status == new_status:
+        return {"order": order, "line_item": line, "customer_notification": "skipped_unchanged"}
+
+    changed_at = datetime.now(timezone.utc).isoformat()
+    line["fulfillment_status"] = new_status
+    line["fulfillment_history"] = [
+        *(line.get("fulfillment_history") or []),
+        {"from": old_status, "to": new_status, "changed_at": changed_at},
+    ]
+    lines[line_index] = line
+
+    update_fields: dict[str, Any] = {"items": lines, "updated_at": changed_at}
+    update_doc: dict[str, Any] = {"$set": update_fields}
+    line_statuses = [item.get("fulfillment_status") or "pending" for item in lines]
+    aggregate_status = None
+    if line_statuses and all(status == "delivered" for status in line_statuses):
+        aggregate_status = "delivered"
+    elif line_statuses and all(status in {"shipped", "delivered"} for status in line_statuses):
+        aggregate_status = "shipped"
+    if aggregate_status and aggregate_status != order.get("status"):
+        update_fields["status"] = aggregate_status
+        update_doc["$push"] = {"status_history": {
+            "from": order.get("status"), "to": aggregate_status, "changed_at": changed_at,
+        }}
+
+    await db.orders.update_one({"id": oid}, update_doc)
+    updated = await db.orders.find_one({"id": oid}, {"_id": 0})
+    notification = await send_customer_order_line_status_update(updated, line, old_status, new_status)
+    return {"order": updated, "line_item": line, "customer_notification": notification}
 
 
 @api_router.get("/returns")
@@ -2834,6 +2881,7 @@ def _build_order_line(p: dict, qty: int, vtype=None, voption=None, vprice=None) 
     unit_price = float(vprice) if vprice is not None else float(p.get("price") or 0)
     unit_cost = float(p.get("cost") or 0)
     return {
+        "line_id": str(uuid.uuid4()),
         "product_id": p["id"],
         "title": p.get("title"),
         "image": (p.get("images") or [None])[0],
@@ -2845,6 +2893,7 @@ def _build_order_line(p: dict, qty: int, vtype=None, voption=None, vprice=None) 
         "unit_cost": round(unit_cost, 2),
         "line_total": round(unit_price * qty, 2),
         "cost_total": round(unit_cost * qty, 2),
+        "fulfillment_status": "pending",
     }
 
 

@@ -597,6 +597,9 @@ class PortalRegisterBody(BaseModel):
 class PortalLoginBody(BaseModel):
     email: str
     password: str
+    # PCStore sends its existing anonymous-cart identifier here on sign-in.
+    # It is optional so portal-only sign-ins continue to work unchanged.
+    session_id: Optional[str] = Field(default=None, min_length=1, max_length=200)
 
 
 class VerifyTokenBody(BaseModel):

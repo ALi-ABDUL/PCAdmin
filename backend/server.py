@@ -1536,7 +1536,12 @@ async def portal_login(body: PortalLoginBody):
             },
         )
     token = _issue_token(email)
-    return {"token": token, "customer": {"id": acct["id"], "email": email, "name": acct.get("name", "")}}
+    cart = await _merge_guest_cart_into_customer(email, body.session_id)
+    return {
+        "token": token,
+        "customer": {"id": acct["id"], "email": email, "name": acct.get("name", "")},
+        "cart": cart,
+    }
 
 
 @api_router.get("/portal/me")
@@ -3003,6 +3008,70 @@ def _cart_key(email: Optional[str], session_id: Optional[str]) -> str:
     if session_id:
         return f"sess:{session_id}"
     raise HTTPException(status_code=400, detail="A session_id is required for a guest cart")
+
+
+def _cart_line_identity(line: dict) -> tuple:
+    """Identity for combining a product/variant selection without changing price."""
+    variant_price = line.get("variant_price")
+    return (
+        line.get("product_id"),
+        line.get("variant_type") or None,
+        line.get("variant_option") or None,
+        (round(float(variant_price), 2) if variant_price is not None else None),
+    )
+
+
+def _merge_cart_lines(*line_groups: list[dict]) -> list[dict]:
+    """Combine identical product/variant lines while retaining their saved price."""
+    merged: list[dict] = []
+    by_identity: dict[tuple, dict] = {}
+    for lines in line_groups:
+        for raw_line in lines or []:
+            line = {key: value for key, value in raw_line.items() if key != "_id"}
+            quantity = max(1, int(line.get("quantity") or 1))
+            identity = _cart_line_identity(line)
+            existing = by_identity.get(identity)
+            if existing:
+                existing["quantity"] += quantity
+                existing["line_total"] = round(existing["unit_price"] * existing["quantity"], 2)
+                continue
+            unit_price = round(float(line.get("unit_price") or 0), 2)
+            line["quantity"] = quantity
+            line["unit_price"] = unit_price
+            line["line_total"] = round(unit_price * quantity, 2)
+            by_identity[identity] = line
+            merged.append(line)
+    return merged
+
+
+async def _merge_guest_cart_into_customer(email: str, session_id: Optional[str]) -> dict:
+    """Move one guest cart into a customer's cart after a successful sign-in.
+
+    A guest cart is consumed only after its contents have been merged into the
+    account cart, making repeated sign-ins with the same session id idempotent.
+    """
+    customer_key = _cart_key(email, None)
+    if not session_id:
+        return await _get_cart(customer_key)
+
+    guest_key = _cart_key(None, session_id)
+    guest_cart = await db.carts.find_one({"key": guest_key}, {"_id": 0})
+    if not guest_cart:
+        return await _get_cart(customer_key)
+
+    customer_cart = await db.carts.find_one({"key": customer_key}, {"_id": 0}) or {}
+    items = _merge_cart_lines(customer_cart.get("items") or [], guest_cart.get("items") or [])
+    cart = {
+        "key": customer_key,
+        "session_id": None,
+        "customer_email": email,
+        "items": items,
+        "subtotal": round(sum(line["line_total"] for line in items), 2),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.carts.update_one({"key": customer_key}, {"$set": cart}, upsert=True)
+    await db.carts.delete_one({"key": guest_key})
+    return cart
 
 
 async def _build_cart_line(li: CartLineInput) -> dict:

@@ -2198,3 +2198,20 @@ Notification Bell deep-links) — zero regressions detected.
 - Frontend-only; uses existing endpoints. Verified via screenshot (QLD origin: 2000→NSW
   adjacent = 2–3 days). Note: restored store postcode settings to enabled/origin QLD
   (a prior test had left them disabled/SA).
+
+
+## Jun 2026 — Guest cart merge on customer sign-in
+- `POST /api/portal/login` now accepts an optional `session_id` and returns the customer's
+  resolved account `cart` alongside its existing JWT/customer response. When supplied, the
+  server moves the matching guest cart (`sess:{session_id}`) into the account cart
+  (`cust:{email}`) immediately after successful credential and verification checks.
+- Merge behavior preserves variant-aware pricing: rows are combined only when product,
+  variant type, variant option, and saved variant price all match. Distinct variants remain
+  separate; quantities, line totals, and subtotal are recalculated. The guest cart is deleted
+  after the account cart is written, so a repeated sign-in cannot duplicate items.
+- `PCSTORE_INTEGRATION.md` documents the new optional login field and a storefront handoff
+  pattern: submit the stable guest session id at sign-in, replace local cart state from the
+  returned cart, then clear the client-held guest id.
+- Verified: `pytest -q backend/tests/test_variant_cart_and_orders.py` — **8 passed**, including
+  a login merge regression that covers matching variants, distinct variants, guest-cart
+  consumption, and repeated-login idempotency. Syntax check also passed.

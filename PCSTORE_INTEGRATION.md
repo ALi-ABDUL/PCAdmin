@@ -202,7 +202,7 @@ via `PATCH /api/security/disposable-domains`) return
 | method | path                        | body / auth                          | returns                                         |
 | ------ | --------------------------- | ------------------------------------ | ----------------------------------------------- |
 | `POST` | `/api/portal/register`      | `{ email, password, name?, first_name?, last_name? }` | `{ token, customer }`              |
-| `POST` | `/api/portal/login`         | `{ email, password }`                | `{ token, customer }`                           |
+| `POST` | `/api/portal/login`         | `{ email, password, session_id? }`   | `{ token, customer, cart }`                     |
 | `GET`  | `/api/portal/me`            | Bearer token                          | `{ customer }`                                  |
 | `PATCH`| `/api/portal/me`            | Bearer token, `{ first_name?, last_name?, name?, phone? }` | `{ customer }`             |
 | `GET`  | `/api/portal/orders`        | Bearer token                          | `{ orders: [...], total }` (each row tagged with `can_review` + `already_reviewed`) |
@@ -211,6 +211,28 @@ via `PATCH /api/security/disposable-domains`) return
 | `POST` | `/api/reviews/{rid}/vote`   | Bearer token, `{ vote: "helpful"\|"not_helpful"\|"clear" }` | vote counts |
 
 Password minimum length is 6 characters.
+
+### Merge a guest cart on sign-in
+
+When a shopper signs in, include the same anonymous `session_id` used for
+their guest cart in the login body. The API moves that guest cart into the
+customer's account cart, combines lines with the same product, variant, and
+saved variant price, then removes the guest cart so another login cannot add
+the same items twice. The merged account cart is returned as `cart`.
+
+```js
+const sessionId = localStorage.getItem("guest_cart_session_id"); // stable UUID created for guest carts
+const { token, customer, cart } = await apiPost("/portal/login", {
+  email,
+  password,
+  ...(sessionId ? { session_id: sessionId } : {}),
+});
+localStorage.removeItem("guest_cart_session_id");
+// Replace local cart state with cart.items / cart.subtotal.
+```
+
+Use an unguessable UUID for each guest `session_id`; do not send it if the
+shopper did not have a guest cart.
 
 **Customer name fields:** the profile stores `first_name` and `last_name`
 separately (plus a derived `name`). PCStore should split the shopper's full

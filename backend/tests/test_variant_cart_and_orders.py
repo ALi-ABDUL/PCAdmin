@@ -203,6 +203,49 @@ class TestJwtCart:
         client.patch(f"{API}/cart", json={"session_id": sess, "items": []})
         client.patch(f"{API}/cart", json={"items": []}, headers=auth)
 
+    def test_login_merges_and_consumes_guest_cart(self, client, products, jwt_token):
+        """Signing in with a guest session merges distinct lines and sums exact matches."""
+        import jwt as pyjwt
+
+        email = pyjwt.decode(jwt_token, options={"verify_signature": False})["sub"]
+        sess = f"qa_merge_{uuid.uuid4().hex[:10]}"
+        p1, p2 = products[0], products[1]
+        auth = {"Authorization": f"Bearer {jwt_token}"}
+
+        # Account cart has an exact match plus a different variant selection.
+        client.patch(f"{API}/cart", json={"items": [
+            {"product_id": p1["id"], "quantity": 2, "variant_type": "Size", "variant_option": "M", "variant_price": 24.50},
+            {"product_id": p1["id"], "quantity": 1, "variant_type": "Size", "variant_option": "L", "variant_price": 29.50},
+        ]}, headers=auth).raise_for_status()
+        # Guest cart shares one line and adds a different product.
+        client.patch(f"{API}/cart", json={"session_id": sess, "items": [
+            {"product_id": p1["id"], "quantity": 3, "variant_type": "Size", "variant_option": "M", "variant_price": 24.50},
+            {"product_id": p2["id"], "quantity": 1, "variant_type": "Color", "variant_option": "Blue", "variant_price": 11.00},
+        ]}).raise_for_status()
+
+        login = client.post(f"{API}/portal/login", json={
+            "email": email, "password": "TestPass123!", "session_id": sess,
+        })
+        assert login.status_code == 200, login.text
+        merged = login.json()["cart"]
+        assert len(merged["items"]) == 3
+        match = next(line for line in merged["items"] if line["product_id"] == p1["id"] and line["variant_option"] == "M")
+        assert match["quantity"] == 5
+        assert match["line_total"] == 122.50
+        assert merged["subtotal"] == 163.00
+
+        # Guest cart is deleted so another login cannot duplicate these lines.
+        guest = client.get(f"{API}/cart", params={"session_id": sess})
+        assert guest.status_code == 200
+        assert guest.json()["items"] == []
+        again = client.post(f"{API}/portal/login", json={
+            "email": email, "password": "TestPass123!", "session_id": sess,
+        })
+        assert again.status_code == 200
+        assert again.json()["cart"]["subtotal"] == 163.00
+
+        client.patch(f"{API}/cart", json={"items": []}, headers=auth)
+
 
 # ---------------------------------------------------------------------------
 # Orders tests

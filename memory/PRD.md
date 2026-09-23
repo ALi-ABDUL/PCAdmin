@@ -2294,3 +2294,15 @@ Notification Bell deep-links) — zero regressions detected.
   delivered, preserving independent line updates. Verified with **16 passing** fulfilment/cart/
   timeline tests, a frontend production build, a live API update, and the dashboard icon render;
   temporary order data was removed and stock restored.
+
+
+## Jun 2026 — Fulfilment controls self-heal for externally created orders
+- Root cause of the non-working line icons: order `ORD-2D512BF5` was inserted outside the normal
+  checkout flow after startup, so its 11 `items` had no `line_id` or `fulfillment_status`.
+  Order Detail correctly refused click updates without a stable line ID.
+- Added `_ensure_order_line_fulfillment(order)`, which assigns/persists missing IDs and a pending
+  state before `GET /api/orders/{id}` reaches PCAdmin, before a line update, and before
+  `GET /api/portal/orders` reaches PCStore. Startup backfill continues to cover existing data.
+- The reported 11-line order was repaired in MongoDB without changing any fulfilment status;
+  all Processing/Shipped/Delivered controls are enabled. testing_agent iteration_36 and the
+  final targeted regression suite passed **9/9**, including Mongo persistence and portal reads.

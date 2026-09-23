@@ -49,7 +49,7 @@ from models import (
 from countries import COUNTRIES, COUNTRY_CODES
 from helpers import (
     _rand_au_address, _slug, _split_name, _compose_name, _product_code_base, _generate_unique_product_code, 
-    _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _ensure_order_line_fulfillment_backfilled, _refresh_all_items, _retry_scrape_items, 
+    _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _ensure_order_line_fulfillment_backfilled, _ensure_order_line_fulfillment, _refresh_all_items, _retry_scrape_items, 
     _get_scraper_schedule, _compute_next_run, _compute_next_run_for, _classify_run, _push_run_history, 
     _refresh_all_and_record, _update_schedule_entry, _scheduler_loop, _ensure_categories_seeded, _ensure_ebay_category, _now_iso, 
     _seed_transactions_and_returns, _rebuild_customers_from_orders, _link_customer_to_portal_account, _shape_review, _jwt_secret, 
@@ -835,7 +835,7 @@ async def get_order(oid: str):
     o = await db.orders.find_one({"id": oid}, {"_id": 0})
     if not o:
         raise HTTPException(status_code=404, detail="Not found")
-    return o
+    return await _ensure_order_line_fulfillment(o)
 
 
 @api_router.patch("/orders/{oid}")
@@ -879,6 +879,7 @@ async def update_order_line_fulfillment(oid: str, line_id: str, body: OrderLineF
     order = await db.orders.find_one({"id": oid}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    order = await _ensure_order_line_fulfillment(order)
 
     lines = [{key: value for key, value in line.items() if key != "_id"} for line in (order.get("items") or [])]
     line_index = next((index for index, line in enumerate(lines) if line.get("line_id") == line_id), None)
@@ -1641,6 +1642,7 @@ async def portal_orders(current: dict = Depends(get_current_customer)):
         {"_id": 0},
     ).sort("created_at", -1).limit(500)
     orders = await cursor.to_list(500)
+    orders = [await _ensure_order_line_fulfillment(order) for order in orders]
     reviewed_ids: set = set()
     async for r in db.reviews.find({"customer_email": email}, {"_id": 0, "product_id": 1}):
         reviewed_ids.add(r.get("product_id"))

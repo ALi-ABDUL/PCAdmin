@@ -1,0 +1,36 @@
+{
+  "summary": "Executed targeted backend + admin UI regression testing for order-line fulfillment self-heal paths and the reported ORD-2D512BF5 issue; all requested checks passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_order_line_fulfillment_targeted.py",
+    "/app/backend/tests/test_order_line_fulfillment.py",
+    "/app/test_reports/pytest/pytest_iteration36_order_line_fulfillment.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_ensure_order_line_fulfillment(order) is wired on GET /api/orders/{oid}, PATCH /api/orders/{oid}/items/{line_id}/fulfillment, and GET /api/portal/orders; targeted tests verified both response-level and Mongo persistence-level repair.",
+    "Normal POST /api/orders continues to create each line with non-empty line_id and default fulfillment_status='pending' in API response and persisted Mongo document.",
+    "For reported order id=2691093f-43bc-47d6-a218-e88744629ca5 (ORD-2D512BF5), all 11 lines persisted valid line_id + fulfillment_status and admin line-0 Processing/Shipped/Delivered controls are enabled."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_order_line_fulfillment_targeted.py",
+    "/app/test_reports/iteration_36.json"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9)",
+    "frontend": "100% (targeted admin order-detail validation)"
+  },
+  "seed_data_creation": "Temporary multi-line orders and portal account created during tests; cleaned up from MongoDB and stock restored.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Targeted regression file added at /app/backend/tests/test_order_line_fulfillment_targeted.py. It validates real reported order metadata, GET self-heal persistence, portal/orders self-heal, PATCH line fulfillment after repair, and POST /orders line metadata defaults.",
+  "rca of the issue": "Original failure occurred when an order was inserted outside normal checkout and line_id/fulfillment_status were absent, causing OrderDetail to intentionally short-circuit line fulfillment clicks. Current implementation repairs missing metadata on read/patch/portal-orders and persists back to Mongo, which removes the UI disablement condition."
+}

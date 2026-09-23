@@ -53,6 +53,39 @@ def _create_multi_item_order(client, products):
 
 
 class TestOrderLineFulfillment:
+    def test_order_detail_read_repairs_missing_line_identifiers(self, client, products):
+        """Orders inserted outside checkout become actionable the first time they are read."""
+        order = _create_multi_item_order(client, products)
+        oid = order["id"]
+        try:
+            from pymongo import MongoClient
+            from dotenv import load_dotenv
+
+            load_dotenv("/app/backend/.env")
+            mongo = MongoClient(os.environ["MONGO_URL"])
+            try:
+                mongo[os.environ["DB_NAME"]].orders.update_one(
+                    {"id": oid},
+                    {"$unset": {"items.0.line_id": "", "items.0.fulfillment_status": ""}},
+                )
+            finally:
+                mongo.close()
+
+            repaired = client.get(f"{API}/orders/{oid}")
+            assert repaired.status_code == 200, repaired.text
+            first = repaired.json()["items"][0]
+            assert first["line_id"]
+            assert first["fulfillment_status"] == "pending"
+
+            update = client.patch(
+                f"{API}/orders/{oid}/items/{first['line_id']}/fulfillment",
+                json={"status": "processing"}, timeout=20,
+            )
+            assert update.status_code == 200, update.text
+            assert update.json()["line_item"]["fulfillment_status"] == "processing"
+        finally:
+            client.delete(f"{API}/orders/{oid}", timeout=20)
+
     def test_updates_only_selected_line_and_derives_order_status(self, client, products):
         order = _create_multi_item_order(client, products)
         oid = order["id"]

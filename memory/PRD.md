@@ -2251,3 +2251,21 @@ Notification Bell deep-links) — zero regressions detected.
 - Verified: testing_agent iteration_33 passed backend and frontend coverage. Final local
   regression (`test_order_line_fulfillment`, variant carts/orders, order timeline) passed
   **16 tests**; frontend production build passed with pre-existing ProductDetail hook warnings.
+
+
+## Jun 2026 — Dynamic Customer Support FAQ and contact form
+- Site Menus → Customer Support now supports complete FAQ management: add, edit, reorder with
+  up/down controls, and delete question/answer pairs. It also configures the storefront contact
+  form enabled toggle and title. The current FAQ order is persisted exactly as submitted.
+- `GET /api/site-menus` now exposes `faq_items: [{id, question, answer}]` and
+  `contact_form: {enabled, title}` alongside the existing Get Help configuration; PCStore
+  integration documentation includes the contract and contact submission payload.
+- Added public `POST /api/support/contact`. The prior error was caused by the endpoint being
+  absent. It now reads `resend_api_key`, `resend_to_email`, and `resend_from_email` only from
+  the existing Email & Notifications store settings, keeps recipient/subject/HTML server-side,
+  and returns clear `403` (form disabled) or `503` (missing key/recipient) configuration errors.
+  **Email delivery is currently unavailable until an admin configures the Resend API key and
+  support recipient in Store Management → Email & Notifications.**
+- Verified: testing_agent iteration_34 passed backend and dashboard coverage; final
+  `pytest -q tests/test_site_menus_support.py` passed **3/3**. The tested missing-key response
+  is HTTP 503 with setup guidance; no real email was sent.

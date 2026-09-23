@@ -1918,6 +1918,8 @@ async def _get_site_menus() -> dict:
         return {**SITE_MENUS_DEFAULTS}
     merged = {**SITE_MENUS_DEFAULTS, **doc}
     merged["get_help"] = {**SITE_MENUS_DEFAULTS["get_help"], **(doc.get("get_help") or {})}
+    merged["faq_items"] = [dict(item) for item in (doc.get("faq_items") if isinstance(doc.get("faq_items"), list) else SITE_MENUS_DEFAULTS["faq_items"])]
+    merged["contact_form"] = {**SITE_MENUS_DEFAULTS["contact_form"], **(doc.get("contact_form") or {})}
     return merged
 
 

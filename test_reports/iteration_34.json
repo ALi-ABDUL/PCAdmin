@@ -1,0 +1,37 @@
+{
+  "summary": "Validated Customer Support site-menu backend + UI flows. Backend regression tests passed for GET/PATCH site-menus and support/contact disabled + missing-Resend-key failures. UI verified Customer Support configuration renders contact-form controls and FAQ add/edit/reorder/delete controls for admins.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_site_menus_support.py",
+    "/app/test_reports/pytest/pytest_iteration34_site_menus_support.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "POST /api/support/contact correctly reads resend_api_key and resend_to_email from _get_push_settings(), returns 403 when contact_form.enabled=false, and returns explicit 503 when resend_api_key is missing.",
+    "Support email recipient/subject/HTML are server-controlled in submit_support_contact; client only provides name/email/message via SupportContactBody.",
+    "GET /api/push/settings masks Resend/Telegram secrets and only exposes *_set flags + masked values; raw secrets are not returned.",
+    "PATCH /api/site-menus preserves get_help when only faq_items/contact_form are updated; FAQ order is persisted according to payload order."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_site_menus_support.py",
+    "/app/test_reports/iteration_34.json"
+  ],
+  "success_rate": {
+    "backend": "100% (3/3)",
+    "frontend": "90% (requested Customer Support UI controls and interactions validated; no server-save performed)"
+  },
+  "test_credentials": "qa@prettycheap.com.au / QaTest123!",
+  "seed_data_creation": "None. UI interactions intentionally not saved to avoid persistent data changes.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "If re-running UI checks, use data-testids: nav-store, store-site-menus, customer-support-configure-btn, faq-add-button, faq-question-{i}, faq-answer-{i}, faq-move-up-{i}, faq-move-down-{i}, faq-delete-{i}. Backend regression command: pytest -q /app/backend/tests/test_site_menus_support.py --junitxml=/app/test_reports/pytest/pytest_iteration34_site_menus_support.xml",
+  "rca of the issue": "Original POST /api/support/contact error was previously due missing endpoint. Current implementation exists and behaves correctly in no-key environment by failing safely with explicit 503 about missing Resend API key, without attempting live sends."
+}

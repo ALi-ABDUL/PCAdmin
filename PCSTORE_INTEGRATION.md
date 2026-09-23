@@ -306,6 +306,8 @@ configure it under **Store Management → Site Menus → Customer Support**.
 ```
 GET /api/site-menus
 → { get_help: { enabled, label, link_type:"url"|"page", url, page },
+    faq_items: [ { id, question, answer }, … ],
+    contact_form: { enabled, title },
     pages: [ { slug, label }, … ] }
 ```
 
@@ -314,6 +316,23 @@ GET /api/site-menus
 - If `link_type === "url"`, point the link at `get_help.url` (external).
 - If `link_type === "page"`, point it at the store page whose slug is
   `get_help.page` (match against the `pages` list — e.g. `/faq`, `/contact`).
+- Render the FAQ page directly from `faq_items`, preserving the returned order.
+- Render the contact form only when `contact_form.enabled` is true, using
+  `contact_form.title` as its heading.
+
+To submit the configured contact form, send only the shopper's own details:
+
+```
+POST /api/support/contact
+{ "name": "Ada", "email": "ada@example.com", "message": "I need help with my order." }
+→ { "sent": true, "message": "Your support request has been sent." }
+```
+
+The API delivers support requests to the store email recipient set in
+**Store Management → Email & Notifications**. If the form is disabled it returns
+`403`; if the Resend key or support recipient is missing it returns `503` with a
+configuration-specific message. Do not send a recipient address, subject, or HTML
+from PCStore — those are deliberately server-controlled.
 
 ---
 

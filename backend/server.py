@@ -11,6 +11,7 @@ import secrets
 import asyncio
 import httpx
 import uuid
+from html import escape
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Any
 
@@ -37,7 +38,7 @@ from models import (
     _DEFAULT_PRICING_RULES, BulkProductIds,
     PostagePresetBase, PostagePreset, PostagePresetUpdate, POSTAGE_PRESET_KINDS,
     DeliverySettingsUpdate,
-    SITE_PAGES, SITE_PAGE_SLUGS, SiteMenusUpdate,
+    SITE_PAGES, SITE_PAGE_SLUGS, SiteMenusUpdate, SupportContactBody,
     ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
     DisposableDomainsUpdate, DISPOSABLE_EMAIL_ERROR,
@@ -2178,27 +2179,88 @@ async def get_site_menus():
 
 @api_router.patch("/site-menus")
 async def update_site_menus(body: SiteMenusUpdate):
-    if body.get_help is None:
+    if body.get_help is None and body.faq_items is None and body.contact_form is None:
         raise HTTPException(status_code=400, detail="No fields to update")
     existing = await _get_site_menus()
-    gh = {**existing["get_help"]}
-    for k, v in body.get_help.model_dump().items():
-        if v is not None:
-            gh[k] = v
-    if gh.get("link_type") not in ("url", "page"):
-        raise HTTPException(status_code=400, detail="link_type must be 'url' or 'page'")
-    if gh["link_type"] == "page" and gh.get("page") not in SITE_PAGE_SLUGS:
-        raise HTTPException(status_code=400, detail=f"Unknown page: {gh.get('page')}")
-    if gh["link_type"] == "url" and not str(gh.get("url") or "").strip():
-        raise HTTPException(status_code=400, detail="A URL is required when link type is 'url'")
+    updates: dict[str, Any] = {}
+    if body.get_help is not None:
+        gh = {**existing["get_help"]}
+        for key, value in body.get_help.model_dump().items():
+            if value is not None:
+                gh[key] = value
+        if gh.get("link_type") not in ("url", "page"):
+            raise HTTPException(status_code=400, detail="link_type must be 'url' or 'page'")
+        if gh["link_type"] == "page" and gh.get("page") not in SITE_PAGE_SLUGS:
+            raise HTTPException(status_code=400, detail=f"Unknown page: {gh.get('page')}")
+        if gh["link_type"] == "url" and not str(gh.get("url") or "").strip():
+            raise HTTPException(status_code=400, detail="A URL is required when link type is 'url'")
+        updates["get_help"] = gh
+    if body.faq_items is not None:
+        faq_items = []
+        used_ids = set()
+        for item in body.faq_items:
+            question, answer = item.question.strip(), item.answer.strip()
+            if not question or not answer:
+                raise HTTPException(status_code=400, detail="Every FAQ needs a question and answer")
+            item_id = (item.id or str(uuid.uuid4())).strip()
+            if item_id in used_ids:
+                raise HTTPException(status_code=400, detail="FAQ item IDs must be unique")
+            used_ids.add(item_id)
+            faq_items.append({"id": item_id, "question": question, "answer": answer})
+        updates["faq_items"] = faq_items
+    if body.contact_form is not None:
+        contact_form = {**existing["contact_form"]}
+        for key, value in body.contact_form.model_dump().items():
+            if value is not None:
+                contact_form[key] = value
+        contact_form["title"] = str(contact_form.get("title") or "").strip()
+        if not contact_form["title"]:
+            raise HTTPException(status_code=400, detail="Contact form title is required")
+        updates["contact_form"] = contact_form
     await db.site_menus.update_one(
         {"id": "singleton"},
-        {"$set": {"get_help": gh, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        {"$set": {**updates, "updated_at": datetime.now(timezone.utc).isoformat()}},
         upsert=True,
     )
     data = await _get_site_menus()
     data["pages"] = SITE_PAGES
     return data
+
+
+@api_router.post("/support/contact")
+async def submit_support_contact(body: SupportContactBody):
+    """Deliver a public support-form message to the store's configured inbox."""
+    email = body.email.strip().lower()
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
+    menus = await _get_site_menus()
+    if not menus["contact_form"].get("enabled", True):
+        raise HTTPException(status_code=403, detail="The support contact form is currently unavailable")
+    settings = await _get_push_settings()
+    key = settings.get("resend_api_key") or ""
+    recipient = settings.get("resend_to_email") or ""
+    if not key:
+        raise HTTPException(status_code=503, detail="Support email is unavailable: the Resend API key is not configured in Store Management › Email & Notifications.")
+    if not recipient:
+        raise HTTPException(status_code=503, detail="Support email is unavailable: no support recipient is configured in Store Management › Email & Notifications.")
+
+    sender = settings.get("resend_from_email") or "onboarding@resend.dev"
+    safe_name, safe_email, safe_message = escape(body.name.strip()), escape(email), escape(body.message.strip()).replace("\n", "<br/>")
+    html = _customer_email_html(
+        title="New support request",
+        intro="A customer has submitted the storefront contact form.",
+        rows=[("From", f"{safe_name} ({safe_email})"), ("Message", safe_message)],
+    )
+    resend.api_key = key
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": sender, "to": [recipient], "reply_to": email,
+            "subject": f"Support request from {body.name.strip()[:100]}", "html": html,
+        })
+    except Exception:
+        logger.exception("Support contact email delivery failed")
+        raise HTTPException(status_code=502, detail="Support message could not be delivered. Please try again shortly.")
+    return {"sent": True, "message": "Your support request has been sent."}
 
 
 # ---------------------------------------------------------------------------

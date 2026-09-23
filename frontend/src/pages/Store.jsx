@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, Menu, Package, Plus, RefreshCw, Store, Trash2, X, XCircle, Zap } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, Menu, Package, Plus, RefreshCw, Store, Trash2, X, XCircle, Zap } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
@@ -1817,7 +1817,7 @@ function SiteMenusPanel() {
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/site-menus`);
     setData(data);
-    setDraft({ ...data.get_help });
+    setDraft({ ...data.get_help, faq_items: data.faq_items || [], contact_form: data.contact_form || { enabled: true, title: "Contact support" } });
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -1826,6 +1826,7 @@ function SiteMenusPanel() {
       return toast.error("Enter a URL for the Get Help link");
     setBusy(true);
     try {
+      if ((draft.faq_items || []).some(item => !item.question.trim() || !item.answer.trim())) return toast.error("Every FAQ needs a question and answer");
       const { data: res } = await axios.patch(`${API}/site-menus`, {
         get_help: {
           enabled: draft.enabled,
@@ -1834,14 +1835,27 @@ function SiteMenusPanel() {
           url: draft.url || "",
           page: draft.page || "faq",
         },
+        faq_items: draft.faq_items,
+        contact_form: draft.contact_form,
       });
       setData(res);
-      setDraft({ ...res.get_help });
-      toast.success("Customer Support menu saved");
+      setDraft({ ...res.get_help, faq_items: res.faq_items || [], contact_form: res.contact_form || { enabled: true, title: "Contact support" } });
+      toast.success("Customer Support settings saved");
     } catch (e) {
       toast.error("Save failed", { description: e?.response?.data?.detail?.slice(0, 200) || e.message });
     } finally { setBusy(false); }
   };
+
+  const updateFaq = (index, field, value) => setDraft(current => ({ ...current, faq_items: current.faq_items.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item) }));
+  const addFaq = () => setDraft(current => ({ ...current, faq_items: [...current.faq_items, { id: `faq-${Date.now()}`, question: "", answer: "" }] }));
+  const deleteFaq = (index) => setDraft(current => ({ ...current, faq_items: current.faq_items.filter((_, itemIndex) => itemIndex !== index) }));
+  const moveFaq = (index, direction) => setDraft(current => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= current.faq_items.length) return current;
+    const faqItems = [...current.faq_items];
+    [faqItems[index], faqItems[nextIndex]] = [faqItems[nextIndex], faqItems[index]];
+    return { ...current, faq_items: faqItems };
+  });
 
   const gh = data?.get_help;
   const pages = data?.pages || [];
@@ -1871,7 +1885,7 @@ function SiteMenusPanel() {
 
         {open && draft && (
           <div className="mt-4 pt-4 border-t hairline grid gap-4" data-testid="customer-support-form">
-            <div className="text-xs text-slate-500">PCStore reads this to wire up the "Get Help" link in the customer-account dropdown on the storefront.</div>
+            <div className="text-xs text-slate-500">PCStore reads this to render the support link, FAQ list, and contact form dynamically.</div>
 
             <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer" data-testid="get-help-enabled-toggle">
               <input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft(d => ({ ...d, enabled: e.target.checked }))} className="accent-indigo-600 mt-1 w-4 h-4"/>
@@ -1904,6 +1918,36 @@ function SiteMenusPanel() {
                   </select>
                 </Field>
               )}
+            </div>
+
+            <div className="grid gap-3 pt-2 border-t hairline" data-testid="contact-form-config">
+              <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Contact form</div>
+              <label className="flex items-center gap-3 cursor-pointer" data-testid="contact-form-enabled-toggle">
+                <input type="checkbox" checked={draft.contact_form?.enabled !== false} onChange={(e) => setDraft(current => ({ ...current, contact_form: { ...current.contact_form, enabled: e.target.checked } }))} className="accent-indigo-600 w-4 h-4"/>
+                <span className="text-sm font-medium">Enable storefront contact form</span>
+              </label>
+              <Field label="Contact form title">
+                <input className="input w-full px-3 py-2" value={draft.contact_form?.title || ""} onChange={(e) => setDraft(current => ({ ...current, contact_form: { ...current.contact_form, title: e.target.value } }))} data-testid="contact-form-title-input"/>
+              </Field>
+            </div>
+
+            <div className="grid gap-3 pt-2 border-t hairline" data-testid="faq-editor">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">FAQ items</div>
+                <button type="button" className="btn btn-ghost text-xs !py-1 !px-2" onClick={addFaq} data-testid="faq-add-button"><Plus size={14}/> Add FAQ</button>
+              </div>
+              {(draft.faq_items || []).map((item, index) => (
+                <div key={item.id || index} className="border hairline rounded-lg p-3 grid gap-2" data-testid={`faq-item-${index}`}>
+                  <div className="flex items-center gap-1 justify-end">
+                    <button type="button" title="Move FAQ up" disabled={index === 0} className="w-7 h-7 grid place-items-center rounded border hairline text-slate-500 disabled:opacity-30" onClick={() => moveFaq(index, -1)} data-testid={`faq-move-up-${index}`}><ArrowUp size={14}/></button>
+                    <button type="button" title="Move FAQ down" disabled={index === draft.faq_items.length - 1} className="w-7 h-7 grid place-items-center rounded border hairline text-slate-500 disabled:opacity-30" onClick={() => moveFaq(index, 1)} data-testid={`faq-move-down-${index}`}><ArrowDown size={14}/></button>
+                    <button type="button" title="Delete FAQ" className="w-7 h-7 grid place-items-center rounded border hairline text-rose-500" onClick={() => deleteFaq(index)} data-testid={`faq-delete-${index}`}><Trash2 size={14}/></button>
+                  </div>
+                  <input className="input w-full px-3 py-2" value={item.question} onChange={(e) => updateFaq(index, "question", e.target.value)} placeholder="Question" data-testid={`faq-question-${index}`}/>
+                  <textarea className="input w-full px-3 py-2 min-h-20" value={item.answer} onChange={(e) => updateFaq(index, "answer", e.target.value)} placeholder="Answer" data-testid={`faq-answer-${index}`}/>
+                </div>
+              ))}
+              {!draft.faq_items?.length && <div className="text-xs text-slate-400" data-testid="faq-empty-state">No FAQ items yet.</div>}
             </div>
 
             <div className="flex justify-end">

@@ -206,6 +206,22 @@ via `PATCH /api/security/disposable-domains`) return
 | `GET`  | `/api/portal/me`            | Bearer token                          | `{ customer }`                                  |
 | `PATCH`| `/api/portal/me`            | Bearer token, `{ first_name?, last_name?, name?, phone? }` | `{ customer }`             |
 | `GET`  | `/api/portal/orders`        | Bearer token                          | `{ orders: [...], total }` (each row tagged with `can_review` + `already_reviewed`) |
+
+### Per-item fulfilment tracking
+
+Each `order.items[]` entry contains a `fulfillment_status` that PCStore should
+render beside that product for split-shipment tracking. Valid values are:
+
+| Status | Shopper-facing meaning |
+| --- | --- |
+| `pending` | Awaiting fulfilment |
+| `processing` | Being prepared |
+| `shipped` | On its way |
+| `delivered` | Delivered |
+
+PCAdmin updates items independently. The aggregate order status becomes
+`processing` once every item is at least processing, `shipped` once every item
+is shipped or delivered, and `delivered` once every item is delivered.
 | `POST` | `/api/portal/reviews`       | Bearer token, `{ product_id, rating, title, body }` | verified review                    |
 | `GET`  | `/api/portal/my-reviews`    | Bearer token                          | reviews written by this customer                 |
 | `POST` | `/api/reviews/{rid}/vote`   | Bearer token, `{ vote: "helpful"\|"not_helpful"\|"clear" }` | vote counts |

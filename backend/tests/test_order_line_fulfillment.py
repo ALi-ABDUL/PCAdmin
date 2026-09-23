@@ -61,17 +61,33 @@ class TestOrderLineFulfillment:
             assert first["line_id"] and second["line_id"]
             assert [line["fulfillment_status"] for line in order["items"]] == ["pending", "pending"]
 
-            one_shipped = client.patch(
+            one_processing = client.patch(
+                f"{API}/orders/{oid}/items/{first['line_id']}/fulfillment",
+                json={"status": "processing"}, timeout=20,
+            )
+            assert one_processing.status_code == 200, one_processing.text
+            body = one_processing.json()
+            assert body["customer_notification"] == "skipped_no_recipient"
+            updated = body["order"]
+            assert updated["items"][0]["fulfillment_status"] == "processing"
+            assert updated["items"][1]["fulfillment_status"] == "pending"
+            assert updated["items"][1].get("fulfillment_history") is None
+
+            all_processing = client.patch(
+                f"{API}/orders/{oid}/items/{second['line_id']}/fulfillment",
+                json={"status": "processing"}, timeout=20,
+            )
+            assert all_processing.status_code == 200, all_processing.text
+            updated = all_processing.json()["order"]
+            assert updated["status"] == "processing"
+            assert [line["fulfillment_status"] for line in updated["items"]] == ["processing", "processing"]
+
+            first_shipped = client.patch(
                 f"{API}/orders/{oid}/items/{first['line_id']}/fulfillment",
                 json={"status": "shipped"}, timeout=20,
             )
-            assert one_shipped.status_code == 200, one_shipped.text
-            body = one_shipped.json()
-            assert body["customer_notification"] == "skipped_no_recipient"
-            updated = body["order"]
-            assert updated["items"][0]["fulfillment_status"] == "shipped"
-            assert updated["items"][1]["fulfillment_status"] == "pending"
-            assert updated["items"][1].get("fulfillment_history") is None
+            assert first_shipped.status_code == 200
+            assert first_shipped.json()["order"]["status"] == "processing"
 
             all_shipped = client.patch(
                 f"{API}/orders/{oid}/items/{second['line_id']}/fulfillment",
@@ -106,7 +122,7 @@ class TestOrderLineFulfillment:
             assert unknown.status_code == 404
             invalid = client.patch(
                 f"{API}/orders/{oid}/items/{first['line_id']}/fulfillment",
-                json={"status": "processing"}, timeout=20,
+                json={"status": "packing"}, timeout=20,
             )
             assert invalid.status_code == 422
         finally:

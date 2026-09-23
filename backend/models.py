@@ -308,7 +308,7 @@ class OrderLineInput(BaseModel):
 
 
 class OrderLineFulfillmentUpdate(BaseModel):
-    status: Literal["pending", "shipped", "delivered"]
+    status: Literal["pending", "processing", "shipped", "delivered"]
 
 
 class OrderCreate(BaseModel):

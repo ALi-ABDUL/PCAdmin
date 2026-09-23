@@ -2281,3 +2281,16 @@ Notification Bell deep-links) — zero regressions detected.
 - Verified: testing_agent iteration_35 passed **5/5** checks — direct MongoDB persistence,
   exact GET read-back, add/edit/reorder/delete preservation, legacy-field migration, and a live
   admin Save settings flow. The test-only FAQ content was restored afterward.
+
+
+## Jun 2026 — Per-line Processing status for order tracking
+- Added `processing` as a first-class per-line `fulfillment_status`. It is accepted by the
+  line-fulfilment API, retained by the legacy-line migration, recorded in line history, and
+  produces an item-specific “being prepared” customer notification when email is configured.
+- Order Detail now places a Package Search icon button — “Mark this item processing” — directly
+  after Pending and before Shipped. PCStore order-history documentation now describes all four
+  per-item tracking states: pending, processing, shipped, delivered.
+- Aggregate order status becomes `processing` only once every line is processing/shipped/
+  delivered, preserving independent line updates. Verified with **16 passing** fulfilment/cart/
+  timeline tests, a frontend production build, a live API update, and the dashboard icon render;
+  temporary order data was removed and stock restored.

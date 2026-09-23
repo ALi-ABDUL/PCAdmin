@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { ChevronLeft, ImageIcon, CreditCard, Wallet, Landmark, CheckCircle2, Clock, PackageCheck, Truck } from "lucide-react";
+import { ChevronLeft, ImageIcon, CreditCard, Wallet, Landmark, CheckCircle2, Clock, PackageCheck, PackageSearch, Truck } from "lucide-react";
 import { StatBox } from "../components/atoms";
 import { API, proxyImg } from "../lib/api";
 import { fmtDate, humaniseStatus, moneyCents } from "../lib/format";
@@ -67,6 +67,7 @@ export function OrderDetailPage({ orderId, onBack }) {
   const hasLineItems = Array.isArray(o.items) && o.items.length > 0;
   const FULFILLMENT_STATUSES = [
     { id: "pending", label: "Pending", icon: Clock },
+    { id: "processing", label: "Processing", icon: PackageSearch },
     { id: "shipped", label: "Shipped", icon: Truck },
     { id: "delivered", label: "Delivered", icon: PackageCheck },
   ];
@@ -133,7 +134,7 @@ export function OrderDetailPage({ orderId, onBack }) {
                 <div className="flex items-center gap-3 ml-auto shrink-0 flex-wrap justify-end">
                   <div className="font-mono font-bold text-indigo-600">{moneyCents(li.line_total ?? (li.unit_price || 0) * (li.quantity || 1))}</div>
                   <div className="flex flex-col items-end gap-1.5">
-                    <span className={`chip ${li.fulfillment_status === "delivered" ? "chip-success" : li.fulfillment_status === "shipped" ? "chip-primary" : "chip-neutral"} !text-[10px]`} data-testid={`order-line-item-fulfillment-status-${i}`}>
+                    <span className={`chip ${li.fulfillment_status === "delivered" ? "chip-success" : li.fulfillment_status === "shipped" ? "chip-primary" : li.fulfillment_status === "processing" ? "chip-warning" : "chip-neutral"} !text-[10px]`} data-testid={`order-line-item-fulfillment-status-${i}`}>
                       {humaniseStatus(li.fulfillment_status || "pending")}
                     </span>
                     <div className="flex items-center gap-1" data-testid={`order-line-item-fulfillment-controls-${i}`}>
@@ -171,7 +172,7 @@ export function OrderDetailPage({ orderId, onBack }) {
         {hasLineItems ? (
           <div className="flex items-center gap-3 flex-wrap" data-testid="order-status-auto-tracker">
             <span className="chip chip-primary !text-xs !py-1 !px-3" data-testid="order-status-auto-badge">{humaniseStatus(o.status)}</span>
-            <span className="text-xs text-slate-500" data-testid="order-status-auto-note">Updates automatically once every line item has shipped or been delivered.</span>
+            <span className="text-xs text-slate-500" data-testid="order-status-auto-note">Updates automatically once every line item is processing, shipped, or delivered.</span>
           </div>
         ) : <div className="flex flex-wrap gap-2" data-testid="order-status-tracker">
           {ORDER_STATUSES.map((s) => {

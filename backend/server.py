@@ -907,6 +907,8 @@ async def update_order_line_fulfillment(oid: str, line_id: str, body: OrderLineF
         aggregate_status = "delivered"
     elif line_statuses and all(status in {"shipped", "delivered"} for status in line_statuses):
         aggregate_status = "shipped"
+    elif line_statuses and all(status in {"processing", "shipped", "delivered"} for status in line_statuses):
+        aggregate_status = "processing"
     if aggregate_status and aggregate_status != order.get("status"):
         update_fields["status"] = aggregate_status
         update_doc["$push"] = {"status_history": {

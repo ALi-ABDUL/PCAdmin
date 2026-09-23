@@ -212,7 +212,7 @@ async def _ensure_order_line_fulfillment_backfilled() -> None:
             if not line.get("line_id"):
                 line["line_id"] = str(uuid.uuid4())
                 changed = True
-            if line.get("fulfillment_status") not in {"pending", "shipped", "delivered"}:
+            if line.get("fulfillment_status") not in {"pending", "processing", "shipped", "delivered"}:
                 line["fulfillment_status"] = "pending"
                 changed = True
             lines.append(line)
@@ -1331,6 +1331,7 @@ async def send_customer_order_line_status_update(order: dict, line: dict, old_st
     to = order.get("customer_email") or ""
     friendly = {
         "pending": "is pending fulfilment",
+        "processing": "is being prepared",
         "shipped": "has shipped",
         "delivered": "has been delivered",
     }.get(new_status, f"status is now {new_status}")
@@ -1920,7 +1921,7 @@ async def _get_site_menus() -> dict:
             "faq_items": [dict(item) for item in SITE_MENUS_DEFAULTS["faq_items"]],
             "contact_form": {**SITE_MENUS_DEFAULTS["contact_form"]},
         }
-        await db.site_menus.insert_one(seeded)
+        await db.site_menus.insert_one({**seeded})
         return seeded
 
     # Legacy singletons predate support content. Persist these defaults rather

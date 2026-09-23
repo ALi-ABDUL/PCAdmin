@@ -1,0 +1,35 @@
+{
+  "summary": "Validated FAQ persistence fix end-to-end for Site Menus Customer Support: Mongo singleton writes, GET reads, legacy migration, and admin UI save flow.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_site_menus_support.py",
+    "/app/test_reports/pytest/pytest_iteration35_site_menus_support.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_get_site_menus now persists missing legacy faq_items/contact_form back to db.site_menus singleton via update_one($set), preventing read-time-only defaults.",
+    "PATCH /api/site-menus explicitly writes faq_items in payload order and keeps get_help/contact_form unchanged when omitted.",
+    "GET /api/site-menus returns persisted singleton faq_items and no hardcoded fallback override when faq_items already exists in MongoDB."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_site_menus_support.py",
+    "/app/test_reports/iteration_35.json"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5)",
+    "frontend": "100% (requested admin Site Menus persistence flow)"
+  },
+  "seed_data_creation": "Temporary FAQ row created through admin UI for persistence verification, then restored to original singleton values.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Executed pytest for /api/site-menus persistence + migration scenarios and Playwright admin UI save flow. Live singleton state was restored after tests.",
+  "rca of the issue": "Original defect was a read-only fallback behavior: GET overlaid defaults when faq_items was missing but did not persist them. Verification confirms current implementation migrates missing faq_items/contact_form into MongoDB during _get_site_menus, and PATCH writes faq_items directly to singleton so edited/reordered/deleted FAQ rows persist and are returned by subsequent GET."
+}

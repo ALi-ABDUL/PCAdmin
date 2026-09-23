@@ -2269,3 +2269,15 @@ Notification Bell deep-links) — zero regressions detected.
 - Verified: testing_agent iteration_34 passed backend and dashboard coverage; final
   `pytest -q tests/test_site_menus_support.py` passed **3/3**. The tested missing-key response
   is HTTP 503 with setup guidance; no real email was sent.
+
+
+## Jun 2026 — FAQ singleton persistence fix
+- Root cause: legacy `site_menus` singleton documents without `faq_items` or `contact_form`
+  received hardcoded values only in the GET response. Those defaults were not being migrated
+  into MongoDB, leaving the singleton incomplete and making support content appear to reset.
+- `_get_site_menus` now creates a complete singleton on first read and migrates missing legacy
+  `faq_items` / `contact_form` fields with an explicit MongoDB `$set` before returning. The
+  existing PATCH route writes the submitted FAQ list directly to that same singleton in order.
+- Verified: testing_agent iteration_35 passed **5/5** checks — direct MongoDB persistence,
+  exact GET read-back, add/edit/reorder/delete preservation, legacy-field migration, and a live
+  admin Save settings flow. The test-only FAQ content was restored afterward.

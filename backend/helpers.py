@@ -1911,11 +1911,31 @@ async def _get_delivery_settings() -> dict:
 
 
 async def _get_site_menus() -> dict:
-    """Return the singleton site-menus settings, seeding on first read."""
+    """Return and persist the singleton site-menu settings, including support data."""
     doc = await db.site_menus.find_one({"id": "singleton"}, {"_id": 0})
     if not doc:
-        await db.site_menus.insert_one({**SITE_MENUS_DEFAULTS})
-        return {**SITE_MENUS_DEFAULTS}
+        seeded = {
+            **SITE_MENUS_DEFAULTS,
+            "get_help": {**SITE_MENUS_DEFAULTS["get_help"]},
+            "faq_items": [dict(item) for item in SITE_MENUS_DEFAULTS["faq_items"]],
+            "contact_form": {**SITE_MENUS_DEFAULTS["contact_form"]},
+        }
+        await db.site_menus.insert_one(seeded)
+        return seeded
+
+    # Legacy singletons predate support content. Persist these defaults rather
+    # than merely layering them into this response, so subsequent GET/PATCH
+    # requests always operate on one complete database document.
+    migration: dict = {}
+    if not isinstance(doc.get("faq_items"), list):
+        migration["faq_items"] = [dict(item) for item in SITE_MENUS_DEFAULTS["faq_items"]]
+    if not isinstance(doc.get("contact_form"), dict):
+        migration["contact_form"] = {**SITE_MENUS_DEFAULTS["contact_form"]}
+    if migration:
+        migration["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.site_menus.update_one({"id": "singleton"}, {"$set": migration})
+        doc = {**doc, **migration}
+
     merged = {**SITE_MENUS_DEFAULTS, **doc}
     merged["get_help"] = {**SITE_MENUS_DEFAULTS["get_help"], **(doc.get("get_help") or {})}
     merged["faq_items"] = [dict(item) for item in (doc.get("faq_items") if isinstance(doc.get("faq_items"), list) else SITE_MENUS_DEFAULTS["faq_items"])]

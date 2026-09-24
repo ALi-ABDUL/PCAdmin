@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
-import { ChevronLeft, DollarSign, ImageIcon, Loader2, Pencil, Plus, RefreshCw, Sparkles, Star as StarIcon, Trash2 } from "lucide-react";
+import { CalendarClock, ChevronLeft, DollarSign, ImageIcon, Loader2, Pencil, Plus, RefreshCw, Sparkles, Star as StarIcon, Trash2 } from "lucide-react";
 import { statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { CategoryEditModal } from "../components/modals/CategoryEditModal";
@@ -16,10 +16,21 @@ export function Categories({ navigateTo }) {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
   const [browsing, setBrowsing] = useState(null); // category currently being drilled into
+  const [cleanupSchedule, setCleanupSchedule] = useState(null);
+  const [cleanupAt, setCleanupAt] = useState("");
+  const [cleanupBusy, setCleanupBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const { data } = await axios.get(`${API}/categories`);
-    setCats(data.categories); setGroups(data.groups);
+    const [categoryResponse, scheduleResponse] = await Promise.all([
+      axios.get(`${API}/categories`), axios.get(`${API}/categories/cleanup-schedule`),
+    ]);
+    setCats(categoryResponse.data.categories); setGroups(categoryResponse.data.groups);
+    setCleanupSchedule(scheduleResponse.data);
+    if (scheduleResponse.data.next_run_at) {
+      const date = new Date(scheduleResponse.data.next_run_at);
+      const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      setCleanupAt(local);
+    }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -39,6 +50,30 @@ export function Categories({ navigateTo }) {
     if (!window.confirm("Reseed defaults? Existing categories will remain; only missing defaults are added.")) return;
     try { await axios.post(`${API}/categories/reseed`, null); toast.success("Reseeded"); load(); }
     catch (e) { toast.error("Reseed failed", { description: e?.response?.data?.detail }); }
+  };
+  const cleanupNow = async () => {
+    if (!window.confirm("Permanently delete every empty category from the site and database? This cannot be undone.")) return;
+    setCleanupBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/categories/cleanup-empty`);
+      toast.success(data.deleted ? `Permanently deleted ${data.deleted} empty categories` : "No empty categories found");
+      await load();
+    } catch (error) { toast.error("Cleanup failed", { description: error?.response?.data?.detail || error.message }); }
+    finally { setCleanupBusy(false); }
+  };
+  const saveCleanupSchedule = async () => {
+    if (cleanupSchedule?.enabled && !cleanupAt) return toast.error("Choose a future date and time");
+    setCleanupBusy(true);
+    try {
+      const { data } = await axios.patch(`${API}/categories/cleanup-schedule`, {
+        enabled: !!cleanupSchedule?.enabled,
+        recurrence: cleanupSchedule?.recurrence || "once",
+        ...(cleanupAt ? { next_run_at: new Date(cleanupAt).toISOString() } : {}),
+      });
+      setCleanupSchedule(data);
+      toast.success(data.enabled ? "Empty category cleanup scheduled" : "Cleanup schedule paused");
+    } catch (error) { toast.error("Schedule failed", { description: error?.response?.data?.detail || error.message }); }
+    finally { setCleanupBusy(false); }
   };
 
   if (browsing) {
@@ -61,6 +96,23 @@ export function Categories({ navigateTo }) {
           <button onClick={() => setCreating(true)} className="btn btn-primary text-sm" data-testid="add-category-btn"><Plus size={14}/> New category</button>
         </div>
       </div>
+
+      {cleanupSchedule && <div className="border hairline rounded-lg p-4 grid gap-4" data-testid="category-cleanup-scheduler">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex gap-3">
+            <CalendarClock size={18} className="text-indigo-600 mt-0.5"/>
+            <div><div className="font-medium text-sm">Empty category cleanup</div><div className="text-xs text-slate-500">Permanently removes categories with no products from the site and database.</div></div>
+          </div>
+          <button onClick={cleanupNow} disabled={cleanupBusy} className="btn btn-danger text-sm" data-testid="category-cleanup-now-button"><Trash2 size={14}/> Delete empty now</button>
+        </div>
+        <div className="grid sm:grid-cols-[auto_minmax(0,1fr)_180px_auto] gap-3 items-end pt-3 border-t hairline">
+          <label className="flex items-center gap-2 text-sm cursor-pointer" data-testid="category-cleanup-enabled-toggle"><input type="checkbox" checked={!!cleanupSchedule.enabled} onChange={(event) => setCleanupSchedule(current => ({ ...current, enabled: event.target.checked }))} className="accent-indigo-600 w-4 h-4"/> Schedule cleanup</label>
+          <label className="grid gap-1 text-xs text-slate-500">Date & time<input type="datetime-local" value={cleanupAt} onChange={(event) => setCleanupAt(event.target.value)} className="input px-3 py-2 text-sm" data-testid="category-cleanup-datetime-input"/></label>
+          <label className="grid gap-1 text-xs text-slate-500">Repeat<select value={cleanupSchedule.recurrence || "once"} onChange={(event) => setCleanupSchedule(current => ({ ...current, recurrence: event.target.value }))} className="input px-3 py-2 text-sm" data-testid="category-cleanup-recurrence-select"><option value="once">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
+          <button onClick={saveCleanupSchedule} disabled={cleanupBusy} className="btn btn-primary text-sm" data-testid="category-cleanup-save-button">{cleanupBusy ? <Loader2 size={14} className="animate-spin"/> : <CalendarClock size={14}/>} Save</button>
+        </div>
+        <div className="text-xs text-slate-500" data-testid="category-cleanup-schedule-status">{cleanupSchedule.enabled && cleanupSchedule.next_run_at ? `Next cleanup: ${new Date(cleanupSchedule.next_run_at).toLocaleString()}` : "Automatic cleanup is paused."}</div>
+      </div>}
 
       {Object.keys(grouped).sort().map((g) => (
         <div key={g}>

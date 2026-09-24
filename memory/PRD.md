@@ -2306,3 +2306,17 @@ Notification Bell deep-links) — zero regressions detected.
 - The reported 11-line order was repaired in MongoDB without changing any fulfilment status;
   all Processing/Shipped/Delivered controls are enabled. testing_agent iteration_36 and the
   final targeted regression suite passed **9/9**, including Mongo persistence and portal reads.
+
+
+## Jun 2026 — Permanent empty-category cleanup and scheduler
+- Categories now includes **Delete empty now** with an irreversible confirmation. It permanently
+  removes category documents that have no linked products from MongoDB, so the storefront and
+  admin category lists no longer contain them.
+- Added a persisted cleanup scheduler: choose a date/time, enable it, and repeat once, daily, or
+  weekly. The backend polls due jobs every minute, records its last result, advances recurring
+  runs, and disables one-time schedules after completion. The current schedule is paused.
+- Added `GET/PATCH /api/categories/cleanup-schedule` and
+  `POST /api/categories/cleanup-empty`; `?dry_run=true` safely previews `candidates` without
+  deleting. Verified: testing_agent iteration_37 plus final backend regressions **10/10**.
+  No live category cleanup was executed during verification; 25 current empty categories remain
+  until the admin confirms a manual cleanup or schedules one.

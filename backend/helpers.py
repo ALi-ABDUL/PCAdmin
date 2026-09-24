@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_split_name', '_compose_name', '_greeting_first_name', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_ensure_order_line_fulfillment_backfilled', '_ensure_order_line_fulfillment', '_refresh_all_items', '_scrape_one_item', '_retry_scrape_items', '_summarise_results', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_auto_retry_cfg', '_run_failed_item_retry', '_update_schedule_entry', '_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_link_customer_to_portal_account', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_optional_customer_email', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_line_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_get_site_menus', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
+__all__ = ['_rand_au_address', '_slug', '_split_name', '_compose_name', '_greeting_first_name', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_ensure_order_line_fulfillment_backfilled', '_ensure_order_line_fulfillment', '_refresh_all_items', '_retry_scrape_items', '_summarise_results', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_auto_retry_cfg', '_run_failed_item_retry', '_update_schedule_entry', '_scheduler_loop', '_get_category_cleanup_schedule', '_purge_empty_categories', '_run_category_cleanup', '_category_cleanup_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_link_customer_to_portal_account', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_optional_customer_email', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_line_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_get_site_menus', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
 
 
 import bcrypt
@@ -29,7 +29,7 @@ from models import (
     _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, _DAY_LETTERS,
     _SYDNEY, ORDER_STATUSES, _CATEGORY_RULES, _EBAY_BREADCRUMB_MAP,
     PUSH_SETTINGS_DEFAULTS, PUSH_CRITICAL_TYPES, _DEFAULT_PRICING_RULES,
-    SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, ITEM_RETRY_DELAY_SECONDS, MAX_ITEM_RETRY_ATTEMPTS, FREQ_INTERVAL_SECONDS,
+    SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, ITEM_RETRY_DELAY_SECONDS, MAX_ITEM_RETRY_ATTEMPTS, FREQ_INTERVAL_SECONDS, CATEGORY_CLEANUP_SCHEDULE_DEFAULTS,
     JWT_ALGO, JWT_ACCESS_TTL,
     Category, Customer, Notification, PricingRule, ScrapeRequest,
     PostagePreset, _DEFAULT_POSTAGE_PRESETS, DELIVERY_SETTINGS_DEFAULTS, SITE_MENUS_DEFAULTS,
@@ -1843,6 +1843,82 @@ async def _delete_categories_if_empty(slugs) -> list:
     if deleted:
         logger.info(f"auto-deleted empty categories: {deleted}")
     return deleted
+
+
+async def _get_category_cleanup_schedule() -> dict:
+    """Return the persisted empty-category cleanup schedule singleton."""
+    doc = await db.category_cleanup_schedule.find_one({"id": "singleton"}, {"_id": 0})
+    if not doc:
+        seed = {**CATEGORY_CLEANUP_SCHEDULE_DEFAULTS}
+        await db.category_cleanup_schedule.insert_one({**seed})
+        return seed
+    return {**CATEGORY_CLEANUP_SCHEDULE_DEFAULTS, **doc}
+
+
+async def _purge_empty_categories(dry_run: bool = False) -> dict:
+    """Find empty categories and permanently delete them unless previewing."""
+    categories = await db.categories.find({}, {"_id": 0, "id": 1, "slug": 1, "name": 1}).to_list(1000)
+    used_slugs = {slug for slug in await db.products.distinct("category") if slug}
+    empty = [category for category in categories if category.get("slug") and category["slug"] not in used_slugs]
+    if empty and not dry_run:
+        await db.categories.delete_many({"id": {"$in": [category["id"] for category in empty if category.get("id")]}})
+    removed = [{"id": category.get("id"), "slug": category.get("slug"), "name": category.get("name")} for category in empty]
+    if removed and not dry_run:
+        logger.info(f"permanently deleted {len(removed)} empty categories")
+    return {
+        "deleted": 0 if dry_run else len(removed),
+        "would_delete": len(removed) if dry_run else 0,
+        "candidates": removed if dry_run else [],
+        "removed_categories": removed,
+    }
+
+
+async def _run_category_cleanup(trigger: str) -> dict:
+    """Run cleanup and advance/disable the stored schedule after a due run."""
+    result = await _purge_empty_categories()
+    now = datetime.now(timezone.utc)
+    schedule = await _get_category_cleanup_schedule()
+    recurrence = schedule.get("recurrence") or "once"
+    fields = {
+        "last_run_at": now.isoformat(),
+        "last_result": {**result, "trigger": trigger, "ran_at": now.isoformat()},
+    }
+    if trigger == "scheduled":
+        if recurrence == "once":
+            fields.update({"enabled": False, "next_run_at": None})
+        else:
+            interval = timedelta(days=1 if recurrence == "daily" else 7)
+            try:
+                next_run = datetime.fromisoformat(schedule.get("next_run_at") or "")
+                if next_run.tzinfo is None:
+                    next_run = next_run.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                next_run = now
+            while next_run <= now:
+                next_run += interval
+            fields["next_run_at"] = next_run.astimezone(timezone.utc).isoformat()
+    await db.category_cleanup_schedule.update_one({"id": "singleton"}, {"$set": fields}, upsert=True)
+    return result
+
+
+async def _category_cleanup_scheduler_loop():
+    """Poll the category cleanup schedule and permanently remove empty rows when due."""
+    await asyncio.sleep(35)
+    while True:
+        try:
+            schedule = await _get_category_cleanup_schedule()
+            if schedule.get("enabled") and schedule.get("next_run_at"):
+                try:
+                    due_at = datetime.fromisoformat(schedule["next_run_at"])
+                    if due_at.tzinfo is None:
+                        due_at = due_at.replace(tzinfo=timezone.utc)
+                    if due_at <= datetime.now(timezone.utc):
+                        await _run_category_cleanup("scheduled")
+                except (TypeError, ValueError):
+                    logger.warning("category cleanup schedule has an invalid next_run_at")
+        except Exception as error:
+            logger.exception(f"category cleanup scheduler error: {error}")
+        await asyncio.sleep(60)
 
 
 

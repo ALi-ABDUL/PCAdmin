@@ -27,7 +27,7 @@ from scraper import (
 from models import (
     CATEGORIES, SEED_CATEGORIES, ScrapeRequest, ScrapedItem, WatchlistToggle, ProductCreate, 
     Product, ProductUpdate, ShippingAddress, _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, 
-    OrderCreate, OrderLineInput, OrderLineFulfillmentUpdate, CartLineInput, CartUpdate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, ItemBulkAction, 
+    OrderCreate, OrderLineInput, OrderLineFulfillmentUpdate, CartLineInput, CartUpdate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, CategoryCleanupScheduleUpdate, ItemBulkAction, 
     RefreshAllRequest, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
     FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ScheduleEntryBody, ScraperSchedulesReplaceBody, AutoRetryConfigBody, ORDER_STATUSES, ReturnRequest, 
     AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate, PortalProfileUpdate,
@@ -58,7 +58,7 @@ from helpers import (
     _get_credential, _push_channel_status, _notif_is_critical, _send_email, _send_telegram, 
     _format_notification_html, _push_notification, _emit_notification, 
     _emit_price_change_notifications, _auto_archive_if_out_of_stock, calc_pricing, _ensure_pricing_rules_seeded, 
-    _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings, _get_site_menus, _delete_categories_if_empty,
+    _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings, _get_site_menus, _delete_categories_if_empty, _get_category_cleanup_schedule, _purge_empty_categories, _run_category_cleanup, _category_cleanup_scheduler_loop,
     _ensure_main_admin_seeded, _default_seo,
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update, send_customer_order_line_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
@@ -675,6 +675,7 @@ async def _start_scheduler():
         logger.warning(f"index setup: {e}")
     asyncio.create_task(_scheduler_loop())
     asyncio.create_task(_countdown_sweep_loop())
+    asyncio.create_task(_category_cleanup_scheduler_loop())
 
 
 # ---------------------------------------------------------------------------
@@ -695,6 +696,37 @@ async def list_categories(active: Optional[bool] = None, group: Optional[str] = 
         c["product_count"] = counts.get(c["slug"], 0)
     groups = sorted({c["group"] for c in cats})
     return {"categories": cats, "groups": groups, "total": len(cats)}
+
+
+@api_router.get("/categories/cleanup-schedule")
+async def get_category_cleanup_schedule():
+    return await _get_category_cleanup_schedule()
+
+
+@api_router.patch("/categories/cleanup-schedule")
+async def update_category_cleanup_schedule(body: CategoryCleanupScheduleUpdate):
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(status_code=400, detail="No schedule fields to update")
+    current = await _get_category_cleanup_schedule()
+    if "next_run_at" in fields and fields["next_run_at"]:
+        try:
+            next_run = datetime.fromisoformat(str(fields["next_run_at"]).replace("Z", "+00:00"))
+            if next_run.tzinfo is None:
+                next_run = next_run.replace(tzinfo=timezone.utc)
+            next_run = next_run.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="next_run_at must be a valid date and time")
+        if next_run <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=400, detail="Schedule time must be in the future")
+        fields["next_run_at"] = next_run.isoformat()
+    enabled = fields.get("enabled", current.get("enabled"))
+    next_run_at = fields.get("next_run_at", current.get("next_run_at"))
+    if enabled and not next_run_at:
+        raise HTTPException(status_code=400, detail="Choose a future date and time before enabling cleanup")
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.category_cleanup_schedule.update_one({"id": "singleton"}, {"$set": fields}, upsert=True)
+    return await _get_category_cleanup_schedule()
 
 
 @api_router.post("/categories", response_model=Category)
@@ -739,6 +771,15 @@ async def reseed_categories(force: bool = False):
         await db.categories.delete_many({})
     await _ensure_categories_seeded()
     return await list_categories()
+
+
+@api_router.post("/categories/cleanup-empty")
+async def cleanup_empty_categories(dry_run: bool = False):
+    """Permanently delete all category documents that have no products."""
+    if dry_run:
+        return await _purge_empty_categories(dry_run=True)
+    result = await _run_category_cleanup("manual")
+    return {**result, "message": f"Permanently deleted {result['deleted']} empty categories"}
 
 
 # ---------------------------------------------------------------------------

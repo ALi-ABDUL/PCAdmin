@@ -1,0 +1,50 @@
+{
+  "summary": "Completed targeted backend + UI verification for permanent empty-category cleanup controls using only safe dry-run cleanup calls; schedule state was restored after mutation tests.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/categories/cleanup-empty?dry_run=true",
+        "issue": "Response exposes `removed_categories` + `would_delete` but does not expose a `candidates` field name as requested in requirement wording."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Categories cleanup scheduler card",
+        "issues": [
+          "Date/time control uses browser-native `datetime-local` picker instead of a custom calendar/time component; UX varies by browser/OS."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_category_cleanup_schedule.py",
+    "/app/test_reports/pytest/pytest_iteration37_category_cleanup_schedule.xml"
+  ],
+  "action_items": [
+    "If product requirement is strict, add `candidates` alias in dry-run response (or update requirement/docs to `removed_categories`).",
+    "Consider replacing native datetime input with consistent calendar/time picker component in Categories scheduler UI."
+  ],
+  "critical_code_review_comments": [
+    "Permanent cleanup implementation is hard delete: `_purge_empty_categories` computes empty category docs by comparing `categories.slug` against `products.distinct('category')`, then runs `db.categories.delete_many(...)` (no soft-delete fields).",
+    "Manual cleanup endpoint (`POST /api/categories/cleanup-empty`) calls `_run_category_cleanup('manual')` by default, while `?dry_run=true` returns preview only and skips deletion.",
+    "Scheduler loop `_category_cleanup_scheduler_loop` checks due schedules every 60s and calls `_run_category_cleanup('scheduled')`; recurrence handling advances `next_run_at` for daily/weekly and disables once-only schedules (`enabled=false`, `next_run_at=null`)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_category_cleanup_schedule.py",
+    "/app/test_reports/iteration_37.json"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5)",
+    "frontend": "100% (requested controls visible and interactive)"
+  },
+  "seed_data_creation": "Temporary QA category created during dry-run verification and removed at test end.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Did not execute destructive cleanup endpoint without dry_run=true on shared live DB. Schedule mutation tests used fixture-based Mongo restore of `category_cleanup_schedule` singleton after each mutation case.",
+  "rca of the issue": "Requirement/API naming drift: implementation and tests use `removed_categories` for dry-run candidate rows, while requirement text states `candidates`. Functional behavior is correct (preview + no delete), but contract naming may cause downstream assertion or client mismatch if `candidates` is expected literally."
+}

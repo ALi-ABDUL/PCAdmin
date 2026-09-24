@@ -1,0 +1,36 @@
+{
+  "summary": "Completed backend + UI verification for Payment Gateway settings storage flow (Stripe/PayPal), including masking, persistence, toggle save, and state restoration.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_payment_gateway_settings.py",
+    "/app/test_reports/pytest/pytest_iteration38_payment_gateway.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GET /api/payment-gateway/settings returns masked payload only (`secret_key_configured` / `client_secret_configured`) and does not expose raw secrets.",
+    "PATCH /api/payment-gateway/settings persists provider fields via Mongo update and keeps Stripe/PayPal namespaces independent (PayPal update does not erase Stripe fields).",
+    "Blank secret input is ignored when submitted alongside non-secret updates (verified for PayPal client_secret), preserving previously stored secret values."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_payment_gateway_settings.py",
+    "/app/test_reports/iteration_38.json"
+  ],
+  "success_rate": {
+    "backend": "100% (3/3)",
+    "frontend": "100% (targeted payment gateway flow)"
+  },
+  "test_credentials": "Admin UI: qa@prettycheap.com.au / QaTest123!",
+  "seed_data_creation": "No long-lived seed data created. Payment gateway toggle change was restored to original value during UI test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Targeted payment-gateway regression now includes blank PayPal secret non-overwrite behavior in /app/backend/tests/test_payment_gateway_settings.py. UI test validated Stripe/PayPal Configure panels, Stripe Apple Pay toggle persistence, and explicit restoration.",
+  "rca of the issue": "No defect reproduced in this iteration. Flow operates as settings-storage only; no Stripe/PayPal provider HTTP calls were observed during UI interactions."
+}

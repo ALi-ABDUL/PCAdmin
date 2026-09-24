@@ -27,7 +27,7 @@ from scraper import (
 from models import (
     CATEGORIES, SEED_CATEGORIES, ScrapeRequest, ScrapedItem, WatchlistToggle, ProductCreate, 
     Product, ProductUpdate, ShippingAddress, _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, 
-    OrderCreate, OrderLineInput, OrderLineFulfillmentUpdate, CartLineInput, CartUpdate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, CategoryCleanupScheduleUpdate, ItemBulkAction, 
+    OrderCreate, OrderLineInput, OrderLineFulfillmentUpdate, CartLineInput, CartUpdate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, CategoryCleanupScheduleUpdate, PaymentGatewayUpdate, PAYMENT_GATEWAY_DEFAULTS, ItemBulkAction, 
     RefreshAllRequest, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
     FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ScheduleEntryBody, ScraperSchedulesReplaceBody, AutoRetryConfigBody, ORDER_STATUSES, ReturnRequest, 
     AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate, PortalProfileUpdate,
@@ -1995,6 +1995,75 @@ async def clear_push_secret(field: str):
         raise HTTPException(status_code=400, detail="Unknown field")
     await db.push_settings.update_one({"id": "singleton"}, {"$set": {field: ""}}, upsert=True)
     return await get_push_settings()
+
+
+async def _get_payment_gateway_settings() -> dict:
+    doc = await db.payment_gateway_settings.find_one({"id": "singleton"}, {"_id": 0})
+    if not doc:
+        return {
+            **PAYMENT_GATEWAY_DEFAULTS,
+            "stripe": {**PAYMENT_GATEWAY_DEFAULTS["stripe"], "payment_methods": {**PAYMENT_GATEWAY_DEFAULTS["stripe"]["payment_methods"]}},
+            "paypal": {**PAYMENT_GATEWAY_DEFAULTS["paypal"]},
+        }
+    return {
+        **PAYMENT_GATEWAY_DEFAULTS,
+        **doc,
+        "stripe": {
+            **PAYMENT_GATEWAY_DEFAULTS["stripe"], **(doc.get("stripe") or {}),
+            "payment_methods": {**PAYMENT_GATEWAY_DEFAULTS["stripe"]["payment_methods"], **((doc.get("stripe") or {}).get("payment_methods") or {})},
+        },
+        "paypal": {**PAYMENT_GATEWAY_DEFAULTS["paypal"], **(doc.get("paypal") or {})},
+    }
+
+
+def _public_payment_gateway_settings(settings: dict) -> dict:
+    stripe, paypal = settings["stripe"], settings["paypal"]
+    return {
+        "stripe": {
+            "publishable_key": stripe.get("publishable_key") or "",
+            "secret_key_configured": bool(stripe.get("secret_key")),
+            "payment_methods": {key: bool(value) for key, value in stripe.get("payment_methods", {}).items()},
+        },
+        "paypal": {
+            "client_id": paypal.get("client_id") or "",
+            "client_secret_configured": bool(paypal.get("client_secret")),
+        },
+        "updated_at": settings.get("updated_at"),
+    }
+
+
+@api_router.get("/payment-gateway/settings")
+async def get_payment_gateway_settings():
+    return _public_payment_gateway_settings(await _get_payment_gateway_settings())
+
+
+@api_router.patch("/payment-gateway/settings")
+async def update_payment_gateway_settings(body: PaymentGatewayUpdate):
+    """Persist provider settings while ensuring secret keys never leave the backend."""
+    updates: dict[str, Any] = {}
+    if body.stripe is not None:
+        stripe = body.stripe.model_dump(exclude_unset=True)
+        if "publishable_key" in stripe:
+            updates["stripe.publishable_key"] = (stripe["publishable_key"] or "").strip()
+        if (secret := (stripe.get("secret_key") or "").strip()):
+            updates["stripe.secret_key"] = secret
+        if stripe.get("payment_methods") is not None:
+            for key, value in stripe["payment_methods"].items():
+                if value is not None:
+                    updates[f"stripe.payment_methods.{key}"] = bool(value)
+    if body.paypal is not None:
+        paypal = body.paypal.model_dump(exclude_unset=True)
+        if "client_id" in paypal:
+            updates["paypal.client_id"] = (paypal["client_id"] or "").strip()
+        if (secret := (paypal.get("client_secret") or "").strip()):
+            updates["paypal.client_secret"] = secret
+    if not updates:
+        raise HTTPException(status_code=400, detail="No payment gateway settings to update")
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.payment_gateway_settings.update_one(
+        {"id": "singleton"}, {"$setOnInsert": {"id": "singleton"}, "$set": updates}, upsert=True,
+    )
+    return _public_payment_gateway_settings(await _get_payment_gateway_settings())
 
 
 @api_router.post("/push/test")

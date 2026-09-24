@@ -2320,3 +2320,16 @@ Notification Bell deep-links) — zero regressions detected.
   deleting. Verified: testing_agent iteration_37 plus final backend regressions **10/10**.
   No live category cleanup was executed during verification; 25 current empty categories remain
   until the admin confirms a manual cleanup or schedules one.
+
+
+## Jun 2026 — Payment gateway configuration
+- Replaced the Payment Gateway scaffold with functional Stripe and PayPal Configure panels.
+  Stripe now supports Publishable Key, Secret Key, and Apple Pay / Google Pay / Afterpay toggles;
+  PayPal supports Client ID and Secret Key. Each provider has an independent success message.
+- Added masked `GET/PATCH /api/payment-gateway/settings` storage in the
+  `payment_gateway_settings` singleton. Stripe/PayPal secrets are never returned by GET; only
+  `*_configured` flags are exposed. Blank secret fields retain the previously stored secret and
+  Stripe/PayPal partial updates do not erase the other provider.
+- This is settings storage only: no Stripe/PayPal provider call, checkout, or credential
+  validation has been added. Verified: testing_agent iteration_38 plus final payment regression
+  suite **3/3**; all dummy test settings and UI toggle changes were restored.

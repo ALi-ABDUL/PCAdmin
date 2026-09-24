@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowDown, ArrowUp, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, Menu, Package, Plus, RefreshCw, Store, Trash2, X, XCircle, Zap } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, CreditCard, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, Menu, Package, Plus, RefreshCw, Store, Trash2, Wallet, X, XCircle, Zap } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
@@ -791,12 +791,12 @@ export function CredField({ label, testId, type = "text", placeholder, value, on
         />
         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
           {isSecret && (
-            <button type="button" onClick={() => setReveal((r) => !r)} className="text-slate-400 hover:text-slate-600 p-1" title={reveal ? "Hide" : "Show"}>
+            <button type="button" onClick={() => setReveal((r) => !r)} className="text-slate-400 hover:text-slate-600 p-1" title={reveal ? "Hide" : "Show"} data-testid={`${testId}-visibility-button`}>
               {reveal ? <EyeOff size={13}/> : <Eye size={13}/>}
             </button>
           )}
           {onClear && (
-            <button type="button" onClick={onClear} className="text-slate-400 hover:text-red-600 p-1" title="Clear stored value">
+            <button type="button" onClick={onClear} className="text-slate-400 hover:text-red-600 p-1" title="Clear stored value" data-testid={`${testId}-clear-button`}>
               <Trash2 size={13}/>
             </button>
           )}
@@ -966,6 +966,76 @@ export function IntegrationsPanel() {
       ))}
     </div>
   );
+}
+
+
+export function PaymentGatewayPanel() {
+  const [settings, setSettings] = useState(null);
+  const [stripeOpen, setStripeOpen] = useState(false);
+  const [paypalOpen, setPaypalOpen] = useState(false);
+  const [stripeSecret, setStripeSecret] = useState("");
+  const [paypalSecret, setPaypalSecret] = useState("");
+  const [saving, setSaving] = useState("");
+
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/payment-gateway/settings`);
+    setSettings(data);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const saveStripe = async () => {
+    setSaving("stripe");
+    try {
+      const stripe = { publishable_key: settings.stripe.publishable_key, payment_methods: settings.stripe.payment_methods };
+      if (stripeSecret.trim()) stripe.secret_key = stripeSecret.trim();
+      const { data } = await axios.patch(`${API}/payment-gateway/settings`, { stripe });
+      setSettings(data); setStripeSecret(""); toast.success("Stripe settings saved");
+    } catch (error) { toast.error("Stripe save failed", { description: error?.response?.data?.detail || error.message }); }
+    finally { setSaving(""); }
+  };
+  const savePayPal = async () => {
+    setSaving("paypal");
+    try {
+      const paypal = { client_id: settings.paypal.client_id };
+      if (paypalSecret.trim()) paypal.client_secret = paypalSecret.trim();
+      const { data } = await axios.patch(`${API}/payment-gateway/settings`, { paypal });
+      setSettings(data); setPaypalSecret(""); toast.success("PayPal settings saved");
+    } catch (error) { toast.error("PayPal save failed", { description: error?.response?.data?.detail || error.message }); }
+    finally { setSaving(""); }
+  };
+  const setStripe = (change) => setSettings(current => ({ ...current, stripe: { ...current.stripe, ...change } }));
+  const setStripeMethod = (key, value) => setStripe({ payment_methods: { ...settings.stripe.payment_methods, [key]: value } });
+
+  if (!settings) return <div className="card p-5 text-sm text-slate-500" data-testid="payment-gateway-loading">Loading payment gateway settings…</div>;
+  const stripeReady = !!settings.stripe.publishable_key && settings.stripe.secret_key_configured;
+  const paypalReady = !!settings.paypal.client_id && settings.paypal.client_secret_configured;
+  return <div className="grid gap-3" data-testid="payment-gateway-panel">
+    <div className="card p-4 md:p-5" data-testid="stripe-gateway-card">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0"><div className="w-10 h-10 rounded-lg grid place-items-center bg-indigo-50 text-indigo-600"><CreditCard size={17}/></div><div><div className="font-medium text-sm">Stripe</div><div className="text-[11px] text-slate-400 font-mono">Cards, wallets &amp; buy-now-pay-later</div></div></div>
+        <div className="flex items-center gap-2"><span className={`chip ${stripeReady ? "chip-success" : "chip-neutral"} font-mono text-[10px]`} data-testid="stripe-gateway-status">{stripeReady ? "CONFIGURED" : "NOT CONFIGURED"}</span><button className="btn btn-ghost text-xs !py-1 !px-2" onClick={() => setStripeOpen(open => !open)} data-testid="stripe-configure-button">{stripeOpen ? "Close" : "Configure"}</button></div>
+      </div>
+      {stripeOpen && <div className="mt-5 pt-5 border-t hairline grid gap-4" data-testid="stripe-configure-panel">
+        <CredField label="Publishable Key" testId="stripe-publishable-key-input" placeholder="pk_test_..." value={settings.stripe.publishable_key} onChange={(value) => setStripe({ publishable_key: value })}/>
+        <CredField label="Secret Key" testId="stripe-secret-key-input" type="password" placeholder={settings.stripe.secret_key_configured ? "Saved · enter a replacement to change" : "sk_test_..."} value={stripeSecret} onChange={setStripeSecret} savedBadge={settings.stripe.secret_key_configured}/>
+        <div className="grid gap-2" data-testid="stripe-payment-method-toggles"><div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Stripe payment methods</div>{[
+          ["apple_pay", "Apple Pay"], ["google_pay", "Google Pay"], ["afterpay", "Afterpay"],
+        ].map(([key, label]) => <label key={key} className="flex items-center justify-between gap-4 p-3 border hairline rounded-lg cursor-pointer" data-testid={`stripe-${key}-toggle`}><div><div className="text-sm font-medium">{label}</div><div className="text-xs text-slate-500">Uses your Stripe account — no extra key needed.</div></div><input type="checkbox" checked={!!settings.stripe.payment_methods[key]} onChange={(event) => setStripeMethod(key, event.target.checked)} className="accent-indigo-600 w-4 h-4" data-testid={`stripe-${key}-checkbox`}/></label>)}</div>
+        <div className="flex justify-end"><button className="btn btn-primary text-sm" onClick={saveStripe} disabled={saving === "stripe"} data-testid="stripe-save-button">{saving === "stripe" ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>} Save Stripe</button></div>
+      </div>}
+    </div>
+    <div className="card p-4 md:p-5" data-testid="paypal-gateway-card">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0"><div className="w-10 h-10 rounded-lg grid place-items-center bg-sky-50 text-sky-600"><Wallet size={17}/></div><div><div className="font-medium text-sm">PayPal</div><div className="text-[11px] text-slate-400 font-mono">PayPal wallet checkout</div></div></div>
+        <div className="flex items-center gap-2"><span className={`chip ${paypalReady ? "chip-success" : "chip-neutral"} font-mono text-[10px]`} data-testid="paypal-gateway-status">{paypalReady ? "CONFIGURED" : "NOT CONFIGURED"}</span><button className="btn btn-ghost text-xs !py-1 !px-2" onClick={() => setPaypalOpen(open => !open)} data-testid="paypal-configure-button">{paypalOpen ? "Close" : "Configure"}</button></div>
+      </div>
+      {paypalOpen && <div className="mt-5 pt-5 border-t hairline grid gap-4" data-testid="paypal-configure-panel">
+        <CredField label="PayPal Client ID" testId="paypal-client-id-input" placeholder="Client ID" value={settings.paypal.client_id} onChange={(value) => setSettings(current => ({ ...current, paypal: { ...current.paypal, client_id: value } }))}/>
+        <CredField label="PayPal Secret Key" testId="paypal-secret-key-input" type="password" placeholder={settings.paypal.client_secret_configured ? "Saved · enter a replacement to change" : "Secret key"} value={paypalSecret} onChange={setPaypalSecret} savedBadge={settings.paypal.client_secret_configured}/>
+        <div className="flex justify-end"><button className="btn btn-primary text-sm" onClick={savePayPal} disabled={saving === "paypal"} data-testid="paypal-save-button">{saving === "paypal" ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>} Save PayPal</button></div>
+      </div>}
+    </div>
+  </div>;
 }
 
 
@@ -1986,7 +2056,7 @@ export function StoreManagement({ section, setSection }) {
     "store-settings":      { hint: "Your storefront brand — name, tagline, logo, favicon and tab title (shown live on PCStore) — plus contact and legal info.", fields: [], custom: <StoreSettingsPanel/> },
     "pricing-rules":       { hint: "Tiered profit rules the scraper uses when calculating sell prices for imported items.", fields: [], custom: <PricingRulesEditor/> },
     "scraper-schedule":    { hint: "Automate the eBay re-fetch: add one or more schedules, each with its own start time, frequency and optional stop date — or run one right now.", fields: [], custom: <ScraperScheduleEditor/> },
-    "payment-gateway":     { hint: "Enable/disable payment providers and configure their credentials.", fields: ["Stripe","PayPal","Apple Pay","Google Pay","Afterpay","Zip Pay","Bank transfer","Cash on delivery"] },
+    "payment-gateway":     { hint: "Configure Stripe and PayPal credentials. Apple Pay, Google Pay, and Afterpay use Stripe with no extra keys.", fields: [], custom: <PaymentGatewayPanel/> },
     "shipping-methods":    { hint: "Everything delivery: reusable postage presets and the store-wide delivery window.", fields: [], custom: <ShippingMethodsPanel/> },
     "tax-rates":           { hint: "GST and location-based tax rules.", fields: ["Australia — GST 10%","New Zealand — GST 15%","B2B / ABN entries"] },
     "checkout-settings":   { hint: "Fine-tune the buyer journey at checkout.", fields: ["Guest checkout","Require phone","Address auto-complete","Order note field","Marketing opt-in","Terms & conditions box"] },

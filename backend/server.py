@@ -2018,15 +2018,19 @@ async def _get_payment_gateway_settings() -> dict:
 
 def _public_payment_gateway_settings(settings: dict) -> dict:
     stripe, paypal = settings["stripe"], settings["paypal"]
+    publishable_key = stripe.get("publishable_key") or ""
+    safe_publishable_key = publishable_key if publishable_key.startswith("pk_") else ""
     return {
         "stripe": {
-            "publishable_key": stripe.get("publishable_key") or "",
+            "publishable_key": safe_publishable_key,
             "secret_key_configured": bool(stripe.get("secret_key")),
+            "webhook_secret_configured": bool(stripe.get("webhook_secret")),
             "payment_methods": {key: bool(value) for key, value in stripe.get("payment_methods", {}).items()},
         },
         "paypal": {
             "client_id": paypal.get("client_id") or "",
             "client_secret_configured": bool(paypal.get("client_secret")),
+            "mode": paypal.get("mode") or "live",
         },
         "updated_at": settings.get("updated_at"),
     }
@@ -2037,6 +2041,41 @@ async def get_payment_gateway_settings():
     return _public_payment_gateway_settings(await _get_payment_gateway_settings())
 
 
+@api_router.get("/payment-gateway")
+async def get_public_payment_gateway(response: Response):
+    """Public PCStore payment configuration; never expose provider secrets."""
+    settings = await _get_payment_gateway_settings()
+    stripe, paypal = settings["stripe"], settings["paypal"]
+    publishable_key = stripe.get("publishable_key") or ""
+    safe_publishable_key = publishable_key if publishable_key.startswith("pk_") else ""
+    stripe_enabled = bool(safe_publishable_key and stripe.get("secret_key"))
+    paypal_enabled = bool(paypal.get("client_id") and paypal.get("client_secret"))
+    methods = stripe.get("payment_methods") or {}
+    response.headers["Cache-Control"] = "public, max-age=60"
+    return {
+        "currency": settings.get("currency") or "AUD",
+        "stripe": {"enabled": stripe_enabled, "publishable_key": safe_publishable_key},
+        "paypal": {"enabled": paypal_enabled, "client_id": paypal.get("client_id") or "", "mode": paypal.get("mode") or "live"},
+        "apple_pay": {"enabled": stripe_enabled and bool(methods.get("apple_pay"))},
+        "google_pay": {"enabled": stripe_enabled and bool(methods.get("google_pay"))},
+        "afterpay": {"enabled": stripe_enabled and bool(methods.get("afterpay"))},
+    }
+
+
+@api_router.get("/payment-gateway/secrets")
+async def get_payment_gateway_secrets(x_pcstore_secret: Optional[str] = Header(default=None, alias="X-PCStore-Secret")):
+    """PCStore server-to-server payment credentials, protected by a shared secret."""
+    settings = await _get_payment_gateway_settings()
+    expected = settings.get("pcstore_internal_secret") or ""
+    if not expected or not x_pcstore_secret or not secrets.compare_digest(x_pcstore_secret, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    stripe, paypal = settings["stripe"], settings["paypal"]
+    return {
+        "stripe": {"secret_key": stripe.get("secret_key") or "", "webhook_secret": stripe.get("webhook_secret") or ""},
+        "paypal": {"client_id": paypal.get("client_id") or "", "secret": paypal.get("client_secret") or "", "mode": paypal.get("mode") or "live"},
+    }
+
+
 @api_router.patch("/payment-gateway/settings")
 async def update_payment_gateway_settings(body: PaymentGatewayUpdate):
     """Persist provider settings while ensuring secret keys never leave the backend."""
@@ -2044,9 +2083,18 @@ async def update_payment_gateway_settings(body: PaymentGatewayUpdate):
     if body.stripe is not None:
         stripe = body.stripe.model_dump(exclude_unset=True)
         if "publishable_key" in stripe:
-            updates["stripe.publishable_key"] = (stripe["publishable_key"] or "").strip()
+            publishable_key = (stripe["publishable_key"] or "").strip()
+            if publishable_key and not publishable_key.startswith("pk_"):
+                raise HTTPException(status_code=422, detail="Stripe Publishable Key must begin with pk_")
+            updates["stripe.publishable_key"] = publishable_key
         if (secret := (stripe.get("secret_key") or "").strip()):
+            if not secret.startswith("sk_"):
+                raise HTTPException(status_code=422, detail="Stripe Secret Key must begin with sk_")
             updates["stripe.secret_key"] = secret
+        if (webhook_secret := (stripe.get("webhook_secret") or "").strip()):
+            if not webhook_secret.startswith("whsec_"):
+                raise HTTPException(status_code=422, detail="Stripe Webhook Secret must begin with whsec_")
+            updates["stripe.webhook_secret"] = webhook_secret
         if stripe.get("payment_methods") is not None:
             for key, value in stripe["payment_methods"].items():
                 if value is not None:
@@ -2057,6 +2105,8 @@ async def update_payment_gateway_settings(body: PaymentGatewayUpdate):
             updates["paypal.client_id"] = (paypal["client_id"] or "").strip()
         if (secret := (paypal.get("client_secret") or "").strip()):
             updates["paypal.client_secret"] = secret
+        if paypal.get("mode") is not None:
+            updates["paypal.mode"] = paypal["mode"]
     if not updates:
         raise HTTPException(status_code=400, detail="No payment gateway settings to update")
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -4326,6 +4376,7 @@ COUNTRY_MIDDLEWARE_EXEMPT_PREFIXES = (
     "/api/portal/",              # customer portal auth + orders + reviews
     "/api/products/",            # public product-detail sub-paths (reviews etc.)
     "/api/reviews/",             # public review voting
+    "/api/payment-gateway",      # public PCStore payment configuration
     "/docs", "/openapi.json", "/redoc",  # framework internals
 )
 

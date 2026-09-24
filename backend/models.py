@@ -402,8 +402,10 @@ class CategoryCleanupScheduleUpdate(BaseModel):
 
 PAYMENT_GATEWAY_DEFAULTS = {
     "id": "singleton",
-    "stripe": {"publishable_key": "", "secret_key": "", "payment_methods": {"apple_pay": False, "google_pay": False, "afterpay": False}},
-    "paypal": {"client_id": "", "client_secret": ""},
+    "currency": "AUD",
+    "pcstore_internal_secret": "",
+    "stripe": {"publishable_key": "", "secret_key": "", "webhook_secret": "", "payment_methods": {"apple_pay": False, "google_pay": False, "afterpay": False}},
+    "paypal": {"client_id": "", "client_secret": "", "mode": "live"},
 }
 
 
@@ -416,12 +418,14 @@ class PaymentMethodToggles(BaseModel):
 class StripeGatewayUpdate(BaseModel):
     publishable_key: Optional[str] = Field(default=None, max_length=500)
     secret_key: Optional[str] = Field(default=None, max_length=500)
+    webhook_secret: Optional[str] = Field(default=None, max_length=500)
     payment_methods: Optional[PaymentMethodToggles] = None
 
 
 class PayPalGatewayUpdate(BaseModel):
     client_id: Optional[str] = Field(default=None, max_length=500)
     client_secret: Optional[str] = Field(default=None, max_length=500)
+    mode: Optional[Literal["sandbox", "live"]] = None
 
 
 class PaymentGatewayUpdate(BaseModel):

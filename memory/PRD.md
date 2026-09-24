@@ -2333,3 +2333,18 @@ Notification Bell deep-links) — zero regressions detected.
 - This is settings storage only: no Stripe/PayPal provider call, checkout, or credential
   validation has been added. Verified: testing_agent iteration_38 plus final payment regression
   suite **3/3**; all dummy test settings and UI toggle changes were restored.
+
+
+## Jun 2026 — PCStore public and server-to-server payment endpoints
+- Added public `GET /api/payment-gateway`, returning only AUD currency, Stripe publishable-key
+  configuration, PayPal client ID/mode, and wallet enabled flags. The backend origin sends
+  `Cache-Control: public, max-age=60`; preview ingress applies a stricter external `no-store`
+  override, which is infrastructure behavior rather than an app response change.
+- Added `GET /api/payment-gateway/secrets`, protected by an opaque 48-character
+  `X-PCStore-Secret` stored only in the payment gateway singleton. It returns 401 for missing or
+  wrong tokens; never returns the shared token itself. The shared token is recorded in the
+  restricted test-credentials handoff file for PCStore setup.
+- Hardened Stripe key handling: public/admin browser responses suppress a legacy `sk_` value if
+  it was mistakenly saved as a publishable key; future Publishable/Secret/Webhook saves require
+  `pk_` / `sk_` / `whsec_` prefixes. Verified: testing_agent iteration_39 and final **6/6**
+  payment regression tests; no provider API calls were made.

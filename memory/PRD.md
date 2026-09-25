@@ -2365,3 +2365,10 @@ Notification Bell deep-links) — zero regressions detected.
 ### P2
 - CSV export for Products and Orders.
 - Replace obsolete seed image URLs that currently produce non-critical image-proxy 404 console noise.
+
+
+## Jun 2026 — Single configurable storefront Footer
+- Site Menus now has one real **Footer** card. Removed the placeholder entries **Footer — Shop**, **Footer — Support**, and **Footer — Legal**; Main navigation, Mobile drawer, and Utility bar scaffolds remain unchanged.
+- `site_menus.footer` is persisted and returned by `GET /api/site-menus` as `{ enabled, links, custom_text }`. `PATCH /api/site-menus` accepts footer-only changes, supports page and external URL links, validates destinations and duplicate link IDs, and lazily migrates legacy singleton documents without changing saved FAQ/contact content.
+- The Footer Configure panel supports a complete PCStore visibility toggle, add/edit/delete navigation links, and custom plain-text footer content (copyright, tagline, ABN, etc.). A dedicated **Save footer** action persists the changes without requiring the Customer Support panel to be opened.
+- Updated `PCSTORE_INTEGRATION.md` with the public footer response contract and rendering rules. Verified with 12 backend tests under parallel xdist, a production build, and authenticated UI add → save → delete → restore flow. QA fixture content left by the testing pass was cleared back to clean Site Menus defaults.

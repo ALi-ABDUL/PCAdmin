@@ -1,5 +1,6 @@
 """Coverage for Store Management → Site Menus → Customer Support persistence."""
 import copy
+import fcntl
 import os
 import time
 from pathlib import Path
@@ -19,6 +20,14 @@ def _api_url():
 
 API = _api_url()
 load_dotenv("/app/backend/.env")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def site_menus_lock():
+    with open("/tmp/pcadmin-site-menus-tests.lock", "w") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        yield
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def _mongo_collection():
@@ -123,6 +132,40 @@ class TestSiteMenusSupport:
         # Confirm omitted fields are preserved
         assert deleted_data["get_help"] == baseline["get_help"]
         assert deleted_data["contact_form"] == baseline["contact_form"]
+        assert deleted_data["footer"] == baseline["footer"]
+
+    def test_footer_persists_enabled_links_and_custom_text(self, site_menus_snapshot):
+        footer = {
+            "enabled": False,
+            "links": [
+                {"id": "qa-footer-returns", "label": "Returns", "link_type": "page", "page": "returns-policy", "url": ""},
+                {"id": "qa-footer-status", "label": "Order status", "link_type": "url", "url": "https://example.com/orders", "page": ""},
+            ],
+            "custom_text": "© QA Footer · ABN 12 345 678 901",
+        }
+        response = requests.patch(f"{API}/site-menus", json={"footer": footer}, timeout=20)
+        assert response.status_code == 200, response.text
+        assert response.json()["footer"] == footer
+
+        mongo, collection = _mongo_collection()
+        try:
+            persisted = collection.find_one({"id": "singleton"}, {"_id": 0})
+            assert persisted["footer"] == footer
+        finally:
+            mongo.close()
+
+    def test_footer_rejects_unknown_page_or_missing_external_url(self, site_menus_snapshot):
+        bad_page = requests.patch(f"{API}/site-menus", json={"footer": {"links": [
+            {"id": "bad-page", "label": "Broken", "link_type": "page", "page": "not-a-page"},
+        ]}}, timeout=20)
+        assert bad_page.status_code == 400
+        assert "unknown footer page" in bad_page.json()["detail"].lower()
+
+        bad_url = requests.patch(f"{API}/site-menus", json={"footer": {"links": [
+            {"id": "bad-url", "label": "Broken", "link_type": "url", "url": ""},
+        ]}}, timeout=20)
+        assert bad_url.status_code == 400
+        assert "url is required" in bad_url.json()["detail"].lower()
 
     def test_legacy_singleton_migration_rehydrates_faq_items_on_get(self, site_menus_snapshot):
         mongo, collection = _mongo_collection()
@@ -142,6 +185,18 @@ class TestSiteMenusSupport:
         finally:
             mongo.close()
 
+    def test_legacy_singleton_migration_adds_footer_on_get(self, site_menus_snapshot):
+        mongo, collection = _mongo_collection()
+        try:
+            collection.update_one({"id": "singleton"}, {"$unset": {"footer": ""}})
+            response = requests.get(f"{API}/site-menus", timeout=20)
+            assert response.status_code == 200, response.text
+            assert response.json()["footer"] == {"enabled": True, "links": [], "custom_text": ""}
+            persisted = collection.find_one({"id": "singleton"}, {"_id": 0})
+            assert persisted["footer"] == {"enabled": True, "links": [], "custom_text": ""}
+        finally:
+            mongo.close()
+
     def test_contact_route_is_explicit_when_disabled_or_key_missing(self, site_menus_snapshot):
         disabled = requests.patch(f"{API}/site-menus", json={"contact_form": {"enabled": False}}, timeout=20)
         assert disabled.status_code == 200, disabled.text
@@ -150,9 +205,10 @@ class TestSiteMenusSupport:
         assert response.status_code == 403
         assert "unavailable" in response.json()["detail"].lower()
 
+        contact_form = {**(site_menus_snapshot.get("contact_form") or {}), "enabled": True}
         restored = requests.patch(
             f"{API}/site-menus",
-            json={"contact_form": site_menus_snapshot.get("contact_form")},
+            json={"contact_form": contact_form},
             timeout=20,
         )
         assert restored.status_code == 200

@@ -2346,7 +2346,7 @@ async def get_site_menus():
 
 @api_router.patch("/site-menus")
 async def update_site_menus(body: SiteMenusUpdate):
-    if body.get_help is None and body.faq_items is None and body.contact_form is None:
+    if body.get_help is None and body.faq_items is None and body.contact_form is None and body.footer is None:
         raise HTTPException(status_code=400, detail="No fields to update")
     existing = await _get_site_menus()
     updates: dict[str, Any] = {}
@@ -2384,6 +2384,28 @@ async def update_site_menus(body: SiteMenusUpdate):
         if not contact_form["title"]:
             raise HTTPException(status_code=400, detail="Contact form title is required")
         updates["contact_form"] = contact_form
+    if body.footer is not None:
+        footer = {**existing["footer"]}
+        if body.footer.enabled is not None:
+            footer["enabled"] = body.footer.enabled
+        if body.footer.custom_text is not None:
+            footer["custom_text"] = body.footer.custom_text.strip()
+        if body.footer.links is not None:
+            links, used_ids = [], set()
+            for link in body.footer.links:
+                label = link.label.strip()
+                link_id = (link.id or str(uuid.uuid4())).strip()
+                if link_id in used_ids:
+                    raise HTTPException(status_code=400, detail="Footer link IDs must be unique")
+                used_ids.add(link_id)
+                item = {"id": link_id, "label": label, "link_type": link.link_type, "url": (link.url or "").strip(), "page": (link.page or "").strip()}
+                if item["link_type"] == "page" and item["page"] not in SITE_PAGE_SLUGS:
+                    raise HTTPException(status_code=400, detail=f"Unknown footer page: {item['page']}")
+                if item["link_type"] == "url" and not item["url"]:
+                    raise HTTPException(status_code=400, detail="A URL is required for every external footer link")
+                links.append(item)
+            footer["links"] = links
+        updates["footer"] = footer
     await db.site_menus.update_one(
         {"id": "singleton"},
         {"$set": {**updates, "updated_at": datetime.now(timezone.utc).isoformat()}},

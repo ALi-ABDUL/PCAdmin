@@ -2003,6 +2003,7 @@ async def _get_site_menus() -> dict:
             "get_help": {**SITE_MENUS_DEFAULTS["get_help"]},
             "faq_items": [dict(item) for item in SITE_MENUS_DEFAULTS["faq_items"]],
             "contact_form": {**SITE_MENUS_DEFAULTS["contact_form"]},
+            "footer": {**SITE_MENUS_DEFAULTS["footer"], "links": []},
         }
         await db.site_menus.insert_one({**seeded})
         return seeded
@@ -2015,6 +2016,8 @@ async def _get_site_menus() -> dict:
         migration["faq_items"] = [dict(item) for item in SITE_MENUS_DEFAULTS["faq_items"]]
     if not isinstance(doc.get("contact_form"), dict):
         migration["contact_form"] = {**SITE_MENUS_DEFAULTS["contact_form"]}
+    if not isinstance(doc.get("footer"), dict):
+        migration["footer"] = {**SITE_MENUS_DEFAULTS["footer"], "links": []}
     if migration:
         migration["updated_at"] = datetime.now(timezone.utc).isoformat()
         await db.site_menus.update_one({"id": "singleton"}, {"$set": migration})
@@ -2024,6 +2027,8 @@ async def _get_site_menus() -> dict:
     merged["get_help"] = {**SITE_MENUS_DEFAULTS["get_help"], **(doc.get("get_help") or {})}
     merged["faq_items"] = [dict(item) for item in (doc.get("faq_items") if isinstance(doc.get("faq_items"), list) else SITE_MENUS_DEFAULTS["faq_items"])]
     merged["contact_form"] = {**SITE_MENUS_DEFAULTS["contact_form"], **(doc.get("contact_form") or {})}
+    merged["footer"] = {**SITE_MENUS_DEFAULTS["footer"], **(doc.get("footer") or {})}
+    merged["footer"]["links"] = [dict(link) for link in (merged["footer"].get("links") or []) if isinstance(link, dict)]
     return merged
 
 

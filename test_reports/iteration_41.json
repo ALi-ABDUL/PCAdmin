@@ -1,0 +1,68 @@
+{
+  "summary": "Tested Site Menus footer backend + frontend integration. Backend footer contract/migration/validation behaviors passed in targeted pytest; UI showed inconsistent footer-card rendering and missing footer data-testid hooks, blocking reliable completion of the full footer configure flow automation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/support/contact (existing regression test)",
+        "issue": "Existing test_site_menus_support.py assertion expected 503 after restoring contact_form, but environment snapshot had contact_form disabled, so route remained 403. This is test-fixture/state-assumption noise, not a footer API contract failure."
+      },
+      {
+        "endpoint": "pytest execution",
+        "issue": "site_menus singleton tests are stateful; parallel xdist run produced cross-test interference. Serial run (-n 1) is stable."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Store Management -> Site Menus",
+        "issue": "Footer card not reliably detectable via required data-testid selectors on the public app build; in repeated runs footer controls were absent or rendered without footer testids, preventing robust automation for configure/add/edit/delete/save verification.",
+        "selector": "[data-testid='footer-menu-card'], [data-testid*='footer-']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "UI Site Menus footer rendering vs backend payload",
+        "issue": "GET /api/site-menus returns footer payload correctly, but UI did not consistently expose a matching configurable Footer block with stable testids in the tested public build.",
+        "affected_selectors": [
+          "[data-testid='site-menus-panel']",
+          "[data-testid='footer-menu-card']"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_site_menus_support.py",
+    "/app/backend/tests/test_site_menus_footer_cleanup.py",
+    "/app/test_reports/pytest/pytest_iteration41_site_menus_footer.xml",
+    "/app/test_reports/pytest/pytest_iteration41_site_menus_footer_serial.xml"
+  ],
+  "action_items": [
+    "Ensure public frontend build renders exactly one Footer card with stable footer data-testid attributes (footer-menu-card, footer-configure-button, etc.) in Site Menus.",
+    "Re-run UI flow after footer selectors/rendering are stable to validate toggle/add/edit/delete/custom text save persistence end-to-end.",
+    "Keep site_menus singleton regression tests serial or isolate DB state per test to avoid xdist cross-test contamination.",
+    "If contact-form regression test remains in suite, harden fixture setup to explicitly re-enable contact_form before asserting missing-key 503 behavior."
+  ],
+  "critical_code_review_comments": [
+    "Backend implementation satisfies requested footer API contract: GET exposes footer.enabled/footer.links/footer.custom_text; PATCH persists enabled/page+url links/custom_text; and validations for unknown page, missing URL, duplicate footer IDs, and empty payload are enforced.",
+    "Legacy migration path in _get_site_menus adds missing footer while preserving existing faq_items/contact_form data.",
+    "Frontend testability gap exists on public build: required footer controls were not consistently discoverable via data-testid despite backend data being present."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_site_menus_footer_cleanup.py",
+    "/app/test_reports/iteration_41.json"
+  ],
+  "success_rate": {
+    "backend": "92% overall suite run (11/12); 100% for new footer-focused tests (4/4)",
+    "frontend": "40% (navigation/login/basic Site Menus load passed; required footer configure flow blocked by selector/render inconsistency)"
+  },
+  "test_credentials": "Read /app/memory/test_credentials.md and used qa@prettycheap.com.au / QaTest123! for admin UI login.",
+  "seed_data_creation": "No permanent seed data created. Snapshot/restore artifacts created under /app/test_reports for site_menus singleton state.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Use /app/backend/tests/test_site_menus_footer_cleanup.py as focused regression for this story. Run site_menus tests serially. Confirm footer UI on the public URL exposes stable footer testids before attempting deeper Playwright add/edit/delete checks.",
+  "rca of the issue": "RCA-1 (UI inconsistency): public Site Menus view did not consistently expose footer controls through expected data-testid hooks, while backend /api/site-menus already returned footer data. This caused automation to fail at selector level rather than business logic level. RCA-2 (backend suite noise): singleton site_menus mutation tests can race under xdist; serial execution removes false failures."
+}

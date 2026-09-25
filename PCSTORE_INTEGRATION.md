@@ -324,6 +324,7 @@ GET /api/site-menus
 → { get_help: { enabled, label, link_type:"url"|"page", url, page },
     faq_items: [ { id, question, answer }, … ],
     contact_form: { enabled, title },
+    footer: { enabled, links: [ { id, label, link_type:"url"|"page", url, page }, … ], custom_text },
     pages: [ { slug, label }, … ] }
 ```
 
@@ -335,6 +336,10 @@ GET /api/site-menus
 - Render the FAQ page directly from `faq_items`, preserving the returned order.
 - Render the contact form only when `contact_form.enabled` is true, using
   `contact_form.title` as its heading.
+- Render the entire footer only when `footer.enabled` is true. For each footer
+  link, resolve `link_type:"page"` through its `page` slug or use `url` for
+  `link_type:"url"`. Render `footer.custom_text` as plain text (for copyright,
+  a tagline, ABN, or similar store details).
 
 To submit the configured contact form, send only the shopper's own details:
 

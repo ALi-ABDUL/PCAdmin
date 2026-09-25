@@ -1962,9 +1962,63 @@ function ShippingMethodsPanel() {
 
 
 const SITE_MENU_SCAFFOLDS = [
-  "Main navigation", "Footer — Shop", "Footer — Support",
-  "Footer — Legal", "Mobile drawer", "Utility bar",
+  "Main navigation", "Mobile drawer", "Utility bar",
 ];
+
+const EMPTY_FOOTER = { enabled: true, links: [], custom_text: "" };
+
+function FooterMenuCard({ footer, pages, onChange, onSave, saving }) {
+  const [open, setOpen] = useState(false);
+  const links = footer.links || [];
+  const update = (patch) => onChange({ ...footer, ...patch });
+  const updateLink = (index, patch) => update({ links: links.map((link, linkIndex) => linkIndex === index ? { ...link, ...patch } : link) });
+  const addLink = () => update({ links: [...links, { id: `footer-${Date.now()}`, label: "", link_type: "page", page: "home", url: "" }] });
+  const deleteLink = (index) => update({ links: links.filter((_, linkIndex) => linkIndex !== index) });
+
+  return (
+    <div className="card p-4 md:p-5" data-testid="footer-menu-card">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-lg grid place-items-center shrink-0 text-white" style={{ background: "linear-gradient(135deg,#0F766E,#0891B2)" }}><Menu size={16}/></div>
+          <div className="min-w-0">
+            <div className="font-medium text-sm truncate">Footer</div>
+            <div className="text-[11px] text-slate-400 font-mono truncate">{links.length} link{links.length === 1 ? "" : "s"} · {footer.enabled !== false ? "visible on PCStore" : "hidden on PCStore"}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className={`chip ${footer.enabled !== false ? "chip-success" : "chip-neutral"} font-mono text-[10px]`} data-testid="footer-status-chip">{footer.enabled !== false ? "ENABLED" : "OFF"}</span>
+          <button className="btn btn-ghost text-xs !py-1 !px-2" onClick={() => setOpen(value => !value)} data-testid="footer-configure-button">{open ? "Close" : "Configure"}</button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="mt-4 pt-4 border-t hairline grid gap-4" data-testid="footer-configure-form">
+          <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer" data-testid="footer-enabled-toggle">
+            <input type="checkbox" checked={footer.enabled !== false} onChange={(e) => update({ enabled: e.target.checked })} className="accent-indigo-600 mt-1 w-4 h-4" data-testid="footer-enabled-checkbox"/>
+            <div className="flex-1"><div className="text-sm font-medium">Show footer on PCStore</div><div className="text-xs text-slate-500 mt-0.5">Turn this off to hide the entire storefront footer.</div></div>
+            <span className={`chip ${footer.enabled !== false ? "chip-success" : "chip-neutral"} font-mono text-[10px] shrink-0`}>{footer.enabled !== false ? "ON" : "OFF"}</span>
+          </label>
+
+          <div className="grid gap-3" data-testid="footer-links-editor">
+            <div className="flex items-center justify-between gap-3"><div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Navigation links</div><button type="button" className="btn btn-ghost text-xs !py-1 !px-2" onClick={addLink} data-testid="footer-add-link-button"><Plus size={14}/> Add link</button></div>
+            {links.map((link, index) => (
+              <div key={link.id || index} className="border hairline rounded-lg p-3 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_150px_minmax(0,1fr)_auto] gap-2 items-end" data-testid={`footer-link-row-${index}`}>
+                <Field label="Label"><input className="input w-full px-3 py-2 text-sm" value={link.label || ""} onChange={(e) => updateLink(index, { label: e.target.value })} placeholder="Shipping & returns" data-testid={`footer-link-label-${index}`}/></Field>
+                <Field label="Destination type"><select className="input w-full px-3 py-2 text-sm" value={link.link_type || "page"} onChange={(e) => updateLink(index, { link_type: e.target.value })} data-testid={`footer-link-type-${index}`}><option value="page">Store page</option><option value="url">External URL</option></select></Field>
+                {link.link_type === "url" ? <Field label="URL"><input className="input w-full px-3 py-2 font-mono text-sm" value={link.url || ""} onChange={(e) => updateLink(index, { url: e.target.value })} placeholder="https://example.com" data-testid={`footer-link-url-${index}`}/></Field> : <Field label="Page"><select className="input w-full px-3 py-2 text-sm" value={link.page || "home"} onChange={(e) => updateLink(index, { page: e.target.value })} data-testid={`footer-link-page-${index}`}>{pages.map(page => <option key={page.slug} value={page.slug}>{page.label}</option>)}</select></Field>}
+                <button type="button" title="Delete footer link" className="btn btn-danger !p-2 h-9" onClick={() => deleteLink(index)} data-testid={`footer-delete-link-${index}`}><Trash2 size={14}/></button>
+              </div>
+            ))}
+            {links.length === 0 && <div className="text-xs text-slate-400 py-2" data-testid="footer-links-empty">No footer links yet.</div>}
+          </div>
+
+          <Field label="Custom footer text"><textarea className="input w-full px-3 py-2 min-h-24 text-sm" value={footer.custom_text || ""} onChange={(e) => update({ custom_text: e.target.value })} placeholder="© 2026 PrettyCheap · ABN 12 345 678 901" data-testid="footer-custom-text-input"/></Field>
+          <div className="flex justify-end"><button type="button" className="btn btn-primary text-sm" onClick={onSave} disabled={saving} data-testid="footer-save-button">{saving ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>} {saving ? "Saving…" : "Save footer"}</button></div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function SiteMenusPanel() {
   const [open, setOpen] = useState(false);
@@ -1975,7 +2029,7 @@ function SiteMenusPanel() {
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/site-menus`);
     setData(data);
-    setDraft({ ...data.get_help, faq_items: data.faq_items || [], contact_form: data.contact_form || { enabled: true, title: "Contact support" } });
+    setDraft({ ...data.get_help, faq_items: data.faq_items || [], contact_form: data.contact_form || { enabled: true, title: "Contact support" }, footer: data.footer || EMPTY_FOOTER });
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -1985,6 +2039,7 @@ function SiteMenusPanel() {
     setBusy(true);
     try {
       if ((draft.faq_items || []).some(item => !item.question.trim() || !item.answer.trim())) return toast.error("Every FAQ needs a question and answer");
+      if ((draft.footer?.links || []).some(link => !String(link.label || "").trim() || (link.link_type === "url" && !String(link.url || "").trim()))) return toast.error("Every footer link needs a label and destination");
       const { data: res } = await axios.patch(`${API}/site-menus`, {
         get_help: {
           enabled: draft.enabled,
@@ -1995,10 +2050,11 @@ function SiteMenusPanel() {
         },
         faq_items: draft.faq_items,
         contact_form: draft.contact_form,
+        footer: draft.footer || EMPTY_FOOTER,
       });
       setData(res);
-      setDraft({ ...res.get_help, faq_items: res.faq_items || [], contact_form: res.contact_form || { enabled: true, title: "Contact support" } });
-      toast.success("Customer Support settings saved");
+      setDraft({ ...res.get_help, faq_items: res.faq_items || [], contact_form: res.contact_form || { enabled: true, title: "Contact support" }, footer: res.footer || EMPTY_FOOTER });
+      toast.success("Site menu settings saved");
     } catch (e) {
       toast.error("Save failed", { description: e?.response?.data?.detail?.slice(0, 200) || e.message });
     } finally { setBusy(false); }
@@ -2025,6 +2081,7 @@ function SiteMenusPanel() {
 
   return (
     <div className="grid gap-3" data-testid="site-menus-panel">
+      {draft && <FooterMenuCard footer={draft.footer || EMPTY_FOOTER} pages={data?.pages || []} onChange={(footer) => setDraft(current => ({ ...current, footer }))} onSave={save} saving={busy}/>} 
       {/* Customer Support — the one working, configurable menu */}
       <div className="card p-4 md:p-5" data-testid="customer-support-card">
         <div className="flex items-center justify-between gap-4">

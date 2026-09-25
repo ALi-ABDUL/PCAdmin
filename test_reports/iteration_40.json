@@ -1,0 +1,69 @@
+{
+  "summary": "Validated Smart Product Tags backend + UI contract. Targeted pytest passed serially (7/7) after identifying xdist race flakiness on shared singleton tag settings. UI verified Store Management → Tag Settings round-trip save, product-grid smart chips, and Product Detail Deal toggle/expiry input.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/admin-accounts/login",
+        "issue": "No app-auth session cookie is set on login (response returns profile JSON only; observed Set-Cookie is Cloudflare __cf_bm, not app session).",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "/api/admin-accounts/login",
+        "issue": "No brute-force lockout after repeated failed attempts (attempts 1-6 all returned 401 without lockout state).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "CORS middleware",
+        "issue": "Configured as allow_credentials=True with CORS_ORIGINS='*'; wildcard origin is incompatible with credentialed browser requests."
+      },
+      {
+        "endpoint": "pytest execution",
+        "issue": "Smart-tag tests are flaky under parallel xdist workers because they mutate global singleton /api/tag-settings and shared ranking data."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Products grid",
+        "issues": [
+          "Broken image source detected in console: /api/image-proxy?url=https://example.com/thumb1.jpg returns 404 (non-feature seed/media data quality issue)."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_smart_tag_contract.py",
+    "/app/backend/tests/test_smart_product_tags.py",
+    "/app/test_reports/pytest/pytest_iteration40_smart_tags_serial.xml"
+  ],
+  "action_items": [
+    "For auth hardening playbook parity: implement server-managed httpOnly auth cookie/session for admin login or update playbook/spec if localStorage-only is intentional.",
+    "Implement brute-force protection/lockout policy on /api/admin-accounts/login.",
+    "Set explicit CORS origins when allow_credentials=True (avoid wildcard).",
+    "Mark smart-tag pytest suite as serial (or isolate tag settings per test) to avoid xdist races.",
+    "Clean/replace broken seed image URLs that route through /api/image-proxy."
+  ],
+  "critical_code_review_comments": [
+    "Smart tag feature logic itself is working: /api/tag-settings validation/persistence, admin smart_tags/smart_tag_ids alongside seo tags, storefront tags + smart_tag_ids + seo_tags + deal_ends_at, Deal expiry behavior, and anonymous /api/store/products/{id}/view flow are all passing.",
+    "Primary instability source is shared mutable singleton state under parallel tests, not smart-tag business logic failure."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_smart_tag_contract.py",
+    "/app/test_reports/iteration_40.json"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 on serial rerun; initial parallel run flaky)",
+    "frontend": "90% (core requested flows passed; minor broken-image console 404)"
+  },
+  "test_credentials": "Read from /app/memory/test_credentials.md and used qa@prettycheap.com.au / QaTest123! for UI login.",
+  "seed_data_creation": "Created one temporary product TEST_UI_SMART_TAG_PRODUCT via public API for UI validation and deleted it after testing.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Use /app/backend/tests/test_smart_tag_contract.py for regression coverage. Run smart-tag tests serially (-n 1) due singleton-tag-settings race under xdist. Feature APIs are stable; unresolved items are auth hardening and CORS policy quality.",
+  "rca of the issue": "RCA-1 (flaky backend run): initial failures were caused by parallel xdist workers concurrently patching/restoring singleton /api/tag-settings and shared ranking inputs, producing cross-test label mismatches. Reproduction: run smart-tag tests with xdist workers >1. Mitigation: serialise suite or isolate mutable globals. RCA-2 (auth playbook gaps): admin login endpoint returns account payload without app session cookie and no lockout state after repeated failures; current design appears localStorage-session based."
+}

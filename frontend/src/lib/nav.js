@@ -1,4 +1,4 @@
-import { Activity, Award, Ban, Bell, Building2, Cable, ClipboardList, CreditCard, FileText, Globe, Heart, History, List, Lock, Mail, MapPinned, Menu, MessageCircle, MessageSquare, Package, PackageMinus, PackageSearch, PackageX, Percent, Receipt, RefreshCw, ShieldCheck, ShoppingCart, Star as StarIcon, StickyNote, Store, Ticket, Timer, TrendingDown as TrendingDownIcon, Truck, Undo2, Upload, UserCheck, User as UserIcon, UserPlus, Users, Warehouse } from "lucide-react";
+import { Activity, Award, Ban, Bell, Building2, Cable, ClipboardList, CreditCard, FileText, Globe, Heart, History, List, Lock, Mail, MapPinned, Menu, MessageCircle, MessageSquare, Package, PackageMinus, PackageSearch, PackageX, Percent, Receipt, RefreshCw, ShieldCheck, ShoppingCart, Star as StarIcon, StickyNote, Store, Tag, Ticket, Timer, TrendingDown as TrendingDownIcon, Truck, Undo2, Upload, UserCheck, User as UserIcon, UserPlus, Users, Warehouse } from "lucide-react";
 import { Analytics } from "../pages/Analytics";
 import { Orders } from "../pages/Orders";
 import { Products } from "../pages/ProductsList";
@@ -74,6 +74,7 @@ export const PRODUCT_NAV = [
 export const STORE_NAV = [
   { id: "store-settings",      label: "Store Settings",       icon: Store,        group: "Configuration" },
   { id: "pricing-rules",       label: "Pricing Rules",        icon: Percent,      group: "Configuration" },
+  { id: "tag-settings",        label: "Tag Settings",         icon: Tag,          group: "Configuration" },
   { id: "scraper-schedule",    label: "Scraper Schedule",     icon: RefreshCw,    group: "Configuration" },
   { id: "payment-gateway",     label: "Payment Gateway",      icon: CreditCard,   group: "Configuration" },
   { id: "shipping-methods",    label: "Shipping Methods",     icon: Truck,        group: "Configuration" },

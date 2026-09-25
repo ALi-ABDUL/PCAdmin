@@ -44,8 +44,9 @@ from models import (
     DisposableDomainsUpdate, DISPOSABLE_EMAIL_ERROR,
     _DEFAULT_STORE_DISPLAY, StoreDisplaySettingsUpdate, _DEFAULT_STORE_BRANDING, StoreBrandingUpdate,
     VerifyTokenBody, ResendVerificationBody, EmailTemplatesUpdate,
-    CountdownStart, BrandingUpdate,
+    CountdownStart, BrandingUpdate, TagSettingsUpdate,
 )
+from product_tags import TAG_IDS, attach_smart_tags, get_tag_settings
 from countries import COUNTRIES, COUNTRY_CODES
 from helpers import (
     _rand_au_address, _slug, _split_name, _compose_name, _product_code_base, _generate_unique_product_code, 
@@ -626,6 +627,7 @@ async def _start_scheduler():
     await _ensure_categories_seeded()
     await _ensure_pricing_rules_seeded()
     await _ensure_postage_presets_seeded()
+    await get_tag_settings()
     await _ensure_main_admin_seeded()
     await _ensure_country_access_seeded()
     await _ensure_disposable_domains_seeded()
@@ -671,6 +673,7 @@ async def _start_scheduler():
         await db.customer_accounts.create_index("email", unique=True)
         await db.reviews.create_index([("product_id", 1), ("customer_email", 1)])
         await db.products.create_index("product_code", unique=True, sparse=True)
+        await db.product_views.create_index("viewed_at")
     except Exception as e:
         logger.warning(f"index setup: {e}")
     asyncio.create_task(_scheduler_loop())
@@ -2647,6 +2650,37 @@ async def create_product(body: ProductCreate):
     return prod
 
 
+@api_router.get("/tag-settings")
+async def read_tag_settings():
+    return await get_tag_settings()
+
+
+@api_router.patch("/tag-settings")
+async def update_tag_settings(body: TagSettingsUpdate):
+    if body.tags is None:
+        raise HTTPException(status_code=400, detail="Provide at least one tag setting")
+    current = await get_tag_settings()
+    next_tags = {tag_id: dict(config) for tag_id, config in current["tags"].items()}
+    for tag_id, patch in body.tags.items():
+        if tag_id not in TAG_IDS:
+            raise HTTPException(status_code=400, detail=f"Unknown smart tag: {tag_id}")
+        if not isinstance(patch, dict):
+            raise HTTPException(status_code=400, detail=f"{tag_id} must be an object")
+        unknown = set(patch) - {"enabled", "label"}
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"Unsupported {tag_id} fields: {', '.join(sorted(unknown))}")
+        if "enabled" in patch:
+            next_tags[tag_id]["enabled"] = bool(patch["enabled"])
+        if "label" in patch:
+            label = str(patch["label"] or "").strip()
+            if not label or len(label) > 40:
+                raise HTTPException(status_code=400, detail=f"{tag_id} label must be between 1 and 40 characters")
+            next_tags[tag_id]["label"] = label
+    updated = {"id": "singleton", "tags": next_tags}
+    await db.tag_settings.update_one({"id": "singleton"}, {"$set": updated}, upsert=True)
+    return updated
+
+
 @api_router.get("/products")
 async def list_products(
     q: Optional[str] = None,
@@ -2716,6 +2750,7 @@ async def list_products(
             row = by_id.get(p["id"])
             p["review_count"] = int(row["count"]) if row else 0
             p["average_rating"] = round(float(row["avg"]), 2) if row and row.get("avg") is not None else 0.0
+    await attach_smart_tags(products)
     return {"products": products, "total": total}
 
 
@@ -2865,6 +2900,7 @@ async def get_product(pid: str):
     ratings = [int(r.get("rating") or 0) for r in reviews if r.get("rating")]
     p["review_count"] = len(reviews)
     p["average_rating"] = round(sum(ratings) / len(ratings), 2) if ratings else 0.0
+    await attach_smart_tags([p])
     return p
 
 
@@ -2876,6 +2912,19 @@ async def update_product(pid: str, body: ProductUpdate):
     # Price field can be blanked out from the storefront strikethrough.
     if "original_price" in body.model_fields_set and body.original_price is None:
         fields["original_price"] = None
+    if "deal_ends_at" in body.model_fields_set and body.deal_ends_at is None:
+        fields["deal_ends_at"] = None
+    if fields.get("deal_enabled") is False:
+        fields["deal_ends_at"] = None
+    if fields.get("deal_ends_at"):
+        try:
+            deal_end = datetime.fromisoformat(str(fields["deal_ends_at"]).replace("Z", "+00:00"))
+            if deal_end.tzinfo is None:
+                deal_end = deal_end.replace(tzinfo=timezone.utc)
+            if deal_end <= datetime.now(timezone.utc):
+                raise ValueError
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Deal expiry must be a future date and time")
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
     # Per-product custom delivery window: only validate when both bounds are
@@ -2923,6 +2972,7 @@ async def delete_product(pid: str):
     r = await db.products.delete_one({"id": pid})
     if r.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Product not found")
+    await db.product_views.delete_many({"product_id": pid})
     removed_categories = await _delete_categories_if_empty([(existing or {}).get("category")])
     return {"deleted": True, "removed_categories": removed_categories}
 
@@ -4665,7 +4715,10 @@ def _shape_storefront_product(p: dict, discount_min: int = 0) -> dict:
         "stock": p.get("stock", 0),
         "in_stock": (p.get("stock") or 0) > 0 and (p.get("stock_status") or "live") == "live",
         "stock_status": p.get("stock_status", "live"),
-        "tags": p.get("tags") or [],
+        "tags": p.get("smart_tags") or [],
+        "smart_tag_ids": p.get("smart_tag_ids") or [],
+        "seo_tags": p.get("tags") or [],
+        "deal_ends_at": p.get("deal_ends_at"),
         "variants": [
             {
                 "type": v.get("type"),
@@ -4762,6 +4815,7 @@ async def store_list_products(
             row = by_id.get(p["id"])
             p["review_count"] = int(row["count"]) if row else 0
             p["average_rating"] = round(float(row["avg"]), 2) if row and row.get("avg") is not None else 0.0
+    await attach_smart_tags(rows)
     return {
         "products": [_shape_storefront_product(p, discount_min=discount_min) for p in rows],
         "total": total,
@@ -4802,7 +4856,24 @@ async def store_get_product(pid: str):
     else:
         p["review_count"] = 0
         p["average_rating"] = 0.0
+    await attach_smart_tags([p])
     return _shape_storefront_product(p, discount_min=int((await _get_store_display()).get("discount_badge_min_percent", 0) or 0))
+
+
+@api_router.post("/store/products/{pid}/view")
+async def record_store_product_view(pid: str):
+    """Record a lightweight anonymous product-page view for the Hot rule."""
+    product = await db.products.find_one(
+        {"id": pid, "active": True, "archived": {"$ne": True}},
+        {"_id": 0, "id": 1},
+    )
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    await db.product_views.insert_one({
+        "id": str(uuid.uuid4()), "product_id": pid,
+        "viewed_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"recorded": True}
 
 
 @api_router.get("/store/categories")
@@ -4848,6 +4919,7 @@ async def store_related_products(pid: str, limit: int = Query(6, ge=1, le=20)):
     )
     rows = await cursor.to_list(length=limit)
     discount_min = int((await _get_store_display()).get("discount_badge_min_percent", 0) or 0)
+    await attach_smart_tags(rows)
     return {"products": [_shape_storefront_product(r, discount_min=discount_min) for r in rows], "total": len(rows)}
 
 

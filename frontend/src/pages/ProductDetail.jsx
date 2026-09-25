@@ -9,6 +9,14 @@ import { API, proxyImg, imgThumb, imgFull } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
 import { computeDeliveryEstimate, formatCutoffLabel } from "../lib/delivery";
 
+function toLocalDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export function ProductDetailPage({ productId, onBack }) {
   const [p, setP] = useState(null);
   const [f, setF] = useState({});
@@ -50,7 +58,9 @@ export function ProductDetailPage({ productId, onBack }) {
       meta_description: prod.meta_description || "",
       url_slug: prod.url_slug || "",
       image_alt_text: prod.image_alt_text || "",
-      tags: Array.isArray(prod.tags) ? [...prod.tags] : [],
+      tags: Array.isArray(prod.seo_tags) ? [...prod.seo_tags] : [],
+      deal_enabled: !!prod.deal_enabled,
+      deal_ends_at: toLocalDateTime(prod.deal_ends_at),
     });
     setReviews(rev);
     setDirty(false);
@@ -73,6 +83,8 @@ export function ProductDetailPage({ productId, onBack }) {
       url_slug: (f.url_slug || "").trim(),
       image_alt_text: (f.image_alt_text || "").trim(),
       tags: Array.isArray(f.tags) ? f.tags : [],
+      deal_enabled: !!f.deal_enabled,
+      deal_ends_at: f.deal_enabled && f.deal_ends_at ? new Date(f.deal_ends_at).toISOString() : null,
     };
     // Only include postage fields when the admin has actually chosen a preset.
     // A blank selection leaves whatever was already stored on the product
@@ -229,6 +241,9 @@ export function ProductDetailPage({ productId, onBack }) {
         <div className="flex items-center gap-3 flex-wrap text-xs">
           {p.product_code && <span className="font-mono text-indigo-600 font-bold" data-testid="product-detail-code">{p.product_code}</span>}
           {badge && <span className={`chip ${badge.cls}`}>{badge.label}</span>}
+          {(p.smart_tags || []).map((tag, index) => (
+            <span className="chip chip-primary" key={`${tag}-${index}`} data-testid={`product-detail-smart-tag-${index}`}>{tag}</span>
+          ))}
           {p.review_count > 0 && (
             <span className="inline-flex items-center gap-1 font-mono">
               <StarIcon size={11} className="text-amber-500" fill="currentColor"/>
@@ -382,6 +397,7 @@ export function ProductDetailPage({ productId, onBack }) {
           description, but the admin can override any of them here.
           Persisted with the product on Save changes. */}
       <SeoCard f={f} setField={setField}/>
+      <DealTagCard f={f} setField={setField}/>
 
       {/* Reviews */}
       {reviews.length > 0 && (
@@ -909,6 +925,35 @@ export function SeoCard({ f, setField }) {
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+
+export function DealTagCard({ f, setField }) {
+  return (
+    <div className="card p-5 grid gap-3" data-testid="product-deal-tag-card">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-display font-bold flex items-center gap-2"><Tag size={14} className="text-rose-500"/> Deal badge</div>
+          <div className="text-xs text-slate-500 mt-1">Manually mark this product as a deal. Set an expiry to remove the badge automatically.</div>
+        </div>
+        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" data-testid="product-deal-toggle-label">
+          <input type="checkbox" checked={!!f.deal_enabled} onChange={(e) => setField("deal_enabled", e.target.checked)} className="accent-indigo-600 w-4 h-4" data-testid="product-deal-toggle"/>
+          {f.deal_enabled ? "Deal active" : "Deal off"}
+        </label>
+      </div>
+      {f.deal_enabled && (
+        <Field label="Deal expiry (optional)">
+          <input
+            type="datetime-local"
+            value={f.deal_ends_at || ""}
+            onChange={(e) => setField("deal_ends_at", e.target.value)}
+            className="input w-full max-w-sm px-3 py-2 font-mono text-sm"
+            data-testid="product-deal-expiry-input"
+          />
+        </Field>
+      )}
     </div>
   );
 }

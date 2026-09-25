@@ -202,6 +202,20 @@ function ProductCard({
           </span>
         )}
 
+        {(p.smart_tags || []).length > 0 && (
+          <div className="flex flex-wrap gap-1" data-testid={`product-card-tags-${p.id}`}>
+            {p.smart_tags.map((tag, index) => (
+              <span
+                key={`${tag}-${index}`}
+                className="chip chip-primary !text-[10px] !py-0.5"
+                data-testid={`product-card-tag-${p.id}-${index}`}
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+
         <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
             {cat ? (

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowDown, ArrowUp, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, CreditCard, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, Menu, Package, Plus, RefreshCw, Store, Trash2, Wallet, X, XCircle, Zap } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, CreditCard, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, Menu, Package, Plus, RefreshCw, Store, Tag, Trash2, Wallet, X, XCircle, Zap } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
@@ -170,6 +170,94 @@ export function PricingRulesEditor() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+const SMART_TAG_HELP = {
+  new: "Created in the last 48 hours",
+  hot: "Top 10% by product-page views in the last 30 days",
+  bestseller: "Top 5% by units sold across the catalogue",
+  deal: "Manually assigned on a product, with an optional expiry",
+  top: "One of the three highest-rated products",
+  limited: "Five or fewer units in stock",
+};
+
+export function TagSettingsEditor() {
+  const [settings, setSettings] = useState(null);
+  const [draft, setDraft] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${API}/tag-settings`);
+      setSettings(data);
+      setDraft(data.tags || {});
+    } catch (e) {
+      toast.error("Could not load tag settings", { description: e?.response?.data?.detail || e.message });
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const setTag = (tagId, patch) => setDraft(current => ({
+    ...current,
+    [tagId]: { ...(current[tagId] || {}), ...patch },
+  }));
+
+  const save = async () => {
+    const tags = {};
+    for (const [tagId, config] of Object.entries(draft)) {
+      const label = (config.label || "").trim();
+      if (!label) return toast.error("Every active tag needs a display label");
+      tags[tagId] = { enabled: config.enabled !== false, label };
+    }
+    setSaving(true);
+    try {
+      const { data } = await axios.patch(`${API}/tag-settings`, { tags });
+      setSettings(data);
+      setDraft(data.tags || {});
+      toast.success("Tag settings saved");
+    } catch (e) {
+      toast.error("Could not save tag settings", { description: e?.response?.data?.detail || e.message });
+    } finally { setSaving(false); }
+  };
+
+  if (!settings) return <div className="card p-8 text-sm text-slate-500" data-testid="tag-settings-loading">Loading tag settings…</div>;
+
+  return (
+    <div className="grid gap-4" data-testid="tag-settings-editor">
+      <div className="card overflow-hidden">
+        <div className="divide-y hairline">
+          {Object.entries(draft).map(([tagId, config]) => (
+            <div key={tagId} className="p-4 md:p-5 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_220px_auto] gap-3 items-center" data-testid={`tag-setting-row-${tagId}`}>
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-lg grid place-items-center shrink-0 bg-indigo-50 text-indigo-600"><Tag size={15}/></div>
+                <div className="min-w-0">
+                  <div className="font-medium text-sm capitalize" data-testid={`tag-setting-name-${tagId}`}>{tagId}</div>
+                  <div className="text-xs text-slate-500 mt-0.5" data-testid={`tag-setting-rule-${tagId}`}>{SMART_TAG_HELP[tagId]}</div>
+                </div>
+              </div>
+              <input
+                value={config.label || ""}
+                onChange={(e) => setTag(tagId, { label: e.target.value })}
+                className="input w-full px-3 py-2 text-sm"
+                maxLength={40}
+                aria-label={`${tagId} display label`}
+                data-testid={`tag-setting-label-${tagId}`}
+              />
+              <label className="flex items-center justify-between md:justify-start gap-2 text-xs font-mono uppercase text-slate-500 cursor-pointer" data-testid={`tag-setting-toggle-${tagId}`}>
+                <input type="checkbox" checked={config.enabled !== false} onChange={(e) => setTag(tagId, { enabled: e.target.checked })} className="accent-indigo-600 w-4 h-4" data-testid={`tag-setting-checkbox-${tagId}`}/>
+                {config.enabled !== false ? "On" : "Off"}
+              </label>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <button className="btn btn-primary text-sm" onClick={save} disabled={saving} data-testid="tag-settings-save-button">
+          {saving ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>} {saving ? "Saving…" : "Save tag settings"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -2055,6 +2143,7 @@ export function StoreManagement({ section, setSection }) {
   const sections = {
     "store-settings":      { hint: "Your storefront brand — name, tagline, logo, favicon and tab title (shown live on PCStore) — plus contact and legal info.", fields: [], custom: <StoreSettingsPanel/> },
     "pricing-rules":       { hint: "Tiered profit rules the scraper uses when calculating sell prices for imported items.", fields: [], custom: <PricingRulesEditor/> },
+    "tag-settings":        { hint: "Choose which smart product badges shoppers see and customise their display labels. Deal is assigned manually per product.", fields: [], custom: <TagSettingsEditor/> },
     "scraper-schedule":    { hint: "Automate the eBay re-fetch: add one or more schedules, each with its own start time, frequency and optional stop date — or run one right now.", fields: [], custom: <ScraperScheduleEditor/> },
     "payment-gateway":     { hint: "Configure Stripe and PayPal credentials. Apple Pay, Google Pay, and Afterpay use Stripe with no extra keys.", fields: [], custom: <PaymentGatewayPanel/> },
     "shipping-methods":    { hint: "Everything delivery: reusable postage presets and the store-wide delivery window.", fields: [], custom: <ShippingMethodsPanel/> },

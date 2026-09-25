@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 
 
-__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'OrderLineInput', 'OrderLineFulfillmentUpdate', 'CartLineInput', 'CartUpdate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'CategoryCleanupScheduleUpdate', 'CATEGORY_CLEANUP_SCHEDULE_DEFAULTS', 'PaymentMethodToggles', 'StripeGatewayUpdate', 'PayPalGatewayUpdate', 'PaymentGatewayUpdate', 'PAYMENT_GATEWAY_DEFAULTS', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'PortalProfileUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'SITE_PAGES', 'SITE_PAGE_SLUGS', 'SITE_MENUS_DEFAULTS', 'GetHelpLinkBody', 'FaqItemBody', 'ContactFormConfigBody', 'SupportContactBody', 'SiteMenusUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate', '_DEFAULT_STORE_DISPLAY', 'StoreDisplaySettingsUpdate', 'VerifyTokenBody', 'ResendVerificationBody', 'VERIFICATION_TOKEN_TTL_HOURS', '_DEFAULT_EMAIL_TEMPLATES', 'VerificationTemplate', 'EmailTemplatesUpdate', '_DEFAULT_STORE_BRANDING', 'StoreBrandingUpdate']
+__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'OrderLineInput', 'OrderLineFulfillmentUpdate', 'CartLineInput', 'CartUpdate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'CategoryCleanupScheduleUpdate', 'CATEGORY_CLEANUP_SCHEDULE_DEFAULTS', 'PaymentMethodToggles', 'StripeGatewayUpdate', 'PayPalGatewayUpdate', 'PaymentGatewayUpdate', 'PAYMENT_GATEWAY_DEFAULTS', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'PortalProfileUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'SITE_PAGES', 'SITE_PAGE_SLUGS', 'SITE_MENUS_DEFAULTS', 'GetHelpLinkBody', 'FaqItemBody', 'ContactFormConfigBody', 'SupportContactBody', 'SiteMenusUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate', '_DEFAULT_STORE_DISPLAY', 'StoreDisplaySettingsUpdate', 'VerifyTokenBody', 'ResendVerificationBody', 'VERIFICATION_TOKEN_TTL_HOURS', '_DEFAULT_EMAIL_TEMPLATES', 'VerificationTemplate', 'EmailTemplatesUpdate', '_DEFAULT_STORE_BRANDING', 'StoreBrandingUpdate', 'TAG_SETTINGS_DEFAULTS', 'TagSettingsUpdate']
 
 
 CATEGORIES = ["electronics", "home", "tools", "apparel", "other"]
@@ -160,6 +160,9 @@ class ProductCreate(BaseModel):
     # scrape/create time (see `_suggest_tags()` in helpers.py) but always
     # editable in the ProductDetail SEO card as removable chips.
     tags: List[str] = Field(default_factory=list)
+    deal_enabled: bool = False
+    deal_ends_at: Optional[str] = None
+    view_count_30d: int = 0
     # ---------------------------- Countdown sale ----------------------------
     # Optional per-product limited-time sale. The admin picks a duration
     # (days) + a sale price; the backend stamps `countdown_started_at`
@@ -212,6 +215,9 @@ class ProductUpdate(BaseModel):
     url_slug: Optional[str] = None
     image_alt_text: Optional[str] = None
     tags: Optional[List[str]] = None
+    deal_enabled: Optional[bool] = None
+    deal_ends_at: Optional[str] = None
+    view_count_30d: Optional[int] = None
 
 
 class CountdownStart(BaseModel):
@@ -973,6 +979,23 @@ class DeliverySettingsUpdate(BaseModel):
     default_max_days: Optional[int] = None
     cutoff_enabled: Optional[bool] = None
     cutoff_hhmm: Optional[str] = None
+
+
+TAG_SETTINGS_DEFAULTS: dict = {
+    "id": "singleton",
+    "tags": {
+        "new": {"enabled": True, "label": "New"},
+        "hot": {"enabled": True, "label": "Hot"},
+        "bestseller": {"enabled": True, "label": "Bestseller"},
+        "deal": {"enabled": True, "label": "Deal"},
+        "top": {"enabled": True, "label": "Top"},
+        "limited": {"enabled": True, "label": "Limited"},
+    },
+}
+
+
+class TagSettingsUpdate(BaseModel):
+    tags: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------

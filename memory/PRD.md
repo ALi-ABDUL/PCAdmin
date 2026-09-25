@@ -2348,3 +2348,20 @@ Notification Bell deep-links) — zero regressions detected.
   it was mistakenly saved as a publishable key; future Publishable/Secret/Webhook saves require
   `pk_` / `sk_` / `whsec_` prefixes. Verified: testing_agent iteration_39 and final **6/6**
   payment regression tests; no provider API calls were made.
+
+
+## Jun 2026 — Smart Product Tags
+- Added a persisted `tag_settings` singleton with six enabled-by-default rules and editable display labels: **New**, **Hot**, **Bestseller**, **Deal**, **Top**, and **Limited**. New endpoints: `GET/PATCH /api/tag-settings`; PATCH validates rule IDs, labels, and partial updates.
+- Dynamic rules are calculated consistently across the full catalogue: New (created within 48 hours), Hot (top 10% by anonymous product-page views in the past 30 days), Bestseller (top 5% by units sold), Top (three highest average-rated products), and Limited (stock ≤ 5). Deal is manually enabled per product, may have an optional future expiry, and vanishes automatically after that time.
+- `POST /api/store/products/{id}/view` records an anonymous view event for the Hot rule. Product deletion clears its associated view events. Admin API responses preserve editable SEO keyword `tags` and add `smart_tags` / `smart_tag_ids`; PCStore responses expose smart labels as public `tags`, alongside `smart_tag_ids`, `seo_tags`, and `deal_ends_at`.
+- **Admin UI:** Store Management → Tag Settings provides labelled on/off controls for all six rules. Product grids display smart tag chips. Product Detail adds a Deal toggle and optional expiry input while retaining the SEO keyword editor.
+- **Verification:** testing_agent iteration_40 passed the complete backend/UI contract (7/7 serial). Targeted regression suites passed **27 tests** total; frontend production build passed with four pre-existing ProductDetail hook warnings. Smart-tag tests are protected with a shared file lock and passed under `pytest -n 2` (7/7), avoiding singleton-setting test races.
+
+## Prioritised backlog (updated Jun 2026)
+### P1
+- Add “Filter By Tag” to the admin product grid using the `smart_tags` response field.
+- Add Select All / US & EU / English-speaking region presets to the Security tab.
+
+### P2
+- CSV export for Products and Orders.
+- Replace obsolete seed image URLs that currently produce non-critical image-proxy 404 console noise.

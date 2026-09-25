@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronLeft, Eye, ExternalLink, Home, Layout, Loader2, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
+import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronDown, ChevronLeft, CircleDollarSign, Eye, ExternalLink, FileText, Home, Image, Layers3, Layout, Loader2, Package, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
@@ -31,6 +31,9 @@ export function ProductDetailPage({ productId, onBack }) {
   const [imgDialog, setImgDialog] = useState({ open: false, mode: "add", idx: null, current: "" });
   const [lightboxIdx, setLightboxIdx] = useState(null);   // opens full-size viewer at index
   const [previewOpen, setPreviewOpen] = useState(false);  // storefront preview lightbox
+  const [openSections, setOpenSections] = useState({ basic: true, images: true, pricing: true, variants: false, shipping: false, content: false, seo: false, promotions: false });
+
+  const toggleSection = (section) => setOpenSections((current) => ({ ...current, [section]: !current[section] }));
 
   const load = useCallback(async () => {
     const [prod, rev] = await Promise.all([
@@ -205,7 +208,7 @@ export function ProductDetailPage({ productId, onBack }) {
   const margin = f.price ? ((Number(f.price) - Number(f.cost || 0)) / Number(f.price)) * 100 : 0;
 
   return (
-    <div className="flex flex-col gap-4 max-w-5xl mx-auto w-full min-w-0 px-1 sm:px-2" data-testid="product-detail-page">
+    <div className="flex flex-col gap-4 max-w-5xl mx-auto w-full min-w-0 px-1 sm:px-2 pb-24 md:pb-8" data-testid="product-detail-page">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <button onClick={onBack} className="btn btn-ghost text-sm" data-testid="product-back-btn"><ChevronLeft size={14}/> Back to products</button>
@@ -235,34 +238,24 @@ export function ProductDetailPage({ productId, onBack }) {
         </div>
       </div>
 
-      {/* Title & meta */}
-      <div className="card p-5 grid gap-2">
-        <input className="input w-full px-3 py-2 text-xl font-display font-bold" value={f.title} onChange={(e) => setField("title", e.target.value)} data-testid="product-title-input"/>
-        <div className="flex items-center gap-3 flex-wrap text-xs">
-          {p.product_code && <span className="font-mono text-indigo-600 font-bold" data-testid="product-detail-code">{p.product_code}</span>}
-          {badge && <span className={`chip ${badge.cls}`}>{badge.label}</span>}
-          {(p.smart_tags || []).map((tag, index) => (
-            <span className="chip chip-primary" key={`${tag}-${index}`} data-testid={`product-detail-smart-tag-${index}`}>{tag}</span>
-          ))}
-          {p.review_count > 0 && (
-            <span className="inline-flex items-center gap-1 font-mono">
-              <StarIcon size={11} className="text-amber-500" fill="currentColor"/>
-              <span className="font-bold">{avg.toFixed(1)}</span>
-              <span className="text-slate-400">({p.review_count} reviews)</span>
-            </span>
-          )}
-          {p.source_url && (
-            <a href={p.source_url} target="_blank" rel="noopener noreferrer" className="chip chip-neutral inline-flex items-center gap-1 hover:!bg-indigo-50 hover:!text-indigo-600 transition-colors" data-testid="product-ebay-link">
-              <ExternalLink size={11}/> View on eBay
-            </a>
-          )}
+      <ProductEditSection id="basic" title="Basic Info" icon={Package} open={openSections.basic} onToggle={() => toggleSection("basic")} summary={f.title || "Untitled product"}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="md:col-span-2"><Field label="Product title"><input className="input w-full px-3 py-2 text-lg sm:text-xl font-display font-bold" value={f.title} onChange={(e) => setField("title", e.target.value)} data-testid="product-title-input"/></Field></div>
+          <Field label="SKU"><input className="input w-full px-3 py-2 font-mono" value={f.sku} onChange={(e) => setField("sku", e.target.value)} data-testid="product-sku-input"/></Field>
+          <Field label="Product code"><input className="input w-full px-3 py-2 font-mono text-indigo-600 font-bold bg-slate-50" value={p.product_code || ""} readOnly data-testid="product-code-input"/></Field>
+          <Field label="Category"><select className="input w-full px-3 py-2" value={f.category} onChange={(e) => setField("category", e.target.value)} data-testid="product-category-select">{cats.length === 0 && <option value="other">Other</option>}{cats.map(c => <option key={c.slug} value={c.slug}>{`${c.group} · ${c.name}`}</option>)}</select></Field>
+          <Field label="Storefront visibility"><select className="input w-full px-3 py-2" value={f.active ? "1" : "0"} onChange={(e) => setField("active", e.target.value === "1")} data-testid="product-active-select"><option value="1">Yes — visible on storefront</option><option value="0">No — hidden</option></select></Field>
         </div>
-      </div>
+        <div className="flex items-center gap-2 flex-wrap text-xs mt-4 pt-4 border-t hairline">
+          {badge && <span className={`chip ${badge.cls}`}>{badge.label}</span>}
+          {(p.smart_tags || []).map((tag, index) => <span className="chip chip-primary" key={`${tag}-${index}`} data-testid={`product-detail-smart-tag-${index}`}>{tag}</span>)}
+          {p.review_count > 0 && <span className="inline-flex items-center gap-1 font-mono"><StarIcon size={11} className="text-amber-500" fill="currentColor"/><span className="font-bold">{avg.toFixed(1)}</span><span className="text-slate-400">({p.review_count} reviews)</span></span>}
+          {p.source_url && <a href={p.source_url} target="_blank" rel="noopener noreferrer" className="chip chip-neutral inline-flex items-center gap-1 hover:!bg-indigo-50 hover:!text-indigo-600 transition-colors" data-testid="product-ebay-link"><ExternalLink size={11}/> View on eBay</a>}
+        </div>
+      </ProductEditSection>
 
-      {/* Images */}
-      <div className="card p-5">
+      <ProductEditSection id="images" title="Images" icon={Image} open={openSections.images} onToggle={() => toggleSection("images")} summary={`${(p.images || []).length} image${(p.images || []).length === 1 ? "" : "s"}`}>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <div className="font-display font-bold">Images · <span className="text-slate-500 font-mono text-sm">{(p.images || []).length}</span></div>
           <div className="flex items-center gap-3">
             {(p.images || []).length > 1 && (
               <div className="text-[11px] text-slate-400 hidden sm:flex items-center gap-1">
@@ -316,24 +309,10 @@ export function ProductDetailPage({ productId, onBack }) {
             );
           })}
         </div>
-      </div>
+      </ProductEditSection>
 
-      {/* Product Variants — editable, separate from Specifications. Saved as an
-          array on the product and exposed via the product API for PCStore. */}
-      <ProductVariantsCard product={p} onUpdated={(fresh) => setP(fresh)}/>
-
-      {/* Editable fields */}
-      <div className="card p-5">
-        <div className="font-display font-bold mb-3">Product details</div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Field label="SKU"><input className="input w-full px-3 py-2 font-mono" value={f.sku} onChange={(e) => setField("sku", e.target.value)} data-testid="product-sku-input"/></Field>
-          <Field label="Product code"><input className="input w-full px-3 py-2 font-mono text-indigo-600 font-bold bg-slate-50" value={p.product_code || ""} readOnly data-testid="product-code-input"/></Field>
-          <Field label="Category">
-            <select className="input w-full px-3 py-2" value={f.category} onChange={(e) => setField("category", e.target.value)} data-testid="product-category-select">
-              {cats.length === 0 && <option value="other">Other</option>}
-              {cats.map(c => <option key={c.slug} value={c.slug}>{`${c.group} · ${c.name}`}</option>)}
-            </select>
-          </Field>
+      <ProductEditSection id="pricing" title="Pricing & Stock" icon={CircleDollarSign} open={openSections.pricing} onToggle={() => toggleSection("pricing")} summary={moneyCents(Number(f.price) || 0)}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <Field label="Sell price (AUD)"><input type="number" className="input w-full px-3 py-2 font-mono" value={f.price} onChange={(e) => setField("price", e.target.value)} data-testid="product-price-input"/></Field>
           <Field label="Original price (AUD)">
             <input
@@ -349,55 +328,15 @@ export function ProductDetailPage({ productId, onBack }) {
           </Field>
           <Field label="Cost (AUD)"><input type="number" className="input w-full px-3 py-2 font-mono" value={f.cost} onChange={(e) => setField("cost", e.target.value)} data-testid="product-cost-input"/></Field>
           <Field label="Stock"><input type="number" className="input w-full px-3 py-2 font-mono" value={f.stock} onChange={(e) => setField("stock", e.target.value)} data-testid="product-stock-input"/></Field>
-          <Field label="Active">
-            <select className="input w-full px-3 py-2" value={f.active ? "1" : "0"} onChange={(e) => setField("active", e.target.value === "1")} data-testid="product-active-select">
-              <option value="1">Yes — visible on storefront</option>
-              <option value="0">No — hidden</option>
-            </select>
-          </Field>
           <Field label="Margin"><div className={`input w-full px-3 py-2 font-mono ${margin>=40?"text-emerald-600":margin>=20?"text-amber-600":"text-red-600"} font-bold`}>{margin.toFixed(1)}%</div></Field>
-          {/* Postage preset — replaces the previously read-only scraped
-              postage line. The admin picks a preset from Store Management ›
-              Postage Presets. If the chosen preset is "Large Item" we show
-              two extra fields (postage + insurance) pre-filled from the
-              preset but editable so an admin can tweak them for this
-              specific product without changing the shared preset. */}
-          <div className="md:col-span-3">
-            <PostagePresetField
-              presets={presets}
-              product={p}
-              f={f}
-              setF={setF}
-              setDirty={setDirty}
-            />
-          </div>
-          <div className="md:col-span-3">
-            <DeliveryWindowField
-              f={f}
-              setF={setF}
-              setDirty={setDirty}
-              defaults={deliveryDefaults}
-            />
-          </div>
         </div>
-        <Field label="Description" className="mt-3"><textarea className="input w-full px-3 py-2 min-h-[160px] leading-relaxed" value={f.description} onChange={(e) => setField("description", e.target.value)} data-testid="product-description-input"/></Field>
-      </div>
+      </ProductEditSection>
 
-      {/* Product specifications — grouped labelled fields scraped from eBay item specifics.
-          Displayed as its own section so the description above stays a clean overview. */}
-      <ProductSpecsCard product={p} onUpdated={(fresh) => setP(fresh)}/>
-
-      {/* Countdown Sale — optional limited-time sale with a live timer.
-          Starts on activation, auto-inactivates + archives to
-          Products › Countdown when the timer hits zero. */}
-      <CountdownSaleCard product={p} onUpdated={(fresh) => setP(fresh)}/>
-
-      {/* SEO — meta title / description / URL slug / image alt text. Every
-          field is auto-populated on scrape/create from the title +
-          description, but the admin can override any of them here.
-          Persisted with the product on Save changes. */}
-      <SeoCard f={f} setField={setField}/>
-      <DealTagCard f={f} setField={setField}/>
+      <ProductEditSection id="variants" title="Variants" icon={Layers3} open={openSections.variants} onToggle={() => toggleSection("variants")} summary={`${(p.variants || []).length} option${(p.variants || []).length === 1 ? "" : "s"}`}><ProductVariantsCard product={p} onUpdated={(fresh) => setP(fresh)} embedded/></ProductEditSection>
+      <ProductEditSection id="shipping" title="Shipping" icon={Truck} open={openSections.shipping} onToggle={() => toggleSection("shipping")} summary={f.postage_preset_id ? "Preset selected" : "Delivery settings"}><div className="grid gap-5"><PostagePresetField presets={presets} product={p} f={f} setF={setF} setDirty={setDirty}/><DeliveryWindowField f={f} setF={setF} setDirty={setDirty} defaults={deliveryDefaults}/></div></ProductEditSection>
+      <ProductEditSection id="content" title="Description & Specs" icon={FileText} open={openSections.content} onToggle={() => toggleSection("content")} summary={f.description ? "Content ready" : "Add product detail"}><div className="grid gap-6"><Field label="Description"><textarea className="input w-full px-3 py-2 min-h-[160px] leading-relaxed" value={f.description} onChange={(e) => setField("description", e.target.value)} data-testid="product-description-input"/></Field><ProductSpecsCard product={p} onUpdated={(fresh) => setP(fresh)} embedded/></div></ProductEditSection>
+      <ProductEditSection id="seo" title="SEO" icon={Search} open={openSections.seo} onToggle={() => toggleSection("seo")} summary={f.url_slug ? `/${f.url_slug}` : "Search visibility"}><SeoCard f={f} setField={setField} embedded/></ProductEditSection>
+      <ProductEditSection id="promotions" title="Promotions" icon={Tag} open={openSections.promotions} onToggle={() => toggleSection("promotions")} summary={p.countdown_enabled || f.deal_enabled ? "Promotion active" : "Optional offers"}><div className="grid gap-6"><CountdownSaleCard product={p} onUpdated={(fresh) => setP(fresh)} embedded/><DealTagCard f={f} setField={setField} embedded/></div></ProductEditSection>
 
       {/* Reviews */}
       {reviews.length > 0 && (
@@ -427,9 +366,9 @@ export function ProductDetailPage({ productId, onBack }) {
       )}
 
       {/* Sticky footer save */}
-      <div className="sticky bottom-4 flex items-center justify-end gap-2 py-2 z-20 pointer-events-none">
-        <button onClick={onBack} className="btn btn-ghost text-sm pointer-events-auto">Cancel</button>
-        <button onClick={save} disabled={!dirty || saving} className="btn btn-primary text-sm shadow-lg pointer-events-auto" data-testid="product-save-btn-footer">
+      <div className="sticky bottom-0 -mx-1 sm:-mx-2 px-3 sm:px-5 py-3 z-20 pointer-events-none bg-white/95 backdrop-blur border-t hairline md:bottom-4 md:mx-0 md:px-0 md:py-2 md:bg-transparent md:backdrop-blur-none md:border-0 flex items-center justify-end gap-2">
+        <button onClick={onBack} className="btn btn-ghost text-sm pointer-events-auto min-h-11 flex-1 sm:flex-none" data-testid="product-cancel-btn-footer">Cancel</button>
+        <button onClick={save} disabled={!dirty || saving} className="btn btn-primary text-sm shadow-lg pointer-events-auto min-h-11 flex-1 sm:flex-none" data-testid="product-save-btn-footer">
           {saving ? <Loader2 className="animate-spin" size={13}/> : <BadgeCheck size={13}/>} Save changes
         </button>
       </div>
@@ -464,6 +403,29 @@ export function ProductDetailPage({ productId, onBack }) {
         }}
       />
     </div>
+  );
+}
+
+
+function ProductEditSection({ id, title, icon: Icon, open, onToggle, summary, children }) {
+  return (
+    <section className="card overflow-hidden" data-testid={`product-section-${id}`}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="w-full min-h-14 px-4 sm:px-5 py-3 flex items-center gap-3 text-left hover:bg-slate-50 transition-colors"
+        data-testid={`product-section-toggle-${id}`}
+      >
+        <span className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-600 grid place-items-center shrink-0"><Icon size={17}/></span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-display font-bold text-sm">{title}</span>
+          {summary && <span className="block text-xs text-slate-500 truncate mt-0.5">{summary}</span>}
+        </span>
+        <ChevronDown size={18} className={`text-slate-400 shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}/>
+      </button>
+      {open && <div className="border-t hairline p-4 sm:p-5 animate-in fade-in slide-in-from-top-1 duration-200" data-testid={`product-section-content-${id}`}>{children}</div>}
+    </section>
   );
 }
 
@@ -611,6 +573,7 @@ export function DeliveryWindowField({ f, setF, setDirty, defaults }) {
           checked={useCustom}
           onChange={(e) => toggle(e.target.checked)}
           className="accent-indigo-600 mt-1 w-4 h-4"
+          data-testid="product-custom-delivery-checkbox"
         />
         <div className="flex-1">
           <div className="text-sm font-medium flex items-center gap-2"><Truck size={14} className="text-slate-500"/> Custom delivery window</div>
@@ -853,20 +816,13 @@ function SpecRow({ label, value }) {  return (
  * `_suggest_tags` in helpers.py). Admin edits persist on Save changes.
  * Tags render as removable chips with an inline "add tag" input.
  * ------------------------------------------------------------------------- */
-export function SeoCard({ f, setField }) {
+export function SeoCard({ f, setField, embedded = false }) {
   const meta = (f.meta_description || "");
   const count = meta.length;
   const overCap = count > 160;
   return (
-    <div className="card p-5" data-testid="product-seo-card">
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <div className="font-display font-bold flex items-center gap-2">
-          <Search size={14} className="text-indigo-500"/> SEO
-        </div>
-        <div className="text-[11px] font-mono uppercase tracking-widest text-slate-400">
-          Search engine visibility
-        </div>
-      </div>
+    <div className={embedded ? "" : "card p-5"} data-testid="product-seo-card">
+      {!embedded && <div className="flex items-center justify-between mb-3 flex-wrap gap-2"><div className="font-display font-bold flex items-center gap-2"><Search size={14} className="text-indigo-500"/> SEO</div><div className="text-[11px] font-mono uppercase tracking-widest text-slate-400">Search engine visibility</div></div>}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Field label="Meta title">
           <input
@@ -930,9 +886,9 @@ export function SeoCard({ f, setField }) {
 }
 
 
-export function DealTagCard({ f, setField }) {
+export function DealTagCard({ f, setField, embedded = false }) {
   return (
-    <div className="card p-5 grid gap-3" data-testid="product-deal-tag-card">
+    <div className={`${embedded ? "p-0" : "card p-5"} grid gap-3`} data-testid="product-deal-tag-card">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <div className="font-display font-bold flex items-center gap-2"><Tag size={14} className="text-rose-500"/> Deal badge</div>
@@ -1222,7 +1178,7 @@ function variantsToRows(variants) {
   });
 }
 
-export function ProductVariantsCard({ product, onUpdated }) {
+export function ProductVariantsCard({ product, onUpdated, embedded = false }) {
   const variants = product?.variants || [];
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState(() => variantsToRows(variants));
@@ -1263,7 +1219,7 @@ export function ProductVariantsCard({ product, onUpdated }) {
   // Empty state
   if (!editing && variants.length === 0) {
     return (
-      <div className="card p-5" data-testid="product-variants">
+      <div className={embedded ? "" : "card p-5"} data-testid="product-variants">
         <div className="flex items-center justify-between mb-3">
           <div className="font-display font-bold">Product Variants</div>
           <button onClick={() => { setRows([]); addRow(); setEditing(true); }} className="btn btn-primary text-xs" data-testid="variants-add-first"><Plus size={12}/> Add variants</button>
@@ -1274,7 +1230,7 @@ export function ProductVariantsCard({ product, onUpdated }) {
   }
 
   return (
-    <div className="card p-5" data-testid="product-variants">
+    <div className={embedded ? "" : "card p-5"} data-testid="product-variants">
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="font-display font-bold">Product Variants · <span className="text-slate-500 font-mono text-sm">{variants.length}</span></div>
         {editing ? (
@@ -1354,7 +1310,7 @@ function specsToRows(specifics) {
   }));
 }
 
-export function ProductSpecsCard({ product, onUpdated }) {
+export function ProductSpecsCard({ product, onUpdated, embedded = false }) {
   const specifics = product?.specifics || {};
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState(() => specsToRows(specifics));
@@ -1396,7 +1352,7 @@ export function ProductSpecsCard({ product, onUpdated }) {
   // Empty state — show a lightweight prompt so admins can start from scratch.
   if (!editing && !hasAny) {
     return (
-      <div className="card p-5" data-testid="product-specs">
+      <div className={embedded ? "" : "card p-5"} data-testid="product-specs">
         <div className="flex items-center justify-between mb-3">
           <div className="font-display font-bold">Specifications</div>
           <button onClick={() => { setRows([]); addRow(); setEditing(true); }} className="btn btn-primary text-xs" data-testid="specs-add-first"><Plus size={12}/> Add specs</button>
@@ -1407,7 +1363,7 @@ export function ProductSpecsCard({ product, onUpdated }) {
   }
 
   return (
-    <div className="card p-5" data-testid="product-specs">
+    <div className={embedded ? "" : "card p-5"} data-testid="product-specs">
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="font-display font-bold">Specifications</div>
         {editing ? (
@@ -1501,7 +1457,7 @@ export function ProductSpecsCard({ product, onUpdated }) {
  * fetch.
  * ------------------------------------------------------------------------- */
 
-function CountdownSaleCard({ product, onUpdated }) {
+function CountdownSaleCard({ product, onUpdated, embedded = false }) {
   const [busy, setBusy] = useState(false);
   const [days, setDays] = useState(7);
   const [salePrice, setSalePrice] = useState(
@@ -1579,7 +1535,7 @@ function CountdownSaleCard({ product, onUpdated }) {
   // Off state: setup form.
   if (off && !expired) {
     return (
-      <div className="card p-5" data-testid="countdown-sale-card">
+      <div className={embedded ? "" : "card p-5"} data-testid="countdown-sale-card">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <div className="font-display font-bold flex items-center gap-2">
@@ -1642,7 +1598,7 @@ function CountdownSaleCard({ product, onUpdated }) {
   // Expired state: banner + restore.
   if (expired) {
     return (
-      <div className="card p-5 border-2 border-red-200 bg-red-50/50" data-testid="countdown-sale-card">
+      <div className={`${embedded ? "" : "card p-5"} border-2 border-red-200 bg-red-50/50 ${embedded ? "p-4 rounded-lg" : ""}`} data-testid="countdown-sale-card">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <div className="font-display font-bold flex items-center gap-2 text-red-800">
@@ -1681,7 +1637,7 @@ function CountdownSaleCard({ product, onUpdated }) {
     : 0;
 
   return (
-    <div className="card p-5 border-2 border-rose-200 bg-gradient-to-br from-rose-50/70 to-pink-50/40" data-testid="countdown-sale-card">
+    <div className={`${embedded ? "" : "card p-5"} border-2 border-rose-200 bg-gradient-to-br from-rose-50/70 to-pink-50/40 ${embedded ? "p-4 rounded-lg" : ""}`} data-testid="countdown-sale-card">
       <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
         <div>
           <div className="font-display font-bold flex items-center gap-2 text-rose-800">

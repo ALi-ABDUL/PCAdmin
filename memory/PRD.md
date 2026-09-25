@@ -2372,3 +2372,13 @@ Notification Bell deep-links) — zero regressions detected.
 - `site_menus.footer` is persisted and returned by `GET /api/site-menus` as `{ enabled, links, custom_text }`. `PATCH /api/site-menus` accepts footer-only changes, supports page and external URL links, validates destinations and duplicate link IDs, and lazily migrates legacy singleton documents without changing saved FAQ/contact content.
 - The Footer Configure panel supports a complete PCStore visibility toggle, add/edit/delete navigation links, and custom plain-text footer content (copyright, tagline, ABN, etc.). A dedicated **Save footer** action persists the changes without requiring the Customer Support panel to be opened.
 - Updated `PCSTORE_INTEGRATION.md` with the public footer response contract and rendering rules. Verified with 12 backend tests under parallel xdist, a production build, and authenticated UI add → save → delete → restore flow. QA fixture content left by the testing pass was cleared back to clean Site Menus defaults.
+
+
+## Jun 2026 — Product editor accordion redesign
+- Reorganised the Product Edit page without altering product data or behavior. The page now uses icon-led, labelled collapsible cards: **Basic Info**, **Images**, **Pricing & Stock**, **Variants**, **Shipping**, **Description & Specs**, **SEO**, and **Promotions**.
+- Basic Info, Images, and Pricing & Stock open by default. Variants, Shipping, Description & Specs, SEO, and Promotions start collapsed. Existing gallery/hero controls, product form fields, shipping tools, variant/spec editors, SEO tags, Countdown Sale, and Deal badge are preserved within their designated sections.
+- Improved phone ergonomics: responsive stacked field grids, 44px+ accordion controls, and a bottom sticky Cancel / Save changes bar that stays accessible while scrolling. Added a direct `product-custom-delivery-checkbox` test target for reliable custom-delivery interaction testing.
+- **Verification:** frontend production build passed (four pre-existing ProductDetail hook-dependency warnings remain); automated regression covered 49 backend product workflow tests. Authenticated desktop and 390px mobile browser checks verified accordion defaults, expansion, shipping custom-window reveal/hide, no horizontal layout issue, and sticky save visibility. Temporary QA products were deleted after validation.
+
+### Security follow-up (identified by product-editor regression)
+- Admin login currently lacks brute-force lockout/throttling, and credentialed CORS is configured with a wildcard origin. Treat auth hardening as the next security-focused task; it is outside this layout-only redesign and requires the auth integration playbook before changes.

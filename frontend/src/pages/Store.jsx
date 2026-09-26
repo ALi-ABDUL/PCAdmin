@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowDown, ArrowUp, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, CreditCard, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, Menu, Package, Plus, RefreshCw, Store, Tag, Trash2, Wallet, X, XCircle, Zap } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, CreditCard, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, Menu, Monitor, Package, Plus, RefreshCw, Smartphone, Store, Tag, Trash2, Wallet, X, XCircle, Zap } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
@@ -1667,121 +1667,45 @@ export function ScraperScheduleEditor() {
 }
 
 
-/* -------------------------- Email Templates editor ------------------------
- *
- * Customise the account-verification email (subject / heading / body /
- * button / footer / accent + logo) plus the PCStore base URL the activation
- * link points at. Live preview mirrors the server-side render. Backed by
- * GET/PATCH /api/email-templates.
- * ------------------------------------------------------------------------- */
+const EMAIL_TEMPLATE_META = [
+  ["verification", "Verification", ["{name}", "{email}"]],
+  ["order_confirmation", "Order Confirmation", ["{name}", "{order_id}", "{order_total}", "{items_list}", "{shipping_address}"]],
+  ["order_shipped", "Order Shipped", ["{name}", "{order_id}", "{tracking_number}", "{carrier}"]],
+  ["order_delivered", "Order Delivered", ["{name}", "{order_id}"]],
+  ["password_reset", "Password Reset", ["{name}", "{reset_link}"]],
+  ["welcome", "Welcome Email", ["{name}"]],
+  ["refund_confirmation", "Refund Confirmation", ["{name}", "{order_id}", "{refund_amount}"]],
+];
+
+const EMAIL_PREVIEW_VALUES = { name: "Jordan", email: "jordan@example.com", order_id: "PC-10482", order_total: "$124.90", items_list: "Everyday essential × 2", shipping_address: "23 Harbour Street, Sydney NSW 2000", tracking_number: "AUS123456789", carrier: "Australia Post", reset_link: "your reset link", refund_amount: "$124.90" };
 
 function EmailTemplatesEditor() {
-  const [tpl, setTpl] = useState(null);
-  const [portalUrl, setPortalUrl] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [dirty, setDirty] = useState(false);
-
-  useEffect(() => {
-    axios.get(`${API}/email-templates`).then(({ data }) => {
-      setTpl(data.verification || {});
-      setPortalUrl(data.portal_base_url || "");
-    }).catch((e) => toast.error("Failed to load templates", { description: e?.response?.data?.detail || e.message }));
-  }, []);
-
-  const setField = (k, v) => { setTpl((t) => ({ ...t, [k]: v })); setDirty(true); };
-
-  const save = async () => {
-    setBusy(true);
-    try {
-      const { data } = await axios.patch(`${API}/email-templates`, {
-        portal_base_url: portalUrl,
-        verification: tpl,
-      });
-      setTpl(data.verification || {});
-      setPortalUrl(data.portal_base_url || "");
-      setDirty(false);
-      toast.success("Email template saved");
-    } catch (e) {
-      toast.error("Save failed", { description: e?.response?.data?.detail || e.message });
-    } finally { setBusy(false); }
-  };
-
-  if (tpl === null) {
-    return <div className="card p-6 text-slate-500 text-sm" data-testid="email-templates-loading">Loading email templates…</div>;
-  }
-
-  const accent = tpl.accent_color || "#4F46E5";
-  const previewName = "Jordan";
-  const sub = (s) => (s || "").replace(/\{name\}/g, previewName).replace(/\{email\}/g, "jordan@example.com");
-
-  return (
-    <div className="grid lg:grid-cols-2 gap-4" data-testid="email-templates-card">
-      {/* Editor */}
-      <div className="card p-5 grid gap-4">
-        <div className="flex items-center gap-2">
-          <Mail size={16} className="text-indigo-500"/>
-          <div className="font-display font-bold">Verification email</div>
-        </div>
-
-        <div>
-          <label className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1 flex items-center gap-1"><Link2 size={11}/> PCStore portal URL</label>
-          <input value={portalUrl} onChange={(e) => { setPortalUrl(e.target.value); setDirty(true); }}
-            placeholder="https://your-pcstore.com"
-            className="input w-full px-3 py-2 text-sm font-mono" data-testid="et-portal-url"/>
-          <div className="text-[11px] text-slate-400 mt-1">
-            Activation links become <span className="font-mono">{(portalUrl || "").replace(/\/$/, "") || "…"}/verify?token=…</span>
-            {!portalUrl && <span className="text-amber-600"> — leave blank while testing; the link is returned in the API response instead.</span>}
-          </div>
-        </div>
-
-        <Field label="Subject line"><input value={tpl.subject || ""} onChange={(e) => setField("subject", e.target.value)} className="input w-full px-3 py-2 text-sm" data-testid="et-subject"/></Field>
-        <Field label="Heading"><input value={tpl.heading || ""} onChange={(e) => setField("heading", e.target.value)} className="input w-full px-3 py-2 text-sm" data-testid="et-heading"/></Field>
-        <Field label="Body text">
-          <textarea value={tpl.body || ""} onChange={(e) => setField("body", e.target.value)} rows={4} className="input w-full px-3 py-2 text-sm" data-testid="et-body"/>
-          <div className="text-[11px] text-slate-400 mt-1">Placeholders: <span className="font-mono">{"{name}"}</span>, <span className="font-mono">{"{email}"}</span></div>
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Button label"><input value={tpl.button_label || ""} onChange={(e) => setField("button_label", e.target.value)} className="input w-full px-3 py-2 text-sm" data-testid="et-button"/></Field>
-          <Field label="Accent colour">
-            <div className="flex items-center gap-2">
-              <input type="color" value={accent} onChange={(e) => setField("accent_color", e.target.value)} className="h-9 w-12 rounded border hairline cursor-pointer" data-testid="et-accent"/>
-              <input value={accent} onChange={(e) => setField("accent_color", e.target.value)} className="input flex-1 px-2 py-2 text-sm font-mono"/>
-            </div>
-          </Field>
-        </div>
-        <Field label="Logo URL (optional)"><input value={tpl.logo_url || ""} onChange={(e) => setField("logo_url", e.target.value)} placeholder="https://…/logo.png" className="input w-full px-3 py-2 text-sm font-mono" data-testid="et-logo"/></Field>
-        <Field label="Footer text"><textarea value={tpl.footer || ""} onChange={(e) => setField("footer", e.target.value)} rows={2} className="input w-full px-3 py-2 text-sm" data-testid="et-footer"/></Field>
-
-        <div className="flex items-center justify-end gap-2">
-          {dirty && <span className="text-[11px] text-amber-600 font-mono">unsaved changes</span>}
-          <button onClick={save} disabled={busy || !dirty} className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed" data-testid="et-save-btn">
-            {busy ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>} Save template
-          </button>
-        </div>
+  const [data, setData] = useState(null); const [selected, setSelected] = useState("verification");
+  const [portalUrl, setPortalUrl] = useState(""); const [brandDraft, setBrandDraft] = useState("");
+  const [dirty, setDirty] = useState(false); const [brandDirty, setBrandDirty] = useState(false); const [busy, setBusy] = useState(false); const [device, setDevice] = useState("desktop");
+  useEffect(() => { axios.get(`${API}/email-templates`).then(({ data: payload }) => { setData(payload); setPortalUrl(payload.portal_base_url || ""); setBrandDraft(payload.brand_name || "PCAdmin"); }).catch((e) => toast.error("Failed to load templates", { description: e?.response?.data?.detail || e.message })); }, []);
+  const template = data?.[selected] || {}; const setField = (key, value) => { setData(current => ({ ...current, [selected]: { ...current[selected], [key]: value } })); setDirty(true); };
+  const saveBrand = async () => { if (!brandDraft.trim()) return toast.error("Brand name is required"); setBusy(true); try { const { data: payload } = await axios.patch(`${API}/email-templates/brand`, { brand_name: brandDraft.trim() }); setData(payload); setBrandDraft(payload.brand_name); setBrandDirty(false); toast.success("Email brand saved"); } catch (e) { toast.error("Could not save brand", { description: e?.response?.data?.detail || e.message }); } finally { setBusy(false); } };
+  const saveTemplate = async () => { setBusy(true); try { const { data: saved } = await axios.patch(`${API}/email-templates/${selected}`, template); let next = { ...data, [selected]: saved.template }; if (selected === "verification") { const { data: settings } = await axios.patch(`${API}/email-templates`, { portal_base_url: portalUrl }); next = { ...next, portal_base_url: settings.portal_base_url }; setPortalUrl(settings.portal_base_url || ""); } setData(next); setDirty(false); toast.success("Email template saved"); } catch (e) { toast.error("Save failed", { description: e?.response?.data?.detail || e.message }); } finally { setBusy(false); } };
+  if (!data) return <div className="card p-6 text-slate-500 text-sm" data-testid="email-templates-loading">Loading email templates…</div>;
+  const accent = template.accent_color || "#4F46E5"; const sub = (text) => String(text || "").replace(/\{([^}]+)\}/g, (_, key) => key === "brand_name" ? (brandDraft || "PCAdmin") : (EMAIL_PREVIEW_VALUES[key] || `{${key}}`)); const [, selectedLabel, placeholders] = EMAIL_TEMPLATE_META.find(([id]) => id === selected) || EMAIL_TEMPLATE_META[0];
+  return <div className="grid gap-4" data-testid="email-templates-card">
+    <div className="card p-4 md:p-5 flex flex-col md:flex-row md:items-end gap-3" data-testid="email-brand-card"><div className="flex-1"><Field label="Brand name"><input value={brandDraft} onChange={(e) => { setBrandDraft(e.target.value); setBrandDirty(true); }} className="input w-full px-3 py-2 text-sm font-medium" data-testid="email-brand-name-input"/></Field><div className="text-xs text-slate-500 mt-1">Shown in the top banner and footer of every customer email.</div></div><button onClick={saveBrand} disabled={busy || !brandDirty} className="btn btn-primary min-h-11 text-sm disabled:opacity-50" data-testid="email-brand-save-button"><BadgeCheck size={14}/> Save brand</button></div>
+    <div className="flex gap-2 overflow-x-auto pb-1" data-testid="email-template-tabs">{EMAIL_TEMPLATE_META.map(([id, label]) => <button key={id} onClick={() => { setSelected(id); setDirty(false); }} className={`shrink-0 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${selected === id ? "bg-indigo-600 text-white" : "bg-white border hairline text-slate-600 hover:bg-indigo-50"}`} data-testid={`email-template-tab-${id}`}>{label}</button>)}</div>
+    <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(400px,.9fr)] gap-4 items-start">
+      <div className="card p-4 md:p-5 grid gap-4" data-testid="email-template-editor"><div className="flex items-center gap-2"><Mail size={16} className="text-indigo-500"/><div><div className="font-display font-bold">{selectedLabel}</div><div className="text-xs text-slate-500">Transactional email content</div></div></div>
+        {selected === "verification" && <Field label="PCStore portal URL"><input value={portalUrl} onChange={(e) => { setPortalUrl(e.target.value); setDirty(true); }} placeholder="https://your-pcstore.com" className="input w-full px-3 py-2 text-sm font-mono" data-testid="email-template-portal-url"/></Field>}
+        <Field label="Subject line"><input value={template.subject || ""} onChange={(e) => setField("subject", e.target.value)} className="input w-full px-3 py-2 text-sm" data-testid="email-template-subject-input"/></Field><Field label="Heading"><input value={template.heading || ""} onChange={(e) => setField("heading", e.target.value)} className="input w-full px-3 py-2 text-sm" data-testid="email-template-heading-input"/></Field>
+        <Field label="Body text"><textarea value={template.body || ""} onChange={(e) => setField("body", e.target.value)} rows={6} className="input w-full px-3 py-2 text-sm leading-relaxed" data-testid="email-template-body-input"/><div className="text-[11px] text-slate-400 mt-1">Placeholders: {placeholders.map(item => <span key={item} className="font-mono mr-1">{item}</span>)}</div></Field>
+        <div className="grid sm:grid-cols-2 gap-3"><Field label="Button label"><input value={template.button_label || ""} onChange={(e) => setField("button_label", e.target.value)} className="input w-full px-3 py-2 text-sm" data-testid="email-template-button-input"/></Field><Field label="Accent colour"><div className="flex gap-2"><input type="color" value={accent} onChange={(e) => setField("accent_color", e.target.value)} className="h-10 w-12 rounded border hairline cursor-pointer" data-testid="email-template-accent-picker"/><input value={accent} onChange={(e) => setField("accent_color", e.target.value)} className="input flex-1 px-2 py-2 text-sm font-mono" data-testid="email-template-accent-input"/></div></Field></div>
+        <Field label="Logo URL (optional)"><input value={template.logo_url || ""} onChange={(e) => setField("logo_url", e.target.value)} placeholder="https://your-store.com/logo.png" className="input w-full px-3 py-2 text-sm font-mono" data-testid="email-template-logo-input"/></Field><Field label="Footer text"><textarea value={template.footer || ""} onChange={(e) => setField("footer", e.target.value)} rows={3} className="input w-full px-3 py-2 text-sm" data-testid="email-template-footer-input"/></Field>
+        <div className="flex justify-end gap-2 items-center">{dirty && <span className="text-xs font-mono text-amber-600">unsaved changes</span>}<button onClick={saveTemplate} disabled={busy || !dirty} className="btn btn-primary min-h-11 text-sm disabled:opacity-50" data-testid="email-template-save-button">{busy ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>} Save template</button></div>
       </div>
-
-      {/* Live preview */}
-      <div className="card p-5">
-        <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-3">Live preview</div>
-        <div className="text-xs text-slate-500 mb-2"><span className="font-mono">Subject:</span> {sub(tpl.subject) || <em>—</em>}</div>
-        <div className="rounded-xl overflow-hidden border hairline" data-testid="et-preview">
-          <div style={{ background: accent }} className="p-5 text-white">
-            {tpl.logo_url
-              ? <img src={tpl.logo_url} alt="" style={{ maxHeight: 36 }} className="mb-2"/>
-              : <div className="text-[11px] tracking-widest uppercase opacity-85">PCAdmin</div>}
-            <div className="text-lg font-bold mt-1">{sub(tpl.heading) || "Confirm your email address"}</div>
-          </div>
-          <div className="p-5 bg-white">
-            <p className="text-sm text-slate-700 leading-relaxed">{sub(tpl.body) || <em className="text-slate-400">Body text…</em>}</p>
-            <button style={{ background: accent }} className="mt-4 inline-block text-white font-bold text-sm px-5 py-2.5 rounded-lg" type="button" disabled>
-              {tpl.button_label || "Activate my account"}
-            </button>
-            {tpl.footer && <div className="mt-5 pt-3 border-t hairline text-xs text-slate-500">{sub(tpl.footer)}</div>}
-          </div>
-        </div>
+      <div className="card p-4 md:p-5" data-testid="email-template-preview-panel"><div className="flex items-center justify-between gap-3 mb-4"><div><div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Live preview</div><div className="text-xs text-slate-500 mt-1">Subject: {sub(template.subject) || "—"}</div></div><div className="flex border hairline rounded-lg overflow-hidden"><button onClick={() => setDevice("desktop")} className={`p-2 min-w-10 ${device === "desktop" ? "bg-indigo-50 text-indigo-600" : "text-slate-400"}`} title="Desktop preview" data-testid="email-preview-desktop-button"><Monitor size={15}/></button><button onClick={() => setDevice("mobile")} className={`p-2 min-w-10 ${device === "mobile" ? "bg-indigo-50 text-indigo-600" : "text-slate-400"}`} title="Mobile preview" data-testid="email-preview-mobile-button"><Smartphone size={15}/></button></div></div>
+        <div className="bg-slate-100 rounded-xl p-4 md:p-6 min-h-[520px] flex justify-center overflow-hidden" data-testid={`email-template-preview-${device}`}><div className={`w-full ${device === "mobile" ? "max-w-[300px]" : "max-w-[520px]"} self-start text-center`}><div className="py-4 flex flex-col items-center">{template.logo_url ? <img src={template.logo_url} alt="" className="w-12 h-12 object-contain rounded-xl"/> : <div style={{ background: accent }} className="w-12 h-12 rounded-xl grid place-items-center text-white font-display text-xl font-bold">{(brandDraft || "P").slice(0, 1).toUpperCase()}</div>}<div className="mt-2 text-[10px] font-bold tracking-[0.16em] uppercase text-slate-500">{brandDraft || "PCAdmin"}</div></div><div className="bg-white rounded-2xl border hairline shadow-sm p-6 md:p-8"><h3 className="font-display text-xl md:text-2xl font-bold text-slate-900">{sub(template.heading) || "Email heading"}</h3><p className="mt-4 text-sm leading-6 text-slate-600 whitespace-pre-line">{sub(template.body) || "Body text…"}</p><button type="button" disabled style={{ background: accent }} className="mt-6 rounded-full px-5 py-3 text-sm font-bold text-white">{sub(template.button_label) || "Continue"}</button></div><div className="px-5 pt-5 text-xs leading-5 text-slate-400 whitespace-pre-line">{sub(template.footer)}</div><div className="pt-2 text-[10px] text-slate-400">© 2026 {brandDraft || "PCAdmin"}</div></div></div>
       </div>
     </div>
-  );
+  </div>;
 }
 
 
@@ -2207,7 +2131,7 @@ export function StoreManagement({ section, setSection }) {
     "tax-rates":           { hint: "GST and location-based tax rules.", fields: ["Australia — GST 10%","New Zealand — GST 15%","B2B / ABN entries"] },
     "checkout-settings":   { hint: "Fine-tune the buyer journey at checkout.", fields: ["Guest checkout","Require phone","Address auto-complete","Order note field","Marketing opt-in","Terms & conditions box"] },
     "email-notifications": { hint: "Admin alerts + transactional emails sent to customers. Configure the Resend API key and per-channel toggles here.", fields: [], custom: <PushNotificationSettings/> },
-    "email-templates":     { hint: "Customise the account-verification email customers receive when they sign up, plus the PCStore link the activation button points to.", fields: [], custom: <EmailTemplatesEditor/> },
+    "email-templates":     { hint: "Design verification, order, delivery, password, welcome and refund emails with shared brand styling and live device previews.", fields: [], custom: <EmailTemplatesEditor/> },
     "popup-messages":      { hint: "On-site banners, promos and pop-ups.", fields: ["Announcement bar","Welcome popup","Exit-intent offer","Free-shipping banner","Cookie consent","Age gate"] },
     "site-menus":          { hint: "Header, footer and mobile navigation menus. Configure the Customer Support 'Get Help' link PCStore shows in the account dropdown.", fields: [], custom: <SiteMenusPanel/> },
     "pages":               { hint: "Static content pages (About, Contact, Policies…).", fields: ["Home","About us","Contact","Shipping policy","Returns policy","Privacy policy","Terms of service","FAQ"] },

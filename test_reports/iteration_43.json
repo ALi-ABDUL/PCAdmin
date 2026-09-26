@@ -1,0 +1,57 @@
+{
+  "summary": "Completed backend+frontend regression for Email Templates redesign. Core template APIs, migration behavior, renderer branding safety, and admin UI edit/persist/restore flow passed in initial runs. One pre-existing related regression test failed due outdated disposable-email fixture data, and later reruns hit public endpoint timeouts (infrastructure/network instability).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "https://ebay-au-harvester.preview.emergentagent.com/api/*",
+        "issue": "Intermittent public endpoint timeout observed after initial successful runs (curl /api and pytest HTTP requests timed out with no response).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "/api/portal/register (test fixture path)",
+        "issue": "Existing test_customer_email_notifications.py uses aliko@yopmail.com, now blocked by disposable-domain policy; test fails with 400 before welcome-email assertion."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_email_templates_v2.py",
+    "/app/backend/tests/test_email_templates_regression_extra.py",
+    "/app/backend/tests/test_customer_email_notifications.py",
+    "/app/backend/tests/test_site_menus_support.py",
+    "/app/backend/tests/test_product_code_orders_api.py",
+    "/app/test_reports/pytest/pytest_iteration43_email_templates.xml",
+    "/app/test_reports/pytest/pytest_iteration43_email_templates_serial.xml",
+    "/app/test_reports/pytest/pytest_iteration43_related_regression.xml"
+  ],
+  "action_items": [
+    "Update TestPortalRegisterWelcomeEmail fixture to non-disposable domain (and satisfy purchaser precondition if needed) so related regression suite remains green.",
+    "Investigate preview ingress/public endpoint stability (timeouts on /api after earlier green runs) before relying on repeated HTTP regression runs.",
+    "Review whether legacy _customer_email_html (hardcoded PCAdmin banner) should be migrated to the branded modern renderer for manual customer-message emails too."
+  ],
+  "critical_code_review_comments": [
+    "Email-template API contract is implemented correctly for this story: seven template IDs, per-template PATCH, brand PATCH, validation for accent/logo, and default+legacy merge migration.",
+    "Transactional flows under send_customer_* and verification renderer use _render_saved_template/_render_email_template with brand_name placeholder substitution and HTML escaping.",
+    "A legacy helper (_customer_email_html) still contains hardcoded 'PCAdmin' styling; if this helper is intended to stay user-facing, it is inconsistent with the new branded modern layout direction."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_email_templates_regression_extra.py",
+    "/app/test_reports/iteration_43.json"
+  ],
+  "success_rate": {
+    "backend": "Core functional checks passed (44/45 before timeout event); subsequent rerun attempts were blocked by public endpoint timeouts",
+    "frontend": "100% for requested Email Templates UI flow (load, tabs, preview toggle, save persistence, restore)"
+  },
+  "test_credentials": "Read /app/memory/test_credentials.md and used qa@prettycheap.com.au / QaTest123!.",
+  "seed_data_creation": "No persistent seed data created. Temporary UI template subject mutation was restored to original value in the same run.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Email Templates feature checks were green in initial run windows and UI mutation was restored. If rerunning broad suites, expect one welcome-email fixture failure until disposable-domain test data is updated. Also verify preview public URL responsiveness first due observed timeout instability.",
+  "rca of the issue": "RCA-1: test_customer_email_notifications::TestPortalRegisterWelcomeEmail uses yopmail.com, now intentionally blocked by disposable-domain validation; this is a regression-test data mismatch. RCA-2: public preview ingress showed intermittent no-response timeouts on /api endpoints after earlier successful executions, indicating environment/network instability rather than deterministic template business-logic failure."
+}

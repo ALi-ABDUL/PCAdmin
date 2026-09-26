@@ -158,16 +158,23 @@ class TestSendCustomerEmailHelper:
         assert res == "skipped_disabled"
 
     def test_no_key_returns_skipped_no_key(self, loop, client, mongo):
-        # All toggles on and clear resend_api_key
+        # Preserve any configured provider credential: this assertion must not
+        # leave a real email integration disabled after the test run.
+        before = mongo.push_settings.find_one({"id": "singleton"}) or {}
         client.patch(f"{API}/push/settings", json={k: True for k in CUSTOMER_FIELDS})
-        mongo.push_settings.update_one(
-            {"id": "singleton"}, {"$set": {"resend_api_key": ""}}, upsert=True
-        )
-        from helpers import send_customer_email
-        res = loop.run_until_complete(
-            send_customer_email("welcome", "b@x.com", "s", "<p>h</p>")
-        )
-        assert res == "skipped_no_key"
+        try:
+            mongo.push_settings.update_one(
+                {"id": "singleton"}, {"$set": {"resend_api_key": ""}}, upsert=True
+            )
+            from helpers import send_customer_email
+            res = loop.run_until_complete(
+                send_customer_email("welcome", "b@x.com", "s", "<p>h</p>")
+            )
+            assert res == "skipped_no_key"
+        finally:
+            mongo.push_settings.update_one(
+                {"id": "singleton"}, {"$set": {"resend_api_key": before.get("resend_api_key", "")}}, upsert=True
+            )
 
     def test_unknown_kind_returns_skipped_disabled(self, loop):
         from helpers import send_customer_email
@@ -245,36 +252,21 @@ class TestOrderEndpointsCustomerEmailIntegration:
 # ---------------------------------------------------------------------------
 
 class TestPortalRegisterWelcomeEmail:
-    def test_portal_register_calls_welcome_email_helper(self, monkeypatch, client, mongo):
-        import server as server_mod
-        calls = []
-
-        async def fake_send(customer):
-            calls.append(customer)
-            return "sent"
-
-        # Note: monkeypatching an in-process symbol only observes calls when the
-        # backend runs in the same process as this test suite. In this env the
-        # backend is the SAME uvicorn process — but tests hit it over HTTP, so
-        # this monkeypatch acts on the LIVE process because pytest is executed
-        # against /app/backend and the import graph is shared via reload.
-        # If not shared, we fall back to verifying via a fresh account row.
-        monkeypatch.setattr(server_mod, "send_customer_welcome_email", fake_send)
-
-        email = "aliko@yopmail.com"
-        # Clean slate for this account (register is one-time)
+    def test_portal_register_accepts_existing_buyer_and_requires_verification(self, client, mongo):
+        email = f"aliko_{uuid.uuid4().hex[:10]}@example.com"
+        order_id = f"TEST_welcome_{uuid.uuid4().hex[:10]}"
         mongo.customer_accounts.delete_many({"email": email})
-
-        r = client.post(f"{API}/portal/register", json={
-            "email": email, "password": "secret123", "name": "Aliko"
-        })
-        assert r.status_code == 200, r.text
-        assert r.json().get("token")
-
-        # If monkeypatch reached the live process, calls will be populated.
-        # Otherwise, at minimum ensure the endpoint succeeded (integration wired).
-        if calls:
-            assert calls[0]["email"] == email
+        mongo.orders.insert_one({"id": order_id, "customer_email": email, "customer_name": "Aliko", "items": []})
+        try:
+            r = client.post(f"{API}/portal/register", json={
+                "email": email, "password": "secret123", "name": "Aliko"
+            })
+            assert r.status_code == 200, r.text
+            assert r.json().get("requires_verification") is True
+            assert r.json().get("email") == email
+        finally:
+            mongo.customer_accounts.delete_many({"email": email})
+            mongo.orders.delete_many({"id": order_id})
 
 
 # ---------------------------------------------------------------------------

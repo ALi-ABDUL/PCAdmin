@@ -43,7 +43,7 @@ from models import (
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
     DisposableDomainsUpdate, DISPOSABLE_EMAIL_ERROR,
     _DEFAULT_STORE_DISPLAY, StoreDisplaySettingsUpdate, _DEFAULT_STORE_BRANDING, StoreBrandingUpdate,
-    VerifyTokenBody, ResendVerificationBody, EmailTemplatesUpdate,
+    VerifyTokenBody, ResendVerificationBody, EmailTemplatesUpdate, EmailTemplateUpdate, EmailBrandUpdate, EMAIL_TEMPLATE_IDS,
     CountdownStart, BrandingUpdate, TagSettingsUpdate,
 )
 from product_tags import TAG_IDS, attach_smart_tags, get_tag_settings
@@ -63,7 +63,7 @@ from helpers import (
     _ensure_main_admin_seeded, _default_seo,
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update, send_customer_order_line_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
-    _customer_email_html,
+    render_branded_message_email,
     _get_email_templates, _send_verification_email, _consume_verification_token,
     _ensure_country_access_seeded, _get_country_access, _client_country, _client_ip,
     _bypass_active_for_ip, _grant_bypass, _purge_expired_bypasses,
@@ -1317,12 +1317,8 @@ async def message_customer(cid: str, body: dict):
         raise HTTPException(status_code=400, detail="Resend API key is not configured. Add it in Store Management › Email & Notifications.")
     frm = settings.get("resend_from_email") or "onboarding@resend.dev"
 
-    # Reuse the store's card template so the email looks on-brand.
-    html = _customer_email_html(
-        title=subject,
-        intro=f"Hi {c.get('name') or 'there'},",
-        rows=[("Message", message.replace('\n', '<br/>'))],
-        footer="Reply to this email to reach us directly.",
+    html = await render_branded_message_email(
+        subject, f"Hi {c.get('name') or 'there'},\n\n{message}", "Reply to this email to reach us directly.",
     )
 
     resend.api_key = key
@@ -2434,11 +2430,9 @@ async def submit_support_contact(body: SupportContactBody):
         raise HTTPException(status_code=503, detail="Support email is unavailable: no support recipient is configured in Store Management › Email & Notifications.")
 
     sender = settings.get("resend_from_email") or "onboarding@resend.dev"
-    safe_name, safe_email, safe_message = escape(body.name.strip()), escape(email), escape(body.message.strip()).replace("\n", "<br/>")
-    html = _customer_email_html(
-        title="New support request",
-        intro="A customer has submitted the storefront contact form.",
-        rows=[("From", f"{safe_name} ({safe_email})"), ("Message", safe_message)],
+    html = await render_branded_message_email(
+        "New support request",
+        f"A customer has submitted the storefront contact form.\n\nFrom: {body.name.strip()} ({email})\n\nMessage: {body.message.strip()}",
     )
     resend.api_key = key
     try:
@@ -5051,10 +5045,42 @@ async def patch_store_display_settings(body: StoreDisplaySettingsUpdate):
 
 @api_router.get("/email-templates")
 async def get_email_templates():
-    """Return the customisable transactional-email templates
-    (currently the account-verification email) + PCStore portal base URL.
-    Rendered by Store Management → Email Templates."""
+    """Return the transactional-email brand, templates and portal base URL."""
     return await _get_email_templates()
+
+
+@api_router.patch("/email-templates/brand")
+async def patch_email_template_brand(body: EmailBrandUpdate):
+    brand_name = body.brand_name.strip()
+    await db.email_templates.update_one(
+        {"_id": "singleton"},
+        {"$set": {"brand_name": brand_name, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return await _get_email_templates()
+
+
+@api_router.patch("/email-templates/{template_id}")
+async def patch_email_template(template_id: str, body: EmailTemplateUpdate):
+    if template_id not in EMAIL_TEMPLATE_IDS:
+        raise HTTPException(status_code=404, detail="Email template not found")
+    fields = {key: value for key, value in body.model_dump().items() if value is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    if "accent_color" in fields and not re.fullmatch(r"#[0-9A-Fa-f]{6}", fields["accent_color"].strip()):
+        raise HTTPException(status_code=400, detail="Accent colour must be a six-digit hex value")
+    if "logo_url" in fields and fields["logo_url"].strip() and not fields["logo_url"].strip().startswith("https://"):
+        raise HTTPException(status_code=400, detail="Logo URL must use https")
+    current = await _get_email_templates()
+    merged = dict(current.get(template_id) or {})
+    for key, value in fields.items():
+        merged[key] = value.strip() if isinstance(value, str) else value
+    await db.email_templates.update_one(
+        {"_id": "singleton"},
+        {"$set": {template_id: merged, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"template_id": template_id, "template": (await _get_email_templates())[template_id]}
 
 
 @api_router.patch("/email-templates")

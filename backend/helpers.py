@@ -8,6 +8,7 @@ import hashlib
 import random
 import secrets
 import uuid
+from html import escape
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
@@ -34,7 +35,7 @@ from models import (
     Category, Customer, Notification, PricingRule, ScrapeRequest,
     PostagePreset, _DEFAULT_POSTAGE_PRESETS, DELIVERY_SETTINGS_DEFAULTS, SITE_MENUS_DEFAULTS,
     AdminAccount, _DEFAULT_MAIN_ADMIN,
-    _DEFAULT_EMAIL_TEMPLATES, VERIFICATION_TOKEN_TTL_HOURS,
+    _DEFAULT_EMAIL_TEMPLATES, EMAIL_TEMPLATE_IDS, VERIFICATION_TOKEN_TTL_HOURS,
 )
 import httpx
 
@@ -1241,7 +1242,7 @@ CUSTOMER_EMAIL_KINDS = {
 }
 
 
-def _customer_email_html(title: str, intro: str, rows: list, footer: str = "") -> str:
+def _customer_email_html(title: str, intro: str, rows: list, footer: str = "", brand_name: str = "Your store") -> str:
     row_html = "".join(
         f'<tr><td style="padding:6px 12px;color:#64748B;font-size:12px;">{k}</td>'
         f'<td style="padding:6px 12px;color:#0F172A;font-size:13px;">{v}</td></tr>'
@@ -1251,7 +1252,7 @@ def _customer_email_html(title: str, intro: str, rows: list, footer: str = "") -
 <html><body style="font-family:Arial,sans-serif;background:#F7F7FB;padding:32px;color:#0F172A;">
   <table role="presentation" cellspacing="0" cellpadding="0" width="100%" style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #EAEAF0;border-radius:12px;overflow:hidden;">
     <tr><td style="padding:20px 24px;background:linear-gradient(135deg,#4F46E5,#EC4899);color:#fff;">
-      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:0.85;">PCAdmin</div>
+      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:0.85;">{escape(brand_name)}</div>
       <div style="font-size:20px;font-weight:700;margin-top:4px;">{title}</div>
     </td></tr>
     <tr><td style="padding:16px 24px;color:#334155;font-size:14px;">{intro}</td></tr>
@@ -1296,102 +1297,54 @@ async def send_customer_email(kind: str, to_email: str, subject: str, html: str)
 
 async def send_customer_order_confirmation(order: dict) -> str:
     to = order.get("customer_email") or ""
-    subject = f"Order confirmed · #{(order.get('reference') or order.get('id') or '')[:16]}"
-    html = _customer_email_html(
-        title="Thanks — we've received your order",
-        intro=f"Hi {_greeting_first_name(order)}, thank you for shopping with us. "
-              "We'll email you again as soon as it ships.",
-        rows=[
-            ("Order",     order.get("reference") or (order.get("id") or "")[:8]),
-            ("Item",      order.get("product_title") or "—"),
-            ("Quantity",  str(order.get("quantity") or 1)),
-            ("Total",     f"${float(order.get('total') or 0):.2f}"),
-        ],
-        footer="Reply to this email if anything looks off.",
-    )
+    order_id = order.get("reference") or (order.get("id") or "")[:8]
+    subject, html = await _render_saved_template("order_confirmation", {
+        "name": _greeting_first_name(order), "order_id": order_id,
+        "order_total": f"${float(order.get('total') or 0):.2f}",
+        "items_list": f"{order.get('product_title') or 'Item'} × {order.get('quantity') or 1}",
+        "shipping_address": order.get("shipping_address") or "Your saved delivery address",
+    }, "/account/orders")
     return await send_customer_email("order_confirmation", to, subject, html)
 
 
 async def send_customer_order_status_update(order: dict, old_status: str, new_status: str) -> str:
     to = order.get("customer_email") or ""
-    friendly = {
-        "processing": "is being prepared for shipping",
-        "shipped":    "has shipped",
-        "delivered":  "has been delivered",
-    }.get(new_status, f"status is now {new_status}")
-    subject = f"Your order {friendly} · #{(order.get('reference') or order.get('id') or '')[:16]}"
-    html = _customer_email_html(
-        title=f"Your order {friendly}",
-        intro=f"Hi {_greeting_first_name(order)}, an update on your recent order.",
-        rows=[
-            ("Order",     order.get("reference") or (order.get("id") or "")[:8]),
-            ("Item",      order.get("product_title") or "—"),
-            ("Status",    new_status.replace("_", " ").title()),
-            ("Total",     f"${float(order.get('total') or 0):.2f}"),
-        ],
-    )
+    order_id = order.get("reference") or (order.get("id") or "")[:8]
+    template_id = "order_delivered" if new_status == "delivered" else "order_shipped"
+    subject, html = await _render_saved_template(template_id, {
+        "name": _greeting_first_name(order), "order_id": order_id,
+        "tracking_number": order.get("tracking_number") or "Available in your order details",
+        "carrier": order.get("carrier") or "our delivery partner",
+    }, "/account/orders")
     return await send_customer_email("order_status_update", to, subject, html)
 
 
 async def send_customer_order_line_status_update(order: dict, line: dict, old_status: str, new_status: str) -> str:
     """Send one transactional update for the changed fulfilment line only."""
     to = order.get("customer_email") or ""
-    friendly = {
-        "pending": "is pending fulfilment",
-        "processing": "is being prepared",
-        "shipped": "has shipped",
-        "delivered": "has been delivered",
-    }.get(new_status, f"status is now {new_status}")
-    variant = ": ".join(str(value) for value in (line.get("variant_type"), line.get("variant_option")) if value)
-    item_label = line.get("title") or order.get("product_title") or "Item"
-    if variant:
-        item_label = f"{item_label} ({variant})"
-    subject = f"Your item {friendly} · #{(order.get('reference') or order.get('id') or '')[:16]}"
-    html = _customer_email_html(
-        title=f"Your item {friendly}",
-        intro=f"Hi {_greeting_first_name(order)}, an update on an item from your recent order.",
-        rows=[
-            ("Order", order.get("reference") or (order.get("id") or "")[:8]),
-            ("Item", item_label),
-            ("Quantity", str(line.get("quantity") or 1)),
-            ("Status", new_status.replace("_", " ").title()),
-            ("Item total", f"${float(line.get('line_total') or 0):.2f}"),
-        ],
-    )
+    order_id = order.get("reference") or (order.get("id") or "")[:8]
+    template_id = "order_delivered" if new_status == "delivered" else "order_shipped"
+    subject, html = await _render_saved_template(template_id, {
+        "name": _greeting_first_name(order), "order_id": order_id,
+        "tracking_number": line.get("tracking_number") or order.get("tracking_number") or "Available in your order details",
+        "carrier": line.get("carrier") or order.get("carrier") or "our delivery partner",
+    }, "/account/orders")
     return await send_customer_email("order_status_update", to, subject, html)
 
 
 async def send_customer_order_cancellation(order: dict) -> str:
     to = order.get("customer_email") or ""
-    subject = f"Order cancelled · #{(order.get('reference') or order.get('id') or '')[:16]}"
-    html = _customer_email_html(
-        title="Your order has been cancelled",
-        intro=f"Hi {_greeting_first_name(order)}, we've cancelled your recent order. "
-              "Any charge will be refunded to your original payment method within a few business days.",
-        rows=[
-            ("Order",     order.get("reference") or (order.get("id") or "")[:8]),
-            ("Item",      order.get("product_title") or "—"),
-            ("Refund",    f"${float(order.get('total') or 0):.2f}"),
-        ],
-        footer="Reply to this email if you have any questions.",
-    )
+    subject, html = await _render_saved_template("refund_confirmation", {
+        "name": _greeting_first_name(order), "order_id": order.get("reference") or (order.get("id") or "")[:8],
+        "refund_amount": f"${float(order.get('total') or 0):.2f}",
+    }, "/account/orders")
     return await send_customer_email("order_cancellation", to, subject, html)
 
 
 async def send_customer_welcome_email(customer: dict) -> str:
     to = customer.get("email") or ""
     name = _greeting_first_name(customer, name_key="name")
-    subject = "Welcome to PCAdmin 🎉"
-    html = _customer_email_html(
-        title=f"Welcome, {name}!",
-        intro="Your account is ready to go. You can now track your orders, "
-              "leave verified reviews, and grab exclusive coupons — all from one place.",
-        rows=[
-            ("Email",  customer.get("email") or "—"),
-            ("Joined", (customer.get("created_at") or "")[:10] or "today"),
-        ],
-        footer="Happy shopping. Reply to this email if you ever need a hand.",
-    )
+    subject, html = await _render_saved_template("welcome", {"name": name}, "/")
     return await send_customer_email("welcome", to, subject, html)
 
 
@@ -1412,51 +1365,73 @@ async def _get_email_templates() -> dict:
     # Merge over defaults so newly-added keys are always present.
     merged = {k: v for k, v in _DEFAULT_EMAIL_TEMPLATES.items() if k != "_id"}
     merged.update(doc)
-    v = dict(_DEFAULT_EMAIL_TEMPLATES["verification"])
-    v.update(doc.get("verification") or {})
-    merged["verification"] = v
+    for template_id in EMAIL_TEMPLATE_IDS:
+        template = dict(_DEFAULT_EMAIL_TEMPLATES[template_id])
+        template.update(doc.get(template_id) or {})
+        merged[template_id] = template
     return merged
+
+
+async def _render_saved_template(template_id: str, values: dict, path: str = "/") -> tuple[str, str]:
+    templates = await _get_email_templates()
+    base = (templates.get("portal_base_url") or "").rstrip("/")
+    link = f"{base}{path}" if base else "#"
+    return _render_email_template(templates.get(template_id) or {}, values, link, templates.get("brand_name") or "PCAdmin")
+
+
+async def render_branded_message_email(subject: str, message: str, footer: str = "") -> str:
+    """Apply the editable email brand to non-template support/admin messages."""
+    templates = await _get_email_templates()
+    style = templates.get("verification") or {}
+    transient = {
+        "subject": subject,
+        "heading": subject,
+        "body": "{message}",
+        "button_label": "Reply to this email",
+        "footer": footer,
+        "accent_color": style.get("accent_color") or "#4F46E5",
+        "logo_url": style.get("logo_url") or "",
+    }
+    _, html = _render_email_template(transient, {"message": message}, "#", templates.get("brand_name") or "PCAdmin")
+    return html
 
 
 def _hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _render_verification_email(name: str, email: str, link: str, tpl: dict) -> tuple[str, str]:
-    """Return (subject, html) for the verification email, substituting
-    {name}/{email} placeholders and applying the admin's branding."""
-    def sub(s: str) -> str:
-        return (s or "").replace("{name}", name or "there").replace("{email}", email or "")
-    subject = sub(tpl.get("subject") or "Verify your email")
-    heading = sub(tpl.get("heading") or "Confirm your email address")
-    body = sub(tpl.get("body") or "")
-    button_label = tpl.get("button_label") or "Activate my account"
-    footer = sub(tpl.get("footer") or "")
-    accent = tpl.get("accent_color") or "#4F46E5"
-    logo = tpl.get("logo_url") or ""
-    logo_html = (
-        f'<img src="{logo}" alt="" height="36" style="max-height:36px;margin-bottom:8px;display:block;"/>'
-        if logo else
-        '<div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:0.85;color:#fff;">PCAdmin</div>'
-    )
-    html = f"""<!doctype html>
-<html><body style="font-family:Arial,sans-serif;background:#F7F7FB;padding:32px;color:#0F172A;">
-  <table role="presentation" cellspacing="0" cellpadding="0" width="100%" style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #EAEAF0;border-radius:12px;overflow:hidden;">
-    <tr><td style="padding:24px;background:{accent};">
-      {logo_html}
-      <div style="font-size:20px;font-weight:700;margin-top:6px;color:#fff;">{heading}</div>
-    </td></tr>
-    <tr><td style="padding:20px 24px;color:#334155;font-size:14px;line-height:1.6;">{body}</td></tr>
-    <tr><td style="padding:4px 24px 24px 24px;">
-      <a href="{link}" style="display:inline-block;background:{accent};color:#fff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:8px;">{button_label}</a>
-    </td></tr>
-    <tr><td style="padding:0 24px 16px 24px;color:#94A3B8;font-size:11px;word-break:break-all;">
-      Or paste this link into your browser:<br/><a href="{link}" style="color:{accent};">{link}</a>
-    </td></tr>
-    {f'<tr><td style="padding:12px 24px 22px 24px;color:#64748B;font-size:12px;border-top:1px solid #EEF2F7;">{footer}</td></tr>' if footer else ''}
-  </table>
-</body></html>"""
+def _render_email_template(template: dict, values: dict, link: str, brand_name: str) -> tuple[str, str]:
+    """Render one safely escaped, client-friendly transactional email."""
+    replacements = {key: str(value or "") for key, value in values.items()}
+    replacements["brand_name"] = brand_name or "PCAdmin"
+
+    def sub(text: str, *, html: bool = False) -> str:
+        result = str(text or "")
+        for key, value in replacements.items():
+            result = result.replace("{" + key + "}", escape(value) if html else value)
+        return result.replace("\n", "<br/>") if html else result
+
+    subject = sub(template.get("subject") or "Update from {brand_name}")
+    heading = sub(template.get("heading") or "An update for you", html=True)
+    body = sub(template.get("body") or "", html=True)
+    button_label = sub(template.get("button_label") or "View details", html=True)
+    footer = sub(template.get("footer") or "", html=True)
+    accent = template.get("accent_color") or "#4F46E5"
+    logo = str(template.get("logo_url") or "").strip()
+    safe_link = escape(link or "#", quote=True)
+    brand = escape(brand_name or "PCAdmin")
+    logo_html = (f'<img src="{escape(logo, quote=True)}" alt="{brand}" width="52" style="display:block;width:52px;max-height:52px;object-fit:contain;border-radius:14px;"/>' if logo.startswith("https://") else f'<div style="width:52px;height:52px;line-height:52px;border-radius:14px;background:{accent};color:#FFFFFF;font-size:22px;font-weight:700;text-align:center;">{escape((brand_name or "P")[0].upper())}</div>')
+    html = f"""<!doctype html><html><body style="margin:0;padding:0;background:#F3F4F6;font-family:Arial,sans-serif;color:#172033;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#F3F4F6;padding:32px 12px;"><tr><td align="center">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;"><tr><td align="center" style="padding:8px 0 18px;">{logo_html}<div style="margin-top:10px;font-size:12px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#64748B;">{brand}</div></td></tr>
+<tr><td align="center" style="background:#FFFFFF;border:1px solid #E5E7EB;border-radius:20px;padding:34px 28px;box-shadow:0 8px 24px rgba(15,23,42,.06);"><div style="font-size:25px;line-height:1.25;font-weight:700;color:#172033;">{heading}</div><div style="margin-top:16px;font-size:15px;line-height:1.7;color:#526074;text-align:center;">{body}</div><div style="padding-top:26px;"><a href="{safe_link}" style="display:inline-block;background:{accent};border-radius:999px;padding:13px 24px;color:#FFFFFF;text-decoration:none;font-size:14px;font-weight:700;">{button_label}</a></div></td></tr>
+<tr><td align="center" style="padding:22px 22px 4px;font-size:12px;line-height:1.55;color:#94A3B8;text-align:center;">{footer}</td></tr><tr><td align="center" style="padding:4px 22px 8px;font-size:11px;color:#A3AFBF;text-align:center;">© {datetime.now(timezone.utc).year} {brand}</td></tr></table>
+</td></tr></table></body></html>"""
     return subject, html
+
+
+def _render_verification_email(name: str, email: str, link: str, tpl: dict, brand_name: str = "PCAdmin") -> tuple[str, str]:
+    return _render_email_template(tpl, {"name": name or "there", "email": email or ""}, link, brand_name)
 
 
 async def _create_verification_token(email: str) -> str:
@@ -1497,7 +1472,7 @@ async def _send_verification_email(account: dict) -> dict:
     sent = False
     status = "skipped_no_key"
     if key and master_on:
-        subject, html = _render_verification_email(name, email, link, tpl.get("verification") or {})
+        subject, html = _render_verification_email(name, email, link, tpl.get("verification") or {}, tpl.get("brand_name") or "PCAdmin")
         resend.api_key = key
         try:
             await asyncio.to_thread(resend.Emails.send, {

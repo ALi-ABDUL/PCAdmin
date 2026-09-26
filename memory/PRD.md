@@ -2382,3 +2382,11 @@ Notification Bell deep-links) — zero regressions detected.
 
 ### Security follow-up (identified by product-editor regression)
 - Admin login currently lacks brute-force lockout/throttling, and credentialed CORS is configured with a wildcard origin. Treat auth hardening as the next security-focused task; it is outside this layout-only redesign and requires the auth integration playbook before changes.
+
+
+## Jun 2026 — Transactional Email Templates redesign
+- Rebuilt Store Management → Email Templates around a shared editable **Brand name**, seven template tabs, and a modern live email preview with Desktop/Mobile modes. Templates: Verification, Order Confirmation, Order Shipped, Order Delivered, Password Reset, Welcome Email, and Refund Confirmation.
+- Every template persists independently through `PATCH /api/email-templates/{template_id}` and supports subject, heading, body, button label, accent colour, HTTPS logo URL, and footer text. `PATCH /api/email-templates/brand` saves the common brand name; legacy singletons are deep-migrated without losing Verification content.
+- Updated verification and customer transactional sends to the new centered-card renderer; order confirmation, shipped/delivered, refund/cancellation, and welcome sends now resolve their saved template and brand at send time. Direct customer messages and incoming support notices also use the editable brand shell. Output escapes placeholder values. Password Reset content is persisted and ready for a reset flow; no password-reset endpoint existed to wire in this scope.
+- Added/updated email-template and notification regression coverage, including validation, legacy migration, brand-safe rendering, buyer-registration preconditions, and credential-preserving no-key testing. **LIVE RESEND DELIVERY IS UNVERIFIED / NOT WORKING UNTIL A RESEND API KEY IS ADDED** in Store Management → Email & Notifications, per user instruction. No external email was sent during verification.
+- Verification: testing_agent iteration_43 passed core API/UI checks; final parallel focused suite passed **12 tests**, production frontend build passed, and the live Email Templates UI preview/tabs were smoke tested. The preview ingress briefly timed out after test writes because the hot-reload Mongo client closed; managed backend restart restored API health.

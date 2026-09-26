@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 
 
-__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'OrderLineInput', 'OrderLineFulfillmentUpdate', 'CartLineInput', 'CartUpdate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'CategoryCleanupScheduleUpdate', 'CATEGORY_CLEANUP_SCHEDULE_DEFAULTS', 'PaymentMethodToggles', 'StripeGatewayUpdate', 'PayPalGatewayUpdate', 'PaymentGatewayUpdate', 'PAYMENT_GATEWAY_DEFAULTS', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'PortalProfileUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'SITE_PAGES', 'SITE_PAGE_SLUGS', 'SITE_MENUS_DEFAULTS', 'GetHelpLinkBody', 'FaqItemBody', 'ContactFormConfigBody', 'FooterLinkBody', 'FooterConfigBody', 'SupportContactBody', 'SiteMenusUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate', '_DEFAULT_STORE_DISPLAY', 'StoreDisplaySettingsUpdate', 'VerifyTokenBody', 'ResendVerificationBody', 'VERIFICATION_TOKEN_TTL_HOURS', '_DEFAULT_EMAIL_TEMPLATES', 'VerificationTemplate', 'EmailTemplatesUpdate', '_DEFAULT_STORE_BRANDING', 'StoreBrandingUpdate', 'TAG_SETTINGS_DEFAULTS', 'TagSettingsUpdate']
+__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'OrderLineInput', 'OrderLineFulfillmentUpdate', 'CartLineInput', 'CartUpdate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'CategoryCleanupScheduleUpdate', 'CATEGORY_CLEANUP_SCHEDULE_DEFAULTS', 'PaymentMethodToggles', 'StripeGatewayUpdate', 'PayPalGatewayUpdate', 'PaymentGatewayUpdate', 'PAYMENT_GATEWAY_DEFAULTS', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'PortalProfileUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'SITE_PAGES', 'SITE_PAGE_SLUGS', 'SITE_MENUS_DEFAULTS', 'GetHelpLinkBody', 'FaqItemBody', 'ContactFormConfigBody', 'FooterLinkBody', 'FooterConfigBody', 'SupportContactBody', 'SiteMenusUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate', '_DEFAULT_STORE_DISPLAY', 'StoreDisplaySettingsUpdate', 'VerifyTokenBody', 'ResendVerificationBody', 'VERIFICATION_TOKEN_TTL_HOURS', '_DEFAULT_EMAIL_TEMPLATES', 'VerificationTemplate', 'EmailTemplateUpdate', 'EmailBrandUpdate', 'EmailTemplatesUpdate', 'EMAIL_TEMPLATE_IDS', '_DEFAULT_STORE_BRANDING', 'StoreBrandingUpdate', 'TAG_SETTINGS_DEFAULTS', 'TagSettingsUpdate']
 
 
 CATEGORIES = ["electronics", "home", "tools", "apparel", "other"]
@@ -672,14 +672,15 @@ class ResendVerificationBody(BaseModel):
 
 
 # --- Email templates (customisable transactional emails) --------------------
-# Singleton `email_templates` doc. Currently holds the account-verification
-# template + the PCStore portal base URL used to build the activation link.
-# Admin-edited under Store Management → Email Templates.
+# Singleton `email_templates` doc. Holds the transactional-email brand,
+# PCStore base URL and template definitions. Admin-edited under Store
+# Management → Email Templates.
 
 VERIFICATION_TOKEN_TTL_HOURS = 24
 
 _DEFAULT_EMAIL_TEMPLATES = {
     "_id": "singleton",
+    "brand_name": "PCAdmin",
     # Base URL of the PCStore storefront that hosts the /verify page.
     # Activation links are built as `{portal_base_url}/verify?token=...`.
     # Empty until the admin sets it — when empty the API falls back to
@@ -694,17 +695,58 @@ _DEFAULT_EMAIL_TEMPLATES = {
         "accent_color": "#4F46E5",
         "logo_url": "",
     },
+    "order_confirmation": {
+        "subject": "Order confirmed · #{order_id}", "heading": "Thanks — your order is confirmed",
+        "body": "Hi {name}, we’ve received order #{order_id} for {order_total}.\n\nItems: {items_list}\n\nShipping to: {shipping_address}",
+        "button_label": "View your order", "footer": "We’ll send another update as soon as your order ships.", "accent_color": "#0F766E", "logo_url": "",
+    },
+    "order_shipped": {
+        "subject": "Your order #{order_id} is on its way", "heading": "Your order has shipped",
+        "body": "Hi {name}, order #{order_id} is on its way with {carrier}.\n\nTracking number: {tracking_number}",
+        "button_label": "Track your order", "footer": "Tracking updates can take a little time to appear after dispatch.", "accent_color": "#2563EB", "logo_url": "",
+    },
+    "order_delivered": {
+        "subject": "Your order #{order_id} was delivered", "heading": "Your order has arrived",
+        "body": "Hi {name}, order #{order_id} has been marked as delivered. We hope you love it.",
+        "button_label": "View your order", "footer": "Need help with your order? Reply to this email and our team will assist.", "accent_color": "#059669", "logo_url": "",
+    },
+    "password_reset": {
+        "subject": "Reset your password", "heading": "Reset your password",
+        "body": "Hi {name}, we received a request to reset your password. Use the button below to choose a new one. This link expires in 1 hour.",
+        "button_label": "Reset password", "footer": "If you didn’t request a password reset, you can safely ignore this email.", "accent_color": "#7C3AED", "logo_url": "",
+    },
+    "welcome": {
+        "subject": "Welcome to {brand_name}", "heading": "Welcome, {name}!",
+        "body": "Hi {name}, your account is ready. You can now track orders, save favourites and shop with confidence.",
+        "button_label": "Start shopping", "footer": "We’re glad you’re here.", "accent_color": "#DB2777", "logo_url": "",
+    },
+    "refund_confirmation": {
+        "subject": "Refund confirmed for order #{order_id}", "heading": "Your refund is confirmed",
+        "body": "Hi {name}, a refund of {refund_amount} for order #{order_id} has been confirmed. Your bank may take a few business days to show the funds.",
+        "button_label": "View order details", "footer": "If you have any questions, reply to this email and our team will help.", "accent_color": "#DC2626", "logo_url": "",
+    },
 }
 
 
-class VerificationTemplate(BaseModel):
-    subject: Optional[str] = None
-    heading: Optional[str] = None
-    body: Optional[str] = None
-    button_label: Optional[str] = None
-    footer: Optional[str] = None
-    accent_color: Optional[str] = None
-    logo_url: Optional[str] = None
+EMAIL_TEMPLATE_IDS = ("verification", "order_confirmation", "order_shipped", "order_delivered", "password_reset", "welcome", "refund_confirmation")
+
+
+class EmailTemplateUpdate(BaseModel):
+    subject: Optional[str] = Field(default=None, max_length=240)
+    heading: Optional[str] = Field(default=None, max_length=240)
+    body: Optional[str] = Field(default=None, max_length=5000)
+    button_label: Optional[str] = Field(default=None, max_length=120)
+    footer: Optional[str] = Field(default=None, max_length=2000)
+    accent_color: Optional[str] = Field(default=None, max_length=20)
+    logo_url: Optional[str] = Field(default=None, max_length=2000)
+
+
+class EmailBrandUpdate(BaseModel):
+    brand_name: str = Field(min_length=1, max_length=120)
+
+
+# Retained for the legacy bulk PATCH endpoint.
+VerificationTemplate = EmailTemplateUpdate
 
 
 class EmailTemplatesUpdate(BaseModel):

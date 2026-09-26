@@ -26,7 +26,7 @@ export function AdminLoginScreen() {
     try {
       const { data } = await axios.post(`${API}/admin-accounts/login`, {
         email: email.trim().toLowerCase(), password,
-      });
+      }, { withCredentials: true });
       saveAdminSession(data);
       toast.success(`Welcome back, ${data.name || data.email}`);
     } catch (e) {

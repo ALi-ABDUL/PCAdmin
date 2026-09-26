@@ -48,6 +48,8 @@ from models import (
 )
 from product_tags import TAG_IDS, attach_smart_tags, get_tag_settings
 from countries import COUNTRIES, COUNTRY_CODES
+from admin_sessions import ADMIN_SESSION_TTL, get_current_admin, issue_admin_session
+from managed_email import send_managed_email
 from helpers import (
     _rand_au_address, _slug, _split_name, _compose_name, _product_code_base, _generate_unique_product_code, 
     _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _ensure_order_line_fulfillment_backfilled, _ensure_order_line_fulfillment, _refresh_all_items, _retry_scrape_items, 
@@ -64,7 +66,7 @@ from helpers import (
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update, send_customer_order_line_status_update,
     send_customer_order_cancellation, send_customer_welcome_email, CUSTOMER_EMAIL_KINDS,
     render_branded_message_email,
-    _get_email_templates, _send_verification_email, _consume_verification_token,
+    _get_email_templates, _render_email_template, _send_verification_email, _consume_verification_token,
     _ensure_country_access_seeded, _get_country_access, _client_country, _client_ip,
     _bypass_active_for_ip, _grant_bypass, _purge_expired_bypasses,
     _ensure_disposable_domains_seeded, _get_disposable_domains, _is_disposable_email,
@@ -674,6 +676,9 @@ async def _start_scheduler():
         await db.reviews.create_index([("product_id", 1), ("customer_email", 1)])
         await db.products.create_index("product_code", unique=True, sparse=True)
         await db.product_views.create_index("viewed_at")
+        await db.email_template_test_sends.create_index("sent_at", expireAfterSeconds=3600)
+        await db.admin_login_attempts.create_index("key", unique=True)
+        await db.admin_login_attempts.create_index("last_attempt", expireAfterSeconds=86400)
     except Exception as e:
         logger.warning(f"index setup: {e}")
     asyncio.create_task(_scheduler_loop())
@@ -2470,14 +2475,14 @@ def _validate_admin_payload(email: str | None, role: str | None, password: str |
 
 
 @api_router.get("/admin-accounts")
-async def list_admin_accounts():
+async def list_admin_accounts(current_admin: dict = Depends(get_current_admin)):
     cursor = db.admin_accounts.find({}, {"_id": 0}).sort("is_main", -1)
     accounts = [_admin_row(d) async for d in cursor]
     return {"accounts": accounts}
 
 
 @api_router.post("/admin-accounts")
-async def create_admin_account(body: AdminAccountCreate):
+async def create_admin_account(body: AdminAccountCreate, current_admin: dict = Depends(get_current_admin)):
     from helpers import _hash_password as hash_pw
     _validate_admin_payload(body.email, body.role, body.password, require_password=True)
     email = body.email.strip().lower()
@@ -2495,7 +2500,7 @@ async def create_admin_account(body: AdminAccountCreate):
 
 
 @api_router.patch("/admin-accounts/{aid}")
-async def update_admin_account(aid: str, body: AdminAccountUpdate):
+async def update_admin_account(aid: str, body: AdminAccountUpdate, current_admin: dict = Depends(get_current_admin)):
     from helpers import _hash_password as hash_pw
     existing = await db.admin_accounts.find_one({"id": aid}, {"_id": 0})
     if not existing:
@@ -2523,7 +2528,7 @@ async def update_admin_account(aid: str, body: AdminAccountUpdate):
 
 
 @api_router.delete("/admin-accounts/{aid}")
-async def delete_admin_account(aid: str):
+async def delete_admin_account(aid: str, current_admin: dict = Depends(get_current_admin)):
     existing = await db.admin_accounts.find_one({"id": aid}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -2534,7 +2539,7 @@ async def delete_admin_account(aid: str):
 
 
 @api_router.post("/admin-accounts/login")
-async def login_admin_account(body: dict = Body(...)):
+async def login_admin_account(response: Response, request: Request, body: dict = Body(...)):
     """Verify email + password against the admin_accounts collection.
 
     Returns the account row (no hash) on success so the frontend can drop it
@@ -2547,11 +2552,38 @@ async def login_admin_account(body: dict = Body(...)):
     password = body.get("password") or ""
     if not email or not password:
         raise HTTPException(status_code=400, detail="Email and password are required")
+    now = datetime.now(timezone.utc)
+    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    client_ip = forwarded or (request.client.host if request.client else "unknown")
+    attempt_key = f"{client_ip}:{email}"
+    attempt = await db.admin_login_attempts.find_one({"key": attempt_key}, {"_id": 0})
+    if attempt and attempt.get("locked_until"):
+        try:
+            locked_until = datetime.fromisoformat(str(attempt["locked_until"]).replace("Z", "+00:00"))
+            if locked_until.tzinfo is None:
+                locked_until = locked_until.replace(tzinfo=timezone.utc)
+            if locked_until > now:
+                raise HTTPException(status_code=429, detail="Too many sign-in attempts. Please try again in 15 minutes.")
+        except ValueError:
+            pass
     doc = await db.admin_accounts.find_one({"email": email}, {"_id": 0})
     if not doc or not _verify_password(password, doc.get("password_hash", "")):
         # Same message either way so we don't leak whether the email exists.
+        failures = int((attempt or {}).get("failures") or 0) + 1
+        fields = {"key": attempt_key, "email": email, "last_attempt": now.isoformat(), "failures": failures}
+        if failures >= 5:
+            fields["locked_until"] = (now + timedelta(minutes=15)).isoformat()
+        await db.admin_login_attempts.update_one({"key": attempt_key}, {"$set": fields}, upsert=True)
+        if failures >= 5:
+            raise HTTPException(status_code=429, detail="Too many sign-in attempts. Please try again in 15 minutes.")
         raise HTTPException(status_code=401, detail="Incorrect email or password")
-    return _admin_row(doc)
+    await db.admin_login_attempts.delete_one({"key": attempt_key})
+    account = _admin_row(doc)
+    response.set_cookie(
+        key="admin_access_token", value=issue_admin_session(account), httponly=True,
+        secure=True, samesite="none", max_age=int(ADMIN_SESSION_TTL.total_seconds()), path="/",
+    )
+    return account
 
 
 # ---------------------------------------------------------------------------
@@ -5060,6 +5092,43 @@ async def patch_email_template_brand(body: EmailBrandUpdate):
     return await _get_email_templates()
 
 
+@api_router.post("/email-templates/{template_id}/send-test")
+async def send_template_test_email(template_id: str, current_admin: dict = Depends(get_current_admin)):
+    """Send server-rendered sample template data only to the signed-in admin."""
+    if template_id not in EMAIL_TEMPLATE_IDS:
+        raise HTTPException(status_code=404, detail="Email template not found")
+    now = datetime.now(timezone.utc)
+    last = await db.email_template_test_sends.find_one(
+        {"admin_id": current_admin["id"]}, {"_id": 0}, sort=[("sent_at", -1)],
+    )
+    if last:
+        try:
+            previous = datetime.fromisoformat(str(last["sent_at"]).replace("Z", "+00:00"))
+            if previous.tzinfo is None:
+                previous = previous.replace(tzinfo=timezone.utc)
+            if (now - previous).total_seconds() < 60:
+                raise HTTPException(status_code=429, detail="Please wait one minute before sending another test email")
+        except (TypeError, ValueError):
+            pass
+    templates = await _get_email_templates()
+    samples = {
+        "name": "Jordan", "email": "jordan@example.com", "order_id": "PC-10482",
+        "order_total": "$124.90", "items_list": "Everyday essential × 2",
+        "shipping_address": "23 Harbour Street, Sydney NSW 2000",
+        "tracking_number": "AUS123456789", "carrier": "Australia Post",
+        "reset_link": "your password reset link", "refund_amount": "$124.90",
+    }
+    subject, html = _render_email_template(
+        templates[template_id], samples, "#", templates.get("brand_name") or "PCAdmin",
+    )
+    delivery_id = await send_managed_email(to=current_admin["email"], subject=subject, html=html)
+    await db.email_template_test_sends.insert_one({
+        "id": str(uuid.uuid4()), "admin_id": current_admin["id"], "template_id": template_id,
+        "sent_at": now.isoformat(), "delivery_id": delivery_id,
+    })
+    return {"sent": True, "message": f"Test email sent to {current_admin['email']}", "template_id": template_id}
+
+
 @api_router.patch("/email-templates/{template_id}")
 async def patch_email_template(template_id: str, body: EmailTemplateUpdate):
     if template_id not in EMAIL_TEMPLATE_IDS:
@@ -5193,7 +5262,7 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=[origin.strip() for origin in os.environ["CORS_ORIGINS"].split(",") if origin.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )

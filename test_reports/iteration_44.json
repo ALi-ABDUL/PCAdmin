@@ -1,0 +1,68 @@
+{
+  "summary": "Tested the new protected email-template test-send flow across backend and UI. Core requested behaviors passed: admin login sets httpOnly cookie, anonymous send-test returns 401, invalid template IDs are rejected, server-side recipient enforcement works, per-admin 60s rate-limit returns 429, one real outbound send to delivered@resend.dev succeeded, and temporary admin/send logs were cleaned up.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/admin-accounts/login",
+        "issue": "No brute-force lockout observed after 6 consecutive failed login attempts (all returned 401; no 429/lock response).",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "/api/admin-accounts, /api/admin-accounts/{aid}",
+        "issue": "Admin account create/delete endpoints are callable without authenticated admin session (anonymous create and delete returned 200).",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "backend startup seed helper (_ensure_main_admin_seeded)",
+        "issue": "Playbook expectation mismatch: helper exits when any admin exists; it does not reconcile/update existing seeded admin password/hash changes."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Email Templates send-test toast feedback",
+        "issue": "Send-test button visibility/disable logic was verified, but runtime success/error toast firing on click was not re-executed in UI to avoid additional outbound email beyond the single permitted delivery test.",
+        "affected_selectors": [
+          "[data-testid='email-template-send-test-button']"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_email_template_send_test_security.py",
+    "/app/backend/tests/test_email_templates_v2.py",
+    "/app/backend/tests/test_email_templates_regression_extra.py",
+    "/app/test_reports/pytest/pytest_iteration44_email_templates_send_test.xml"
+  ],
+  "action_items": [
+    "Implement server-side brute-force lockout/rate protection for admin login (playbook expects lock after repeated failures).",
+    "Protect admin account management endpoints with authenticated admin authorization checks.",
+    "Replace wildcard CORS_ORIGINS with explicit trusted origins for credentialed cookie flows.",
+    "If playbook compliance is required, update seed-admin behavior to reconcile existing account password hash changes safely."
+  ],
+  "critical_code_review_comments": [
+    "CORS is configured with allow_credentials=true while backend/.env currently sets CORS_ORIGINS='*', which is too permissive for credentialed admin-cookie auth.",
+    "send-test route correctly blocks caller-supplied recipient/subject/html by rendering server-side templates with fixed sample data and recipient from current_admin only.",
+    "Per-admin one-minute send throttle is implemented via email_template_test_sends latest sent_at check and verified via API.",
+    "Anonymous access to admin account CRUD is a severe authz gap independent of the new send-test route."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_email_template_send_test_security.py",
+    "/app/test_reports/iteration_44.json"
+  ],
+  "success_rate": {
+    "backend": "88%",
+    "frontend": "90%"
+  },
+  "test_credentials": "Used credentials from /app/memory/test_credentials.md (qa admin account).",
+  "seed_data_creation": "Created temporary admin delivered@resend.dev for one real send-test delivery; then deleted that account and removed related email_template_test_sends records. Also removed temporary anon-check admin artifacts created during authz probing.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Primary story flow is passing. Re-test after fixing admin auth hardening (lockout + admin-account endpoint authorization). For UI, send button/tab behavior is verified; if allowed, run one controlled toast check with delivered@resend.dev policy constraints.",
+  "rca of the issue": "RCA-1: admin login currently has no persisted failed-attempt counter/lock window logic, so repeated invalid credentials continue returning 401. RCA-2: admin account CRUD endpoints lack Depends(get_current_admin) or equivalent authorization middleware, allowing anonymous mutation. RCA-3: CORS wildcard origin in env broadens credentialed cookie acceptance across arbitrary origins."
+}

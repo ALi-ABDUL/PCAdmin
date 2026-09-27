@@ -200,8 +200,9 @@ class TestSiteMenusSupport:
     def test_contact_route_is_explicit_when_disabled_or_key_missing(self, site_menus_snapshot):
         disabled = requests.patch(f"{API}/site-menus", json={"contact_form": {"enabled": False}}, timeout=20)
         assert disabled.status_code == 200, disabled.text
-        payload = {"name": "Ada", "email": "ada@example.com", "message": "I need help."}
-        response = requests.post(f"{API}/support/contact", json=payload, timeout=20)
+        payload = {"name": "Ada", "email": "ada@example.com", "subject": "Delivery help", "message": "I need help."}
+        headers = {"X-PCStore-Secret": os.environ["PCADMIN_INTERNAL_SECRET"]}
+        response = requests.post(f"{API}/support/contact", json=payload, headers=headers, timeout=20)
         assert response.status_code == 403
         assert "unavailable" in response.json()["detail"].lower()
 
@@ -212,8 +213,5 @@ class TestSiteMenusSupport:
             timeout=20,
         )
         assert restored.status_code == 200
-        settings = requests.get(f"{API}/push/settings", timeout=20).json()
-        if not settings["resend_api_key_set"]:
-            response = requests.post(f"{API}/support/contact", json=payload, timeout=20)
-            assert response.status_code == 503
-            assert "resend api key is not configured" in response.json()["detail"].lower()
+        unauthenticated = requests.post(f"{API}/support/contact", json=payload, timeout=20)
+        assert unauthenticated.status_code == 401

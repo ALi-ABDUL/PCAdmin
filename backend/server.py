@@ -50,7 +50,7 @@ from models import (
 from product_tags import TAG_IDS, attach_smart_tags, get_tag_settings
 from countries import COUNTRIES, COUNTRY_CODES
 from admin_sessions import ADMIN_SESSION_TTL, get_current_admin, issue_admin_session
-from managed_email import send_managed_email
+from managed_email import EMAIL_FROM_NAME, send_managed_email
 from helpers import (
     _rand_au_address, _slug, _split_name, _compose_name, _product_code_base, _generate_unique_product_code, 
     _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _ensure_order_line_fulfillment_backfilled, _ensure_order_line_fulfillment, _refresh_all_items, _retry_scrape_items, 
@@ -2419,37 +2419,50 @@ async def update_site_menus(body: SiteMenusUpdate):
 
 
 @api_router.post("/support/contact")
-async def submit_support_contact(body: SupportContactBody):
-    """Deliver a public support-form message to the store's configured inbox."""
+async def submit_support_contact(
+    body: SupportContactBody,
+    x_pcstore_secret: Optional[str] = Header(default=None, alias="X-PCStore-Secret"),
+):
+    """Trusted PCStore support contact ingestion and admin notification."""
+    expected = os.environ["PCADMIN_INTERNAL_SECRET"]
+    if not x_pcstore_secret or not secrets.compare_digest(x_pcstore_secret, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
     email = body.email.strip().lower()
     if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
         raise HTTPException(status_code=422, detail="Enter a valid email address")
     menus = await _get_site_menus()
     if not menus["contact_form"].get("enabled", True):
         raise HTTPException(status_code=403, detail="The support contact form is currently unavailable")
-    settings = await _get_push_settings()
-    key = settings.get("resend_api_key") or ""
-    recipient = settings.get("resend_to_email") or ""
-    if not key:
-        raise HTTPException(status_code=503, detail="Support email is unavailable: the Resend API key is not configured in Store Management › Email & Notifications.")
-    if not recipient:
-        raise HTTPException(status_code=503, detail="Support email is unavailable: no support recipient is configured in Store Management › Email & Notifications.")
+    now = datetime.now(timezone.utc).isoformat()
+    support_message = {
+        "id": str(uuid.uuid4()), "name": body.name.strip(), "email": email,
+        "subject": body.subject.strip(), "message": body.message.strip(),
+        "customer_id": body.customer_id.strip() if body.customer_id else None,
+        "created_at": now, "status": "unread",
+    }
+    await db.support_messages.insert_one(dict(support_message))
 
-    sender = settings.get("resend_from_email") or "onboarding@resend.dev"
-    html = await render_branded_message_email(
-        "New support request",
-        f"A customer has submitted the storefront contact form.\n\nFrom: {body.name.strip()} ({email})\n\nMessage: {body.message.strip()}",
+    notification = Notification(
+        type="support_message",
+        title=f"New support message from {support_message['name']}",
+        body=support_message["subject"],
+        customer_id=support_message["customer_id"],
+        data={"support_message_id": support_message["id"], "name": support_message["name"], "subject": support_message["subject"]},
+        at=now,
     )
-    resend.api_key = key
+    await db.notifications.insert_one(notification.model_dump())
+
+    safe_name, safe_email = escape(support_message["name"]), escape(email)
+    safe_subject, safe_message = escape(support_message["subject"]), escape(support_message["message"]).replace("\n", "<br/>")
+    html = f"""<!doctype html><html><body style="margin:0;padding:24px;background:#F3F4F6;font-family:Arial,sans-serif;color:#172033;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#FFFFFF;border:1px solid #E5E7EB;border-radius:16px;overflow:hidden;"><tr><td style="padding:24px;background:#172033;color:#FFFFFF;"><div style="font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;">{escape(EMAIL_FROM_NAME)}</div><div style="font-size:21px;font-weight:700;margin-top:8px;">New support message</div></td></tr><tr><td style="padding:24px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:14px;line-height:1.6;"><tr><td style="width:110px;color:#64748B;padding:5px 0;">Customer</td><td style="color:#172033;padding:5px 0;">{safe_name}</td></tr><tr><td style="color:#64748B;padding:5px 0;">Email</td><td style="color:#172033;padding:5px 0;">{safe_email}</td></tr><tr><td style="color:#64748B;padding:5px 0;">Subject</td><td style="color:#172033;padding:5px 0;">{safe_subject}</td></tr></table><div style="margin-top:20px;padding-top:18px;border-top:1px solid #E5E7EB;color:#334155;font-size:14px;line-height:1.65;">{safe_message}</div></td></tr><tr><td style="padding:16px 24px;color:#94A3B8;font-size:11px;border-top:1px solid #E5E7EB;">Sent by {escape(EMAIL_FROM_NAME)}</td></tr></table></td></tr></table></body></html>"""
+    email_notified = True
     try:
-        await asyncio.to_thread(resend.Emails.send, {
-            "from": sender, "to": [recipient], "reply_to": email,
-            "subject": f"Support request from {body.name.strip()[:100]}", "html": html,
-        })
-    except Exception:
+        await send_managed_email(to=os.environ["SUPPORT_NOTIFICATION_EMAIL"], subject=f"New {EMAIL_FROM_NAME} support message", html=html)
+    except HTTPException:
         logger.exception("Support contact email delivery failed")
-        raise HTTPException(status_code=502, detail="Support message could not be delivered. Please try again shortly.")
-    return {"sent": True, "message": "Your support request has been sent."}
+        email_notified = False
+    return {"received": True, "id": support_message["id"], "email_notified": email_notified}
 
 
 # ---------------------------------------------------------------------------

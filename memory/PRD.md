@@ -2419,3 +2419,10 @@ Notification Bell deep-links) — zero regressions detected.
 - Replaced the plain description textarea with a React 19-compatible Tiptap editor: bold, italic, headings, bullet/ordered lists, and safe links. The editor saves HTML in the existing `description` product field and reloads formatted content.
 - Added backend HTML sanitisation with Bleach on product description updates. It preserves the supported formatting/link tags and strips scripts, images, inline handlers, unsafe protocols, and other unsupported markup before storage.
 - Added Tiptap and Bleach dependencies, editor styling, and persistence/sanitisation tests. Testing agent iteration_47 passed **10/10** targeted backend checks and the authenticated browser flow; all temporary products were deleted. Production build passes with four pre-existing ProductDetail hook warnings.
+
+
+## Jun 2026 — Trusted PCStore support contact ingestion
+- Reworked `POST /api/support/contact` as a server-to-server route protected by `X-PCStore-Secret` / `PCADMIN_INTERNAL_SECRET`. Missing or invalid headers return 401 before any database write.
+- Trusted requests persist `support_messages` records with name, email, subject, message, customer ID, timestamp, and `unread` status. Each also inserts an unread `support_message` bell notification with the customer name and subject.
+- Support email uses a fixed server-rendered, escaped template and the user-supplied server-side owner recipient; PCStore cannot set recipient, provider key, outbound subject, or HTML. Email delivery failure does not lose the saved message or bell alert.
+- Updated PCSTORE_INTEGRATION.md with server-only request guidance and test credential documentation. Testing agent iteration_48 passed **24/24** targeted tests. **MOCKED IN TESTS:** outbound owner email was mocked to avoid sending a real inbox message; persistence and notifications used real MongoDB and were cleaned up.

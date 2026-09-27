@@ -407,7 +407,33 @@ export async function apiPost(path, body, token) {
 
 ---
 
-## 9. Things NOT to call from PCStore
+## 9. Server-side support contact ingestion
+
+Submit the storefront contact form only from the **PCStore server**, never
+browser code. The request needs the same `PCADMIN_INTERNAL_SECRET` configured
+on both servers and creates a PCAdmin bell notification plus an owner email.
+
+```js
+// PCStore server route only — do not ship this secret to the browser.
+await fetch(`${process.env.PCADMIN_API_URL}/api/support/contact`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "X-PCStore-Secret": process.env.PCADMIN_INTERNAL_SECRET,
+  },
+  body: JSON.stringify({
+    name, email, subject, message,
+    customer_id: customerId || null,
+  }),
+});
+```
+
+Successful responses return `{ received: true, id, email_notified }`. A missing
+or invalid shared-secret header returns `401` and creates no message.
+
+---
+
+## 10. Things NOT to call from PCStore
 
 These are admin-only routes protected by the Country Access middleware
 and (in most cases) the RBAC session. Calling them from a public
@@ -426,11 +452,12 @@ PCAdmin owner to add it — don't reach for admin routes.
 
 ---
 
-## 10. Environment variables cheat-sheet
+## 11. Environment variables cheat-sheet
 
 | Var                     | Set in                | Purpose                                              |
 | ----------------------- | --------------------- | ---------------------------------------------------- |
 | `REACT_APP_BACKEND_URL` | PCStore `.env`        | Base URL of the PCAdmin backend                      |
+| `PCADMIN_INTERNAL_SECRET` | PCStore **server** env | Shared secret for trusted PCAdmin server-to-server calls |
 | (nothing else)          | —                     | PCStore doesn't need the DB URL, Mongo creds, or JWT secret. Never share those with a frontend. |
 
 ---

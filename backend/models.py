@@ -1112,7 +1112,9 @@ class FooterConfigBody(BaseModel):
 class SupportContactBody(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     email: str = Field(min_length=3, max_length=254)
+    subject: str = Field(min_length=1, max_length=240)
     message: str = Field(min_length=1, max_length=5000)
+    customer_id: Optional[str] = Field(default=None, max_length=120)
 
 
 class SiteMenusUpdate(BaseModel):

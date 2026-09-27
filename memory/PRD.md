@@ -2408,3 +2408,7 @@ Notification Bell deep-links) — zero regressions detected.
 ### Follow-up fix — Google Sign-In card loading state
 - Fixed the Integrations card staying on “Loading Google Sign-In…” when an older dashboard browser session did not yet have the new secure admin cookie. The card now renders its enabled/default form immediately, fetches public Client ID/enable values from `GET /api/site-settings`, and only enriches the masked secret state when the protected admin request succeeds.
 - Verified by deliberately removing the admin cookie while preserving the existing dashboard session: the complete Google Sign-In toggle, Client ID, and masked-secret fields rendered without a loading state. Google/admin regression suite passed **19 tests** and the production frontend build passed (four pre-existing ProductDetail hook warnings remain).
+
+### Follow-up — PCStore Google secret proxy
+- Added server-to-server-only `GET /api/site-settings/secrets`. It returns exact plain JSON `{ google_client_secret }` only when `X-PCStore-Secret` constant-time matches `PCADMIN_INTERNAL_SECRET` from backend environment. Missing/wrong headers receive 401; successful responses are `Cache-Control: no-store`.
+- Public `GET /api/site-settings` remains restricted to `google_signin_enabled` and `google_client_id`; no frontend code references either site or payment secret endpoint. Testing agent iteration_46 passed **9/9** targeted checks, including authorization, no-cache policy, state restore, and payment-secret regression coverage.

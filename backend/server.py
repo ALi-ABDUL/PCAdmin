@@ -4444,6 +4444,20 @@ async def get_site_settings():
     }
 
 
+@api_router.get("/site-settings/secrets")
+async def get_site_settings_secrets(
+    response: Response,
+    x_pcstore_secret: Optional[str] = Header(default=None, alias="X-PCStore-Secret"),
+):
+    """Google OAuth secret for the trusted PCStore server only."""
+    expected = os.environ["PCADMIN_INTERNAL_SECRET"]
+    if not x_pcstore_secret or not secrets.compare_digest(x_pcstore_secret, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    response.headers["Cache-Control"] = "no-store"
+    settings = await _get_google_signin_settings()
+    return {"google_client_secret": settings.get("google_client_secret") or ""}
+
+
 @api_router.get("/site-settings/google-signin")
 async def get_google_signin_settings(current_admin: dict = Depends(get_current_admin)):
     return _google_signin_admin_response(await _get_google_signin_settings())

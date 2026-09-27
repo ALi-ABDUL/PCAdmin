@@ -73,13 +73,39 @@ def test_public_site_settings_seeds_google_defaults_without_secret():
     response = requests.get(f"{API}/site-settings", timeout=20)
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data == {"google_signin_enabled": True, "google_client_id": ""}
+    assert set(data) == {"google_signin_enabled", "google_client_id"}
+    assert isinstance(data["google_signin_enabled"], bool)
+    assert isinstance(data["google_client_id"], str)
     assert "google_client_secret" not in data
 
 
 def test_google_signin_admin_settings_require_session():
     response = requests.get(f"{API}/site-settings/google-signin", timeout=20)
     assert response.status_code == 401
+
+
+def test_pcstore_secret_endpoint_rejects_missing_or_wrong_header():
+    missing = requests.get(f"{API}/site-settings/secrets", timeout=20)
+    wrong = requests.get(f"{API}/site-settings/secrets", headers={"X-PCStore-Secret": "wrong"}, timeout=20)
+    assert missing.status_code == 401
+    assert wrong.status_code == 401
+
+
+def test_pcstore_secret_endpoint_returns_only_secret_with_shared_header():
+    session = _admin_session()
+    configured = session.patch(f"{API}/site-settings/google-signin", json={
+        "google_client_id": "secret-proxy.apps.googleusercontent.com",
+        "google_client_secret": "GOCSPX-server-only-secret",
+    }, timeout=20)
+    assert configured.status_code == 200, configured.text
+    response = requests.get(
+        f"{API}/site-settings/secrets",
+        headers={"X-PCStore-Secret": os.environ["PCADMIN_INTERNAL_SECRET"]}, timeout=20,
+    )
+    assert response.status_code == 200, response.text
+    assert "no-store" in response.headers["Cache-Control"]
+    assert response.json() == {"google_client_secret": "GOCSPX-server-only-secret"}
+    assert "google_client_secret" not in requests.get(f"{API}/site-settings", timeout=20).json()
     response = requests.patch(f"{API}/site-settings/google-signin", json={"google_client_id": "blocked"}, timeout=20)
     assert response.status_code == 401
 

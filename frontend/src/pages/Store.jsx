@@ -1036,24 +1036,37 @@ export function ResendIntegrationCard() {
 }
 
 
+const GOOGLE_SIGNIN_FORM_DEFAULTS = { google_signin_enabled: true, google_client_id: "", google_client_secret_masked: "", google_client_secret_set: false };
+
 export function GoogleSignInIntegrationCard() {
-  const [settings, setSettings] = useState(null);
-  const [draft, setDraft] = useState(null);
-  const [open, setOpen] = useState(false);
+  const [settings, setSettings] = useState(GOOGLE_SIGNIN_FORM_DEFAULTS);
+  const [draft, setDraft] = useState({ google_signin_enabled: true, google_client_id: "", google_client_secret: "" });
+  const [open, setOpen] = useState(true);
   const [showSecret, setShowSecret] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
+    const apply = (data) => {
+      const next = { ...GOOGLE_SIGNIN_FORM_DEFAULTS, ...data };
+      setSettings(next);
+      setDraft({ google_signin_enabled: !!next.google_signin_enabled, google_client_id: next.google_client_id || "", google_client_secret: "" });
+      if (!next.google_client_id) setOpen(true);
+    };
+    try {
+      const { data } = await axios.get(`${API}/site-settings`);
+      apply(data);
+    } catch { apply(GOOGLE_SIGNIN_FORM_DEFAULTS); }
     try {
       const { data } = await axios.get(`${API}/site-settings/google-signin`, { withCredentials: true });
-      setSettings(data);
-      setDraft({ google_signin_enabled: !!data.google_signin_enabled, google_client_id: data.google_client_id || "", google_client_secret: "" });
-      if (!data.google_client_id) setOpen(true);
-    } catch (e) { toast.error("Could not load Google Sign-In", { description: e?.response?.data?.detail || e.message }); }
+      apply(data);
+    } catch (e) {
+      // A dashboard session created before secure admin cookies existed still
+      // gets the public values and a usable empty-secret configuration form.
+      if (e?.response?.status && e.response.status !== 401) toast.error("Could not load saved Google Sign-In secret", { description: e?.response?.data?.detail || e.message });
+    }
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  if (!settings || !draft) return <div className="card p-5 text-slate-500 text-sm" data-testid="google-signin-loading">Loading Google Sign-In…</div>;
   const connected = !!settings.google_client_id && !!settings.google_signin_enabled;
   const dirty = draft.google_signin_enabled !== !!settings.google_signin_enabled || draft.google_client_id !== (settings.google_client_id || "") || !!draft.google_client_secret;
   const save = async () => {

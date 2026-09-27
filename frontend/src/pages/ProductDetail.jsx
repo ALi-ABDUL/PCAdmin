@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Calendar, CheckCircle2, ChevronDown, ChevronLeft, CircleDollarSign, Eye, ExternalLink, FileText, Home, Image, Layers3, Layout, Loader2, Package, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
+import { BadgeCheck, Ban, Bold, Calendar, CheckCircle2, ChevronDown, ChevronLeft, CircleDollarSign, Eye, ExternalLink, FileText, Heading2, Home, Image, Italic, Layers3, Layout, Link2, List, ListOrdered, Loader2, Package, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import Link from "@tiptap/extension-link";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
@@ -254,6 +257,8 @@ export function ProductDetailPage({ productId, onBack }) {
         </div>
       </ProductEditSection>
 
+      <ProductEditSection id="content" title="Description & Specs" icon={FileText} open alwaysOpen summary={f.description ? "Content ready" : "Add product detail"}><div className="grid gap-6"><Field label="Description"><RichTextDescription value={f.description} onChange={(html) => setField("description", html)}/></Field><ProductSpecsCard product={p} onUpdated={(fresh) => setP(fresh)} embedded/></div></ProductEditSection>
+
       <ProductEditSection id="images" title="Images" icon={Image} open={openSections.images} onToggle={() => toggleSection("images")} summary={`${(p.images || []).length} image${(p.images || []).length === 1 ? "" : "s"}`}>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="flex items-center gap-3">
@@ -334,7 +339,6 @@ export function ProductDetailPage({ productId, onBack }) {
 
       <ProductEditSection id="variants" title="Variants" icon={Layers3} open={openSections.variants} onToggle={() => toggleSection("variants")} summary={`${(p.variants || []).length} option${(p.variants || []).length === 1 ? "" : "s"}`}><ProductVariantsCard product={p} onUpdated={(fresh) => setP(fresh)} embedded/></ProductEditSection>
       <ProductEditSection id="shipping" title="Shipping" icon={Truck} open={openSections.shipping} onToggle={() => toggleSection("shipping")} summary={f.postage_preset_id ? "Preset selected" : "Delivery settings"}><div className="grid gap-5"><PostagePresetField presets={presets} product={p} f={f} setF={setF} setDirty={setDirty}/><DeliveryWindowField f={f} setF={setF} setDirty={setDirty} defaults={deliveryDefaults}/></div></ProductEditSection>
-      <ProductEditSection id="content" title="Description & Specs" icon={FileText} open={openSections.content} onToggle={() => toggleSection("content")} summary={f.description ? "Content ready" : "Add product detail"}><div className="grid gap-6"><Field label="Description"><textarea className="input w-full px-3 py-2 min-h-[160px] leading-relaxed" value={f.description} onChange={(e) => setField("description", e.target.value)} data-testid="product-description-input"/></Field><ProductSpecsCard product={p} onUpdated={(fresh) => setP(fresh)} embedded/></div></ProductEditSection>
       <ProductEditSection id="seo" title="SEO" icon={Search} open={openSections.seo} onToggle={() => toggleSection("seo")} summary={f.url_slug ? `/${f.url_slug}` : "Search visibility"}><SeoCard f={f} setField={setField} embedded/></ProductEditSection>
       <ProductEditSection id="promotions" title="Promotions" icon={Tag} open={openSections.promotions} onToggle={() => toggleSection("promotions")} summary={p.countdown_enabled || f.deal_enabled ? "Promotion active" : "Optional offers"}><div className="grid gap-6"><CountdownSaleCard product={p} onUpdated={(fresh) => setP(fresh)} embedded/><DealTagCard f={f} setField={setField} embedded/></div></ProductEditSection>
 
@@ -407,26 +411,45 @@ export function ProductDetailPage({ productId, onBack }) {
 }
 
 
-function ProductEditSection({ id, title, icon: Icon, open, onToggle, summary, children }) {
+function ProductEditSection({ id, title, icon: Icon, open, onToggle, summary, children, alwaysOpen = false }) {
+  const header = <><span className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-600 grid place-items-center shrink-0"><Icon size={17}/></span><span className="min-w-0 flex-1"><span className="block font-display font-bold text-sm">{title}</span>{summary && <span className="block text-xs text-slate-500 truncate mt-0.5">{summary}</span>}</span>{!alwaysOpen && <ChevronDown size={18} className={`text-slate-400 shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}/>}</>;
   return (
     <section className="card overflow-hidden" data-testid={`product-section-${id}`}>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="w-full min-h-14 px-4 sm:px-5 py-3 flex items-center gap-3 text-left hover:bg-slate-50 transition-colors"
-        data-testid={`product-section-toggle-${id}`}
-      >
-        <span className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-600 grid place-items-center shrink-0"><Icon size={17}/></span>
-        <span className="min-w-0 flex-1">
-          <span className="block font-display font-bold text-sm">{title}</span>
-          {summary && <span className="block text-xs text-slate-500 truncate mt-0.5">{summary}</span>}
-        </span>
-        <ChevronDown size={18} className={`text-slate-400 shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}/>
-      </button>
-      {open && <div className="border-t hairline p-4 sm:p-5 animate-in fade-in slide-in-from-top-1 duration-200" data-testid={`product-section-content-${id}`}>{children}</div>}
+      {alwaysOpen ? <div className="w-full min-h-14 px-4 sm:px-5 py-3 flex items-center gap-3 text-left" data-testid={`product-section-header-${id}`}>{header}</div> : <button type="button" onClick={onToggle} aria-expanded={open} className="w-full min-h-14 px-4 sm:px-5 py-3 flex items-center gap-3 text-left hover:bg-slate-50 transition-colors" data-testid={`product-section-toggle-${id}`}>{header}</button>}
+      {(alwaysOpen || open) && <div className="border-t hairline p-4 sm:p-5 animate-in fade-in slide-in-from-top-1 duration-200" data-testid={`product-section-content-${id}`}>{children}</div>}
     </section>
   );
+}
+
+
+function RichTextDescription({ value, onChange }) {
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [StarterKit.configure({ heading: { levels: [2, 3, 4] } }), Link.configure({ openOnClick: false, autolink: false, HTMLAttributes: { rel: "noopener noreferrer nofollow", target: "_blank" } })],
+    content: value || "",
+    editorProps: { attributes: { class: "min-h-44 px-4 py-3 focus:outline-none text-sm leading-7 text-slate-700" } },
+    onUpdate: ({ editor: activeEditor }) => onChange(activeEditor.getHTML()),
+  });
+  useEffect(() => {
+    if (editor && value !== editor.getHTML()) editor.commands.setContent(value || "", false);
+  }, [editor, value]);
+  if (!editor) return <div className="min-h-52 rounded-lg border hairline bg-slate-50 animate-pulse" data-testid="product-description-rich-editor-loading"/>;
+  const command = (run) => () => { run(); editor.chain().focus().run(); };
+  const setLink = () => {
+    const href = window.prompt("Enter the link URL", editor.getAttributes("link").href || "");
+    if (href === null) return;
+    if (!href.trim()) editor.chain().focus().unsetLink().run();
+    else editor.chain().focus().extendMarkRange("link").setLink({ href: href.trim() }).run();
+  };
+  const tools = [
+    ["bold", Bold, () => editor.chain().focus().toggleBold().run(), editor.isActive("bold")],
+    ["italic", Italic, () => editor.chain().focus().toggleItalic().run(), editor.isActive("italic")],
+    ["heading", Heading2, () => editor.chain().focus().toggleHeading({ level: 2 }).run(), editor.isActive("heading", { level: 2 })],
+    ["bullet", List, () => editor.chain().focus().toggleBulletList().run(), editor.isActive("bulletList")],
+    ["ordered", ListOrdered, () => editor.chain().focus().toggleOrderedList().run(), editor.isActive("orderedList")],
+    ["link", Link2, setLink, editor.isActive("link")],
+  ];
+  return <div className="product-rich-description rounded-lg border hairline overflow-hidden bg-white" data-testid="product-description-rich-editor"><div className="flex items-center gap-1 p-2 bg-slate-50 border-b hairline flex-wrap" data-testid="product-description-toolbar">{tools.map(([name, Icon, run, active]) => <button key={name} type="button" onClick={command(run)} title={name === "heading" ? "Heading" : name} className={`w-9 h-9 grid place-items-center rounded-md transition-colors ${active ? "bg-indigo-100 text-indigo-700" : "text-slate-600 hover:bg-white hover:text-indigo-600"}`} data-testid={`product-description-toolbar-${name}`}><Icon size={16}/></button>)}</div><EditorContent editor={editor} data-testid="product-description-input"/></div>;
 }
 
 

@@ -2412,3 +2412,10 @@ Notification Bell deep-links) — zero regressions detected.
 ### Follow-up — PCStore Google secret proxy
 - Added server-to-server-only `GET /api/site-settings/secrets`. It returns exact plain JSON `{ google_client_secret }` only when `X-PCStore-Secret` constant-time matches `PCADMIN_INTERNAL_SECRET` from backend environment. Missing/wrong headers receive 401; successful responses are `Cache-Control: no-store`.
 - Public `GET /api/site-settings` remains restricted to `google_signin_enabled` and `google_client_id`; no frontend code references either site or payment secret endpoint. Testing agent iteration_46 passed **9/9** targeted checks, including authorization, no-cache policy, state restore, and payment-secret regression coverage.
+
+
+## Jun 2026 — Product rich-description editor
+- Moved **Description & Specs** directly below Basic Info and above Images on Product Edit. It is now always expanded with a non-interactive header and no collapse arrow.
+- Replaced the plain description textarea with a React 19-compatible Tiptap editor: bold, italic, headings, bullet/ordered lists, and safe links. The editor saves HTML in the existing `description` product field and reloads formatted content.
+- Added backend HTML sanitisation with Bleach on product description updates. It preserves the supported formatting/link tags and strips scripts, images, inline handlers, unsafe protocols, and other unsupported markup before storage.
+- Added Tiptap and Bleach dependencies, editor styling, and persistence/sanitisation tests. Testing agent iteration_47 passed **10/10** targeted backend checks and the authenticated browser flow; all temporary products were deleted. Production build passes with four pre-existing ProductDetail hook warnings.

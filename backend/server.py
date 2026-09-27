@@ -16,6 +16,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Any
 
 import resend
+import bleach
 import bcrypt
 import jwt
 
@@ -2975,6 +2976,12 @@ async def update_product(pid: str, body: ProductUpdate):
             raise HTTPException(status_code=400, detail="Deal expiry must be a future date and time")
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if "description" in fields:
+        fields["description"] = bleach.clean(
+            fields["description"] or "",
+            tags=["p", "br", "strong", "b", "em", "i", "u", "h2", "h3", "h4", "ul", "ol", "li", "a"],
+            attributes={"a": ["href", "target", "rel"]}, protocols=["http", "https", "mailto"], strip=True,
+        )
     # Per-product custom delivery window: only validate when both bounds are
     # being set (or already set on the product), so partial patches don't
     # spuriously fail.

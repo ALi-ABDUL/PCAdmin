@@ -42,7 +42,7 @@ from models import (
     ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
     DisposableDomainsUpdate, DISPOSABLE_EMAIL_ERROR,
-    _DEFAULT_STORE_DISPLAY, StoreDisplaySettingsUpdate, _DEFAULT_STORE_BRANDING, StoreBrandingUpdate,
+    _DEFAULT_STORE_DISPLAY, StoreDisplaySettingsUpdate, _DEFAULT_STORE_BRANDING, StoreBrandingUpdate, GoogleSignInSettingsUpdate, GOOGLE_SIGNIN_SETTINGS_DEFAULTS,
     VerifyTokenBody, ResendVerificationBody, EmailTemplatesUpdate, EmailTemplateUpdate, EmailBrandUpdate, EMAIL_TEMPLATE_IDS,
     CountdownStart, BrandingUpdate, TagSettingsUpdate,
 )
@@ -4415,6 +4415,53 @@ async def demo_seed(reset: bool = False):
 # ---------------------------------------------------------------------------
 # Settings (single doc)
 # ---------------------------------------------------------------------------
+
+async def _get_google_signin_settings() -> dict:
+    saved = await db.site_settings.find_one({"id": "singleton"}, {"_id": 0})
+    settings = {**GOOGLE_SIGNIN_SETTINGS_DEFAULTS, **(saved or {})}
+    if saved is None or any(key not in saved for key in GOOGLE_SIGNIN_SETTINGS_DEFAULTS):
+        await db.site_settings.update_one({"id": "singleton"}, {"$set": settings}, upsert=True)
+    return settings
+
+
+def _google_signin_admin_response(settings: dict) -> dict:
+    secret = settings.get("google_client_secret") or ""
+    return {
+        "google_signin_enabled": bool(settings.get("google_signin_enabled", True)),
+        "google_client_id": settings.get("google_client_id") or "",
+        "google_client_secret_masked": ("•" * max(0, len(secret) - 4)) + secret[-4:] if secret else "",
+        "google_client_secret_set": bool(secret),
+    }
+
+
+@api_router.get("/site-settings")
+async def get_site_settings():
+    """Public storefront settings. OAuth secrets never leave the server."""
+    settings = await _get_google_signin_settings()
+    return {
+        "google_signin_enabled": bool(settings.get("google_signin_enabled", True)),
+        "google_client_id": settings.get("google_client_id") or "",
+    }
+
+
+@api_router.get("/site-settings/google-signin")
+async def get_google_signin_settings(current_admin: dict = Depends(get_current_admin)):
+    return _google_signin_admin_response(await _get_google_signin_settings())
+
+
+@api_router.patch("/site-settings/google-signin")
+async def patch_google_signin_settings(body: GoogleSignInSettingsUpdate, current_admin: dict = Depends(get_current_admin)):
+    fields = {key: value for key, value in body.model_dump().items() if value is not None}
+    if "google_client_secret" in fields and fields["google_client_secret"] == "":
+        fields.pop("google_client_secret")
+    for key in ("google_client_id", "google_client_secret"):
+        if key in fields:
+            fields[key] = fields[key].strip()
+    if not fields:
+        raise HTTPException(status_code=400, detail="No Google Sign-In settings to update")
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.site_settings.update_one({"id": "singleton"}, {"$set": fields}, upsert=True)
+    return _google_signin_admin_response(await _get_google_signin_settings())
 
 @api_router.get("/settings")
 async def get_settings():

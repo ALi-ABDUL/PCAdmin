@@ -18,10 +18,22 @@ for line in Path("/app/frontend/.env").read_text().splitlines():
     if line.startswith("REACT_APP_BACKEND_URL="):
         BASE_URL = line.split("=", 1)[1].strip().rstrip("/")
 API = f"{BASE_URL}/api"
+_SESSION = None
+
+
+def _admin_session():
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = requests.Session()
+        response = _SESSION.post(f"{API}/admin-accounts/login", json={
+            "email": "qa@prettycheap.com.au", "password": "QaTest123!",
+        }, timeout=15)
+        response.raise_for_status()
+    return _SESSION
 
 
 def _list():
-    return requests.get(f"{API}/admin-accounts", timeout=15).json()["accounts"]
+    return _admin_session().get(f"{API}/admin-accounts", timeout=15).json()["accounts"]
 
 
 def _main():
@@ -30,7 +42,7 @@ def _main():
 
 def _new(role="manager"):
     email = f"t-{uuid.uuid4().hex[:8]}@example.com"
-    r = requests.post(f"{API}/admin-accounts",
+    r = _admin_session().post(f"{API}/admin-accounts",
                       json={"name": "Tempy", "email": email, "password": "passw0rd!", "role": role},
                       timeout=15)
     r.raise_for_status()
@@ -54,23 +66,23 @@ class TestAdminCRUD:
         a = _new("manager")
         assert a["role"] == "manager"
         assert a["is_main"] is False
-        r = requests.delete(f"{API}/admin-accounts/{a['id']}", timeout=15)
+        r = _admin_session().delete(f"{API}/admin-accounts/{a['id']}", timeout=15)
         assert r.status_code == 200
 
     def test_reject_short_password(self):
-        r = requests.post(f"{API}/admin-accounts",
+        r = _admin_session().post(f"{API}/admin-accounts",
                           json={"name": "T", "email": "t@t.com", "password": "abc", "role": "manager"},
                           timeout=15)
         assert r.status_code == 400
 
     def test_reject_bad_role(self):
-        r = requests.post(f"{API}/admin-accounts",
+        r = _admin_session().post(f"{API}/admin-accounts",
                           json={"name": "T", "email": "t2@t.com", "password": "12345678", "role": "superuser"},
                           timeout=15)
         assert r.status_code == 400
 
     def test_reject_bad_email(self):
-        r = requests.post(f"{API}/admin-accounts",
+        r = _admin_session().post(f"{API}/admin-accounts",
                           json={"name": "T", "email": "not-an-email", "password": "12345678", "role": "manager"},
                           timeout=15)
         assert r.status_code == 400
@@ -78,57 +90,57 @@ class TestAdminCRUD:
     def test_reject_duplicate_email(self):
         a = _new("manager")
         try:
-            r = requests.post(f"{API}/admin-accounts",
+            r = _admin_session().post(f"{API}/admin-accounts",
                               json={"name": "Dup", "email": a["email"], "password": "12345678", "role": "manager"},
                               timeout=15)
             assert r.status_code == 400
         finally:
-            requests.delete(f"{API}/admin-accounts/{a['id']}", timeout=15)
+            _admin_session().delete(f"{API}/admin-accounts/{a['id']}", timeout=15)
 
     def test_patch_updates_name_and_role(self):
         a = _new("manager")
         try:
-            r = requests.patch(f"{API}/admin-accounts/{a['id']}",
+            r = _admin_session().patch(f"{API}/admin-accounts/{a['id']}",
                                json={"name": "Elevated", "role": "admin"}, timeout=15)
             assert r.status_code == 200
             body = r.json()
             assert body["name"] == "Elevated"
             assert body["role"] == "admin"
         finally:
-            requests.delete(f"{API}/admin-accounts/{a['id']}", timeout=15)
+            _admin_session().delete(f"{API}/admin-accounts/{a['id']}", timeout=15)
 
     def test_patch_password_when_provided(self):
         # Just verify the endpoint accepts a password change and returns 200
         # (the hash update is exercised end-to-end via the sign-in flow later).
         a = _new("manager")
         try:
-            r = requests.patch(f"{API}/admin-accounts/{a['id']}",
+            r = _admin_session().patch(f"{API}/admin-accounts/{a['id']}",
                                json={"password": "brand-new-pw"}, timeout=15)
             assert r.status_code == 200
         finally:
-            requests.delete(f"{API}/admin-accounts/{a['id']}", timeout=15)
+            _admin_session().delete(f"{API}/admin-accounts/{a['id']}", timeout=15)
 
     def test_patch_rejects_short_password(self):
         a = _new("manager")
         try:
-            r = requests.patch(f"{API}/admin-accounts/{a['id']}",
+            r = _admin_session().patch(f"{API}/admin-accounts/{a['id']}",
                                json={"password": "short"}, timeout=15)
             assert r.status_code == 400
         finally:
-            requests.delete(f"{API}/admin-accounts/{a['id']}", timeout=15)
+            _admin_session().delete(f"{API}/admin-accounts/{a['id']}", timeout=15)
 
 
 class TestMainAdminProtection:
     def test_cannot_delete_main_admin(self):
         m = _main()
-        r = requests.delete(f"{API}/admin-accounts/{m['id']}", timeout=15)
+        r = _admin_session().delete(f"{API}/admin-accounts/{m['id']}", timeout=15)
         assert r.status_code == 400
         # Still present after the failed delete
         assert any(a["id"] == m["id"] for a in _list())
 
     def test_cannot_demote_main_admin_to_manager(self):
         m = _main()
-        r = requests.patch(f"{API}/admin-accounts/{m['id']}",
+        r = _admin_session().patch(f"{API}/admin-accounts/{m['id']}",
                            json={"role": "manager"}, timeout=15)
         assert r.status_code == 400
         # Sanity: still an admin
@@ -139,10 +151,10 @@ class TestMainAdminProtection:
         m = _main()
         original = m["name"]
         try:
-            r = requests.patch(f"{API}/admin-accounts/{m['id']}",
+            r = _admin_session().patch(f"{API}/admin-accounts/{m['id']}",
                                json={"name": "Renamed Admin"}, timeout=15)
             assert r.status_code == 200
             assert r.json()["name"] == "Renamed Admin"
         finally:
-            requests.patch(f"{API}/admin-accounts/{m['id']}",
+            _admin_session().patch(f"{API}/admin-accounts/{m['id']}",
                            json={"name": original}, timeout=15)

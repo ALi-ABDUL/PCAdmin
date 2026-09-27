@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowDown, ArrowUp, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, CreditCard, ExternalLink, Eye, EyeOff, HelpCircle, History, Link2, Loader2, Mail, Menu, Monitor, Package, Plus, RefreshCw, Smartphone, Store, Tag, Trash2, Wallet, X, XCircle, Zap } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, CreditCard, ExternalLink, Eye, EyeOff, Globe, HelpCircle, History, Link2, Loader2, Mail, Menu, Monitor, Package, Plus, RefreshCw, Smartphone, Store, Tag, Trash2, Wallet, X, XCircle, Zap } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
@@ -1035,11 +1035,59 @@ export function ResendIntegrationCard() {
   );
 }
 
+
+export function GoogleSignInIntegrationCard() {
+  const [settings, setSettings] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [showSecret, setShowSecret] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${API}/site-settings/google-signin`, { withCredentials: true });
+      setSettings(data);
+      setDraft({ google_signin_enabled: !!data.google_signin_enabled, google_client_id: data.google_client_id || "", google_client_secret: "" });
+      if (!data.google_client_id) setOpen(true);
+    } catch (e) { toast.error("Could not load Google Sign-In", { description: e?.response?.data?.detail || e.message }); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  if (!settings || !draft) return <div className="card p-5 text-slate-500 text-sm" data-testid="google-signin-loading">Loading Google Sign-In…</div>;
+  const connected = !!settings.google_client_id && !!settings.google_signin_enabled;
+  const dirty = draft.google_signin_enabled !== !!settings.google_signin_enabled || draft.google_client_id !== (settings.google_client_id || "") || !!draft.google_client_secret;
+  const save = async () => {
+    setBusy(true);
+    try {
+      const payload = { google_signin_enabled: draft.google_signin_enabled, google_client_id: draft.google_client_id.trim() };
+      if (draft.google_client_secret.trim()) payload.google_client_secret = draft.google_client_secret.trim();
+      const { data } = await axios.patch(`${API}/site-settings/google-signin`, payload, { withCredentials: true });
+      setSettings(data); setDraft({ google_signin_enabled: !!data.google_signin_enabled, google_client_id: data.google_client_id || "", google_client_secret: "" });
+      toast.success("Google Sign-In settings saved");
+    } catch (e) { toast.error("Could not save Google Sign-In", { description: e?.response?.data?.detail || e.message }); }
+    finally { setBusy(false); }
+  };
+
+  return <div className="card p-5" data-testid="google-signin-integration-card">
+    <div className="flex items-start justify-between gap-3 flex-wrap">
+      <div className="flex items-center gap-3 min-w-0"><div className="w-11 h-11 rounded-xl grid place-items-center shrink-0 bg-sky-50 text-sky-600"><Globe size={19}/></div><div className="min-w-0"><div className="font-display font-bold text-base flex items-center gap-2">Google Sign-In <span className={`chip ${connected ? "chip-success" : "chip-neutral"} text-[10px]`} data-testid="google-signin-status">{connected ? <><BadgeCheck size={11}/> Connected</> : "Not configured"}</span></div><div className="text-xs text-slate-500 mt-0.5">Allow customers to sign in to the storefront using their Google account.</div></div></div>
+      <button onClick={() => setOpen(value => !value)} className="btn btn-ghost text-sm min-h-10" data-testid="google-signin-configure-button">{open ? "Close" : "Configure"}</button>
+    </div>
+    {open && <div className="mt-5 pt-5 border-t hairline grid gap-4" data-testid="google-signin-configure-panel">
+      <label className="flex items-start gap-3 p-3 rounded-lg bg-slate-50 border hairline cursor-pointer" data-testid="google-signin-enabled-toggle"><input type="checkbox" checked={draft.google_signin_enabled} onChange={(e) => setDraft(current => ({ ...current, google_signin_enabled: e.target.checked }))} className="accent-indigo-600 mt-0.5 w-4 h-4" data-testid="google-signin-enabled-checkbox"/><div><div className="text-sm font-medium">Enable Google Sign-In</div><div className="text-xs text-slate-500">Show Google account sign-in when PCStore adds its OAuth button.</div></div></label>
+      <Field label="Google Client ID"><input type="text" autoComplete="off" value={draft.google_client_id} onChange={(e) => setDraft(current => ({ ...current, google_client_id: e.target.value }))} placeholder="1234567890-abc.apps.googleusercontent.com" className="input w-full px-3 py-2 text-sm font-mono" data-testid="google-signin-client-id-input"/></Field>
+      <Field label="Google Client Secret"><div className="relative"><input type={showSecret ? "text" : "password"} autoComplete="new-password" value={draft.google_client_secret} onChange={(e) => setDraft(current => ({ ...current, google_client_secret: e.target.value }))} placeholder={settings.google_client_secret_set ? `Saved · ${settings.google_client_secret_masked}` : "GOCSPX-…"} className="input w-full px-3 py-2 pr-11 text-sm font-mono" data-testid="google-signin-client-secret-input"/><button type="button" onClick={() => setShowSecret(value => !value)} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-indigo-600" title={showSecret ? "Hide client secret" : "Show client secret"} data-testid="google-signin-secret-visibility-toggle">{showSecret ? <EyeOff size={15}/> : <Eye size={15}/>}</button></div><div className="text-[11px] text-slate-400 mt-1">Saved secrets are masked and never returned through public storefront settings.</div></Field>
+      <div className="flex justify-end gap-2 items-center flex-wrap">{dirty && <span className="text-xs text-amber-600 font-mono">unsaved changes</span>}<button onClick={save} disabled={busy || !dirty} className="btn btn-primary text-sm min-h-10 disabled:opacity-50" data-testid="google-signin-save-button">{busy ? <Loader2 size={14} className="animate-spin"/> : <BadgeCheck size={14}/>} Save</button></div>
+    </div>}
+  </div>;
+}
+
 export function IntegrationsPanel() {
   const others = ["eBay Australia (source)", "Xero", "MYOB", "Klaviyo", "Mailchimp", "Zapier", "Slack", "Discord"];
   return (
     <div className="grid gap-3" data-testid="integrations-panel">
       <ResendIntegrationCard/>
+      <div className="pt-3"><div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2" data-testid="auth-social-integrations-heading">Authentication &amp; social</div><GoogleSignInIntegrationCard/></div>
       {others.map((f, i) => (
         <div key={f} className="card p-4 md:p-5 flex items-center justify-between gap-4 group hover:shadow-md transition-shadow">
           <div className="flex items-center gap-3 min-w-0">
@@ -2139,7 +2187,7 @@ export function StoreManagement({ section, setSection }) {
     "locations":           { hint: "Physical stores, warehouses and pickup points.", fields: ["Bellara HQ, QLD","Sydney warehouse, NSW","Melbourne showroom, VIC","Pickup: 3rd party locker"] },
     "seo-settings":        { hint: "Global SEO defaults, sitemaps and social cards.", fields: ["Meta title template","Meta description default","Open Graph image","Twitter card","Sitemap URL","robots.txt"] },
     "analytics-tracking":  { hint: "Attach analytics and tracking pixels.", fields: ["Google Analytics 4","Google Tag Manager","Meta pixel","TikTok pixel","Hotjar","Server-side conversions"] },
-    "integrations":        { hint: "Third-party apps and API connections. Configure Resend to send customer verification & order emails.", fields: [], custom: <IntegrationsPanel/> },
+    "integrations":        { hint: "Third-party email, authentication, and social connections for your storefront.", fields: [], custom: <IntegrationsPanel/> },
     "security":            { hint: "Admin access controls, password rules and audit logs.", fields: ["Two-factor authentication","Session timeout","IP allowlist","Password strength","Failed-login lockout","Audit log retention"] },
   }[section] || { hint: "", fields: [] };
 

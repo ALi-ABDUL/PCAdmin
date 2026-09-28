@@ -107,8 +107,9 @@ export function ScraperPage({ onView, onEditProduct }) {
 
   const addToProducts = async (it) => {
     try { const { data } = await axios.post(`${API}/products/from-item/${it.id}`);
-      toast.success("Added to products", { description: `${data.title} · ${moneyCents(data.price)} · SKU ${data.sku}` });
+      toast.success("Saved as draft — opening editor", { description: `${data.title} · ${moneyCents(data.price)} · SKU ${data.sku}` });
       await load();
+      onEditProduct?.(data.id);
     } catch (e) { toast.error("Failed", { description: e?.response?.data?.detail || e.message }); }
   };
 
@@ -118,7 +119,7 @@ export function ScraperPage({ onView, onEditProduct }) {
     if (it.linked_product_id) { onEditProduct?.(it.linked_product_id); return; }
     try {
       const { data } = await axios.post(`${API}/products/from-item/${it.id}`);
-      toast.success("Added to products — opening editor", { description: `${data.title} · ${moneyCents(data.price)}` });
+      toast.success("Saved as draft — opening editor", { description: `${data.title} · ${moneyCents(data.price)}` });
       onEditProduct?.(data.id);
     } catch (e) {
       toast.error("Couldn't open editor", { description: e?.response?.data?.detail || e.message });

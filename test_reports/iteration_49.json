@@ -1,0 +1,71 @@
+{
+  "summary": "Completed targeted backend + frontend testing for draft publication, Product Edit publish/save behavior, original-price paste button, and rich-description image URL behavior.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ProductDetailPage",
+        "issue": "After successful publish (toast shown and backend/state updated), draft UI state remains: Publish Product button and Draft indicator/chip are still visible.",
+        "selector": "[data-testid='product-publish-button'], [data-testid='product-draft-chip'], [data-testid='product-draft-status']",
+        "priority": "HIGH"
+      },
+      {
+        "component": "RichTextDescription (Tiptap)",
+        "issue": "Typing an https image URL then pressing space does not convert to an inline image node.",
+        "selector": "[data-testid='product-description-rich-editor'] .ProseMirror",
+        "priority": "HIGH"
+      },
+      {
+        "component": "RichTextDescription (Tiptap)",
+        "issue": "Paste-to-image behavior is unreliable/flaky in UI automation runs; multiple runs produced no image node, while one run produced one node. Save/reopen persistence could not be reliably validated via UI because image node creation was inconsistent.",
+        "selector": "[data-testid='product-description-rich-editor'] .ProseMirror",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Product Sourcing Add -> Product Edit",
+        "issue": "Could not validate in this run because there were zero scraped source items and live external scraping is disallowed for this task.",
+        "affected_selectors": [
+          "[data-testid='nav-scraper']",
+          "button:has-text('Add to products')"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_scraper_drafts.py",
+    "/app/backend/tests/test_product_rich_description.py",
+    "/app/test_reports/pytest/pytest_iteration49_drafts_rich.xml",
+    "/app/test_reports/pytest/pytest_iteration49_drafts_only.xml"
+  ],
+  "action_items": [
+    "Fix ProductDetail publish UI state sync: once publish succeeds, draft-only controls/indicators must disappear without requiring manual refresh/navigation.",
+    "Fix Tiptap typed-image URL conversion path (space/enter trigger) so valid https image URLs become image nodes.",
+    "Stabilize Tiptap paste-image URL conversion and then verify save/reload image HTML persistence through UI.",
+    "Seed a temporary scraped item in a controlled non-external way for deterministic Add->Edit Product Sourcing validation in next run."
+  ],
+  "critical_code_review_comments": [
+    "Backend draft/publication contract is working: draft PATCH with active=true is rejected for drafts, dedicated publish endpoint transitions draft->live, and storefront visibility follows active status.",
+    "Backend sanitizer contract is working for requested scope: remote http(s) img src is retained, alt/title are retained, and unsafe/relative attributes/scripts are stripped.",
+    "Frontend console repeatedly shows Tiptap warning: duplicate extension names ['link']; likely worth resolving because editor behavior around URL handling is already unstable."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_scraper_drafts.py",
+    "/app/backend/tests/test_product_rich_description.py",
+    "/app/test_reports/iteration_49.json"
+  ],
+  "success_rate": {
+    "backend": "100% (6/6 targeted tests passed across the executed suites)",
+    "frontend": "55% (core login/draft-save/publish API state/original-price paste passed; publish-UI-state and rich-editor URL-image flows failed or were unstable)"
+  },
+  "seed_data_creation": "Created temporary products via API during UI tests; cleaned up at end of each run. No persistent source-item seed was created this iteration.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Do not rely on eBay live scraping for this scope. Backend is green for draft and sanitization behavior. Frontend issues are concentrated in ProductDetail publish-state rendering and Tiptap URL->image UX (typed and paste). Product Sourcing Add->Edit remains unverified due no scraped data available in this environment.",
+  "rca of the issue": "RCA 1: Publish-state mismatch appears frontend-side because backend state/storefront availability turn live immediately while draft-only UI elements stay visible. Repro: create draft product -> open ProductDetail -> click Publish Product -> observe success toast + backend/storefront live, but draft chip/publish control still rendered. RCA 2: Tiptap typed image URL conversion path likely not firing in keydown handler (or replacement transaction not applied), since repeated typed URL + space keeps image node count at 0. Paste path is inconsistent/flaky across runs. MOCKED: Google OAuth customer callback/sign-in remains configuration-only and unrelated to this scope."
+}

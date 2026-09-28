@@ -129,6 +129,7 @@ body {
 .product-rich-description .ProseMirror ul { list-style: disc; padding-left: 1.4rem; }
 .product-rich-description .ProseMirror ol { list-style: decimal; padding-left: 1.4rem; }
 .product-rich-description .ProseMirror a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.product-rich-description .ProseMirror img { display: block; max-width: 100%; height: auto; margin: .9rem 0; border-radius: .5rem; }
 .product-rich-description .ProseMirror p.is-editor-empty:first-child::before { color: var(--dim); content: 'Write a detailed product description…'; float: left; height: 0; pointer-events: none; }
 
 /* Buttons */

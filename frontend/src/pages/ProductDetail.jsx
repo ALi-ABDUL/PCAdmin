@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Bold, Calendar, CheckCircle2, ChevronDown, ChevronLeft, CircleDollarSign, Eye, ExternalLink, FileText, Heading2, Home, Image, Italic, Layers3, Layout, Link2, List, ListOrdered, Loader2, Package, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
+import { BadgeCheck, Ban, Bold, Calendar, CheckCircle2, ChevronDown, ChevronLeft, CircleDollarSign, ClipboardPaste, Eye, ExternalLink, FileText, Heading2, Home, Image, ImagePlus, Italic, Layers3, Layout, Link2, List, ListOrdered, Loader2, Package, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
+import TiptapImage from "@tiptap/extension-image";
 import { Field, statusBadge } from "../components/atoms";
 import { CatIcon } from "../components/icons";
 import { ImageSourceDialog } from "../components/ImageSourceDialog";
@@ -29,6 +30,7 @@ export function ProductDetailPage({ productId, onBack }) {
   const [reviews, setReviews] = useState([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showCatPopover, setShowCatPopover] = useState(false);
   const [imgDialog, setImgDialog] = useState({ open: false, mode: "add", idx: null, current: "" });
@@ -138,8 +140,22 @@ export function ProductDetailPage({ productId, onBack }) {
 
   const save = () => persist();
   const publish = async () => {
-    const ok = await persist({ active: true });
-    if (ok) setPreviewOpen(false);
+    if (dirty) return toast.error("Save changes before publishing this draft");
+    setPublishing(true);
+    try {
+      const { data } = await axios.post(`${API}/products/${productId}/publish`);
+      setP((current) => ({ ...current, ...data, draft: false, active: true }));
+      setF((current) => ({ ...current, active: true }));
+      await load();
+      toast.success("Product published to PCStore");
+    } catch (e) { toast.error("Could not publish product", { description: e?.response?.data?.detail || e.message }); }
+    finally { setPublishing(false); }
+  };
+  const pasteOriginalPrice = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) setField("original_price", text.trim());
+    } catch { toast.error("Clipboard blocked"); }
   };
   const del = async () => {
     if (!window.confirm(`Delete "${p.title}"? This can't be undone.`)) return;
@@ -235,6 +251,7 @@ export function ProductDetailPage({ productId, onBack }) {
           </div>
           <button onClick={del} className="btn btn-danger text-sm" data-testid="product-delete-btn"><Trash2 size={13}/> Delete</button>
           <button onClick={() => setPreviewOpen(true)} className="btn btn-ghost text-sm" data-testid="product-preview-btn"><Eye size={13}/> Preview</button>
+          {p.draft === true && <button onClick={publish} disabled={publishing || dirty} title={dirty ? "Save changes before publishing" : "Make this draft live on PCStore"} className="btn btn-primary text-sm disabled:opacity-50" data-testid="product-publish-button">{publishing ? <Loader2 className="animate-spin" size={13}/> : <Rocket size={13}/>} Publish Product</button>}
           <button onClick={save} disabled={!dirty || saving} className="btn btn-primary text-sm" data-testid="product-save-btn">
             {saving ? <Loader2 className="animate-spin" size={13}/> : <BadgeCheck size={13}/>} Save
           </button>
@@ -247,9 +264,10 @@ export function ProductDetailPage({ productId, onBack }) {
           <Field label="SKU"><input className="input w-full px-3 py-2 font-mono" value={f.sku} onChange={(e) => setField("sku", e.target.value)} data-testid="product-sku-input"/></Field>
           <Field label="Product code"><input className="input w-full px-3 py-2 font-mono text-indigo-600 font-bold bg-slate-50" value={p.product_code || ""} readOnly data-testid="product-code-input"/></Field>
           <Field label="Category"><select className="input w-full px-3 py-2" value={f.category} onChange={(e) => setField("category", e.target.value)} data-testid="product-category-select">{cats.length === 0 && <option value="other">Other</option>}{cats.map(c => <option key={c.slug} value={c.slug}>{`${c.group} · ${c.name}`}</option>)}</select></Field>
-          <Field label="Storefront visibility"><select className="input w-full px-3 py-2" value={f.active ? "1" : "0"} onChange={(e) => setField("active", e.target.value === "1")} data-testid="product-active-select"><option value="1">Yes — visible on storefront</option><option value="0">No — hidden</option></select></Field>
+          <Field label="Storefront visibility">{p.draft === true ? <div className="input w-full px-3 py-2 text-amber-700 bg-amber-50 border-amber-200 text-sm" data-testid="product-draft-status">Draft — publish using the button above</div> : <select className="input w-full px-3 py-2" value={f.active ? "1" : "0"} onChange={(e) => setField("active", e.target.value === "1")} data-testid="product-active-select"><option value="1">Yes — visible on storefront</option><option value="0">No — hidden</option></select>}</Field>
         </div>
         <div className="flex items-center gap-2 flex-wrap text-xs mt-4 pt-4 border-t hairline">
+          {p.draft === true && <span className="chip chip-warning" data-testid="product-draft-chip">Draft</span>}
           {badge && <span className={`chip ${badge.cls}`}>{badge.label}</span>}
           {(p.smart_tags || []).map((tag, index) => <span className="chip chip-primary" key={`${tag}-${index}`} data-testid={`product-detail-smart-tag-${index}`}>{tag}</span>)}
           {p.review_count > 0 && <span className="inline-flex items-center gap-1 font-mono"><StarIcon size={11} className="text-amber-500" fill="currentColor"/><span className="font-bold">{avg.toFixed(1)}</span><span className="text-slate-400">({p.review_count} reviews)</span></span>}
@@ -320,16 +338,7 @@ export function ProductDetailPage({ productId, onBack }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <Field label="Sell price (AUD)"><input type="number" className="input w-full px-3 py-2 font-mono" value={f.price} onChange={(e) => setField("price", e.target.value)} data-testid="product-price-input"/></Field>
           <Field label="Original price (AUD)">
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="Optional 'was' price"
-              className="input w-full px-3 py-2 font-mono"
-              value={f.original_price}
-              onChange={(e) => setField("original_price", e.target.value)}
-              data-testid="product-original-price-input"
-            />
+            <div className="relative"><input type="number" min="0" step="0.01" placeholder="Optional 'was' price" className="input w-full px-3 pr-20 py-2 font-mono" value={f.original_price} onChange={(e) => setField("original_price", e.target.value)} data-testid="product-original-price-input"/><button type="button" onClick={pasteOriginalPrice} className="absolute right-2 top-1/2 -translate-y-1/2 btn btn-ghost text-xs !py-1.5 !px-2.5" data-testid="product-original-price-paste-button"><ClipboardPaste size={12}/> Paste</button></div>
           </Field>
           <Field label="Cost (AUD)"><input type="number" className="input w-full px-3 py-2 font-mono" value={f.cost} onChange={(e) => setField("cost", e.target.value)} data-testid="product-cost-input"/></Field>
           <Field label="Stock"><input type="number" className="input w-full px-3 py-2 font-mono" value={f.stock} onChange={(e) => setField("stock", e.target.value)} data-testid="product-stock-input"/></Field>
@@ -422,12 +431,46 @@ function ProductEditSection({ id, title, icon: Icon, open, onToggle, summary, ch
 }
 
 
+function inlineImageUrl(value) {
+  const url = String(value || "").trim();
+  return /^https?:\/\/[^\s]+$/i.test(url) ? url : "";
+}
+
 function RichTextDescription({ value, onChange }) {
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: [StarterKit.configure({ heading: { levels: [2, 3, 4] } }), Link.configure({ openOnClick: false, autolink: false, HTMLAttributes: { rel: "noopener noreferrer nofollow", target: "_blank" } })],
+    extensions: [StarterKit.configure({ heading: { levels: [2, 3, 4] }, link: false }), Link.configure({ openOnClick: false, autolink: false, HTMLAttributes: { rel: "noopener noreferrer nofollow", target: "_blank" } }), TiptapImage.configure({ allowBase64: false, HTMLAttributes: { class: "max-w-full h-auto rounded-lg my-3" } })],
     content: value || "",
-    editorProps: { attributes: { class: "min-h-44 px-4 py-3 focus:outline-none text-sm leading-7 text-slate-700" } },
+    editorProps: {
+      attributes: { class: "min-h-44 px-4 py-3 focus:outline-none text-sm leading-7 text-slate-700" },
+      handlePaste: (view, event) => {
+        const url = inlineImageUrl(event.clipboardData?.getData("text/plain"));
+        const image = view.state.schema.nodes.image;
+        if (!url || !image) return false;
+        view.dispatch(view.state.tr.replaceSelectionWith(image.create({ src: url, alt: "" })).scrollIntoView());
+        return true;
+      },
+      handleTextInput: (view, from, _to, text) => {
+        if (text !== " " && text !== "\n") return false;
+        const before = view.state.doc.textBetween(Math.max(0, from - 2048), from, "\n", "\0");
+        const url = inlineImageUrl(before.match(/(https?:\/\/[^\s]+)$/)?.[1]);
+        const image = view.state.schema.nodes.image;
+        if (!url || !image) return false;
+        view.dispatch(view.state.tr.replaceWith(Math.max(0, from - url.length), from, image.create({ src: url, alt: "" })).scrollIntoView());
+        return true;
+      },
+      handleKeyDown: (view, event) => {
+        if (event.key !== "Enter") return false;
+        const from = view.state.selection.from;
+        const text = view.state.doc.textBetween(Math.max(0, from - 2048), from, "\n", "\0");
+        const url = inlineImageUrl(text.match(/(https?:\/\/[^\s]+)$/)?.[1]);
+        const image = view.state.schema.nodes.image;
+        if (!url || !image) return false;
+        event.preventDefault();
+        view.dispatch(view.state.tr.replaceWith(Math.max(0, from - url.length), from, image.create({ src: url, alt: "" })).scrollIntoView());
+        return true;
+      },
+    },
     onUpdate: ({ editor: activeEditor }) => onChange(activeEditor.getHTML()),
   });
   useEffect(() => {
@@ -441,6 +484,11 @@ function RichTextDescription({ value, onChange }) {
     if (!href.trim()) editor.chain().focus().unsetLink().run();
     else editor.chain().focus().extendMarkRange("link").setLink({ href: href.trim() }).run();
   };
+  const addImage = () => {
+    const url = inlineImageUrl(window.prompt("Enter an image URL", ""));
+    if (!url) return toast.error("Enter a full http(s) image URL ending in an image file extension");
+    editor.chain().focus().setImage({ src: url, alt: "" }).run();
+  };
   const tools = [
     ["bold", Bold, () => editor.chain().focus().toggleBold().run(), editor.isActive("bold")],
     ["italic", Italic, () => editor.chain().focus().toggleItalic().run(), editor.isActive("italic")],
@@ -448,8 +496,15 @@ function RichTextDescription({ value, onChange }) {
     ["bullet", List, () => editor.chain().focus().toggleBulletList().run(), editor.isActive("bulletList")],
     ["ordered", ListOrdered, () => editor.chain().focus().toggleOrderedList().run(), editor.isActive("orderedList")],
     ["link", Link2, setLink, editor.isActive("link")],
+    ["image", ImagePlus, addImage, false],
   ];
-  return <div className="product-rich-description rounded-lg border hairline overflow-hidden bg-white" data-testid="product-description-rich-editor"><div className="flex items-center gap-1 p-2 bg-slate-50 border-b hairline flex-wrap" data-testid="product-description-toolbar">{tools.map(([name, Icon, run, active]) => <button key={name} type="button" onClick={command(run)} title={name === "heading" ? "Heading" : name} className={`w-9 h-9 grid place-items-center rounded-md transition-colors ${active ? "bg-indigo-100 text-indigo-700" : "text-slate-600 hover:bg-white hover:text-indigo-600"}`} data-testid={`product-description-toolbar-${name}`}><Icon size={16}/></button>)}</div><EditorContent editor={editor} data-testid="product-description-input"/></div>;
+  const handleEditorPaste = (event) => {
+    const url = inlineImageUrl(event.clipboardData?.getData("text/plain"));
+    if (!url) return;
+    event.preventDefault();
+    editor.chain().focus().setImage({ src: url, alt: "" }).run();
+  };
+  return <div className="product-rich-description rounded-lg border hairline overflow-hidden bg-white" data-testid="product-description-rich-editor"><div className="flex items-center gap-1 p-2 bg-slate-50 border-b hairline flex-wrap" data-testid="product-description-toolbar">{tools.map(([name, Icon, run, active]) => <button key={name} type="button" onClick={command(run)} title={name === "heading" ? "Heading" : name} className={`w-9 h-9 grid place-items-center rounded-md transition-colors ${active ? "bg-indigo-100 text-indigo-700" : "text-slate-600 hover:bg-white hover:text-indigo-600"}`} data-testid={`product-description-toolbar-${name}`}><Icon size={16}/></button>)}</div><EditorContent editor={editor} onPaste={handleEditorPaste} data-testid="product-description-input"/></div>;
 }
 
 

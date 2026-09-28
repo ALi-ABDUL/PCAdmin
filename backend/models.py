@@ -124,6 +124,7 @@ class ProductCreate(BaseModel):
     source_url: Optional[str] = None
     source_item_id: Optional[str] = None
     active: bool = True
+    draft: bool = False
     sku: Optional[str] = None
     stock_status: str = "live"          # live | sold | ended | out_of_stock
     is_sold: bool = False               # kept for backward compat (True iff stock_status != "live")

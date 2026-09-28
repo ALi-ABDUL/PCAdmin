@@ -29,7 +29,7 @@ def test_rich_description_html_persists_and_is_sanitised():
     assert created.status_code == 200, created.text
     product_id = created.json()["id"]
     try:
-        description = '<h2>Highlights</h2><p><strong>Bold</strong> and <em>italic</em> text.</p><ul><li>First point</li><li>Second point</li></ul><p><a href="https://example.com">Learn more</a></p><script>alert(1)</script><img src="x" onerror="alert(2)">'
+        description = '<h2>Highlights</h2><p><strong>Bold</strong> and <em>italic</em> text.</p><ul><li>First point</li><li>Second point</li></ul><p><a href="https://example.com">Learn more</a></p><img src="https://images.example.com/guide.jpg" alt="Guide"><script>alert(1)</script><img src="x" onerror="alert(2)">'
         saved = requests.patch(f"{API}/products/{product_id}", json={"description": description}, timeout=20)
         assert saved.status_code == 200, saved.text
         stored = saved.json()["description"]
@@ -38,7 +38,8 @@ def test_rich_description_html_persists_and_is_sanitised():
         assert "<em>italic</em>" in stored
         assert "<ul>" in stored and "<li>First point</li>" in stored
         assert 'href="https://example.com"' in stored
-        assert "<script" not in stored and "<img" not in stored and "onerror" not in stored
+        assert 'src="https://images.example.com/guide.jpg"' in stored and 'alt="Guide"' in stored
+        assert "<script" not in stored and 'src="x"' not in stored and "onerror" not in stored
 
         reloaded = requests.get(f"{API}/products/{product_id}", timeout=20)
         assert reloaded.status_code == 200, reloaded.text
@@ -82,5 +83,34 @@ def test_description_sanitiser_keeps_allowed_tags_and_strips_unsafe_markup():
         reloaded = requests.get(f"{API}/products/{product_id}", timeout=20)
         assert reloaded.status_code == 200, reloaded.text
         assert reloaded.json().get("description") == stored
+    finally:
+        requests.delete(f"{API}/products/{product_id}", timeout=20)
+
+
+def test_description_sanitiser_keeps_remote_img_src_alt_title_only():
+    created = requests.post(f"{API}/products", json={
+        "title": f"Rich img sanitiser QA {uuid.uuid4().hex[:8]}", "sku": f"rich-img-{uuid.uuid4().hex[:8]}",
+        "price": 39.95, "cost": 11, "stock": 6, "category": "other",
+    }, timeout=20)
+    assert created.status_code == 200, created.text
+    product_id = created.json()["id"]
+    try:
+        dirty = (
+            '<p>Image checks</p>'
+            '<img src="https://cdn.example.com/a.png" alt="Alpha" title="Hero">'
+            '<img src="/relative.jpg" alt="Bad">'
+            '<img src="http://assets.example.com/noext" alt="NoExt" title="Keep">'
+            '<img src="https://cdn.example.com/b.jpg" alt="Bravo" title="Shot" onerror="alert(1)">'
+        )
+        saved = requests.patch(f"{API}/products/{product_id}", json={"description": dirty}, timeout=20)
+        assert saved.status_code == 200, saved.text
+        stored = saved.json().get("description", "")
+
+        assert 'src="https://cdn.example.com/a.png"' in stored
+        assert 'alt="Alpha"' in stored and 'title="Hero"' in stored
+        assert 'src="http://assets.example.com/noext"' in stored
+        assert 'alt="NoExt"' in stored and 'title="Keep"' in stored
+        assert 'src="/relative.jpg"' not in stored
+        assert "onerror" not in stored
     finally:
         requests.delete(f"{API}/products/{product_id}", timeout=20)

@@ -25,6 +25,20 @@ from scraper import (
     ScrapeError, NotEbayAUError, BlockedError,
     validate_ebay_au_url, fetch_html, parse_and_enrich,
 )
+
+
+def _safe_description_attribute(tag: str, name: str, value: str) -> bool:
+    """Permit only remote http(s) images and safe description-link attributes."""
+    lowered = (value or "").strip().lower()
+    if tag == "img":
+        if name in {"alt", "title"}:
+            return True
+        return name == "src" and lowered.startswith(("https://", "http://"))
+    if tag == "a":
+        if name in {"target", "rel"}:
+            return True
+        return name == "href" and lowered.startswith(("https://", "http://", "mailto:"))
+    return False
 from models import (
     CATEGORIES, SEED_CATEGORIES, ScrapeRequest, ScrapedItem, WatchlistToggle, ProductCreate, 
     Product, ProductUpdate, ShippingAddress, _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, 
@@ -2688,6 +2702,8 @@ async def create_product_from_item(item_id: str):
         postage=it.get("postage_display") or None,
         delivery_speed=it.get("delivery_speed") or None,
         delivery_date_range=it.get("delivery_date_range") or None,
+        active=False,
+        draft=True,
     )
     prod.product_code = await _generate_unique_product_code(prod.title)
     # Auto-fill SEO fields from title/description; admin can edit later.
@@ -2989,12 +3005,17 @@ async def update_product(pid: str, body: ProductUpdate):
             raise HTTPException(status_code=400, detail="Deal expiry must be a future date and time")
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if fields.get("active") is True:
+        existing_status = await db.products.find_one({"id": pid}, {"_id": 0, "draft": 1})
+        if existing_status and existing_status.get("draft"):
+            raise HTTPException(status_code=409, detail="Save changes does not publish a scraper draft. Use Publish Product instead.")
     if "description" in fields:
-        fields["description"] = bleach.clean(
+        sanitised_description = bleach.clean(
             fields["description"] or "",
-            tags=["p", "br", "strong", "b", "em", "i", "u", "h2", "h3", "h4", "ul", "ol", "li", "a"],
-            attributes={"a": ["href", "target", "rel"]}, protocols=["http", "https", "mailto"], strip=True,
+            tags=["p", "br", "strong", "b", "em", "i", "u", "h2", "h3", "h4", "ul", "ol", "li", "a", "img"],
+            attributes=_safe_description_attribute, protocols=["http", "https", "mailto"], strip=True,
         )
+        fields["description"] = re.sub(r'<img\b(?![^>]*\bsrc="https?://)[^>]*>', "", sanitised_description, flags=re.IGNORECASE)
     # Per-product custom delivery window: only validate when both bounds are
     # being set (or already set on the product), so partial patches don't
     # spuriously fail.
@@ -3029,6 +3050,19 @@ async def update_product(pid: str, body: ProductUpdate):
                 cleaned.append(s)
         if cleaned != fields["tags"]:
             await db.products.update_one({"id": pid}, {"$set": {"tags": cleaned}})
+    return await db.products.find_one({"id": pid}, {"_id": 0})
+
+
+@api_router.post("/products/{pid}/publish")
+async def publish_scraper_draft(pid: str):
+    product = await db.products.find_one({"id": pid}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if not product.get("draft"):
+        raise HTTPException(status_code=409, detail="Only scraper drafts can be published with this action")
+    await db.products.update_one({"id": pid}, {"$set": {
+        "active": True, "draft": False, "updated_at": datetime.now(timezone.utc).isoformat(),
+    }})
     return await db.products.find_one({"id": pid}, {"_id": 0})
 
 

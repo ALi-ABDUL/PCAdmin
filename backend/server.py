@@ -65,6 +65,7 @@ from product_tags import TAG_IDS, attach_smart_tags, get_tag_settings
 from countries import COUNTRIES, COUNTRY_CODES
 from admin_sessions import ADMIN_SESSION_TTL, get_current_admin, issue_admin_session
 from managed_email import EMAIL_FROM_NAME, send_managed_email
+from scraper import format_scraped_description_html
 from helpers import (
     _rand_au_address, _slug, _split_name, _compose_name, _product_code_base, _generate_unique_product_code, 
     _ensure_product_codes_backfilled, _ensure_order_references_backfilled, _ensure_order_line_fulfillment_backfilled, _ensure_order_line_fulfillment, _refresh_all_items, _retry_scrape_items, 
@@ -397,7 +398,7 @@ async def items_bulk_action(body: ItemBulkAction):
                         breadcrumbs=it.get("ebay_category_path") or [],
                         specifics=it.get("specifics") or {},
                     ),
-                    description=it.get("description") or "",
+                    description=format_scraped_description_html(it.get("description") or ""),
                     images=it.get("images") or [],
                     source_url=it.get("url"),
                     source_item_id=it.get("item_id") or it.get("id"),
@@ -2692,7 +2693,7 @@ async def create_product_from_item(item_id: str):
             breadcrumbs=it.get("ebay_category_path") or [],
             specifics=it.get("specifics") or {},
         ),
-        description=it.get("description") or "",
+        description=format_scraped_description_html(it.get("description") or ""),
         images=it.get("images") or [],
         source_url=it.get("url"),
         source_item_id=it.get("item_id"),

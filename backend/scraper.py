@@ -5,6 +5,7 @@ import asyncio
 import json
 import random
 import re
+from html import escape
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -915,7 +916,7 @@ async def fetch_description_iframe(iframe_url: str) -> str:
         tag.decompose()
     body = soup.body or soup
     text = re.sub(r"\n{3,}", "\n\n", body.get_text("\n", strip=True))
-    return clean_description(text.strip())
+    return format_scraped_description_html(text.strip())
 
 
 # Section headers that indicate the seller's product overview is done and
@@ -1000,6 +1001,50 @@ def clean_description(raw: str) -> str:
         cut = max(head.rfind(". "), head.rfind("\n"), head.rfind("! "), head.rfind("? "))
         text = head[: cut + 1].rstrip() if cut > 400 else head.rstrip() + "…"
     return text
+
+
+def format_scraped_description_html(raw: str) -> str:
+    """Turn an eBay listing's raw description into scannable paragraph HTML.
+
+    Seller templates frequently repeat the same marketing copy in multiple
+    blocks. We retain the first occurrence of each normalized sentence, honour
+    explicit blank-line breaks, then group ordinary text into 2–3 sentence
+    paragraphs for the rich product editor and storefront.
+    """
+    if not raw:
+        return ""
+    # Descriptions normally arrive as text from the iframe, but tolerate
+    # legacy item rows that stored source HTML.
+    source = BeautifulSoup(raw, "lxml").get_text("\n", strip=True) if "<" in raw and ">" in raw else raw
+    cleaned = clean_description(source)
+    if not cleaned:
+        return ""
+    seen: set[str] = set()
+    paragraphs: list[str] = []
+    for block in re.split(r"\n\s*\n+", cleaned):
+        normalized_block = re.sub(r"\s+", " ", block).strip()
+        if not normalized_block:
+            continue
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", normalized_block) if s.strip()]
+        # A description without terminal punctuation still deserves a paragraph.
+        if not sentences:
+            sentences = [normalized_block]
+        unique: list[str] = []
+        for sentence in sentences:
+            key = re.sub(r"[^a-z0-9]+", "", sentence.lower())
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            unique.append(sentence)
+        while unique:
+            remaining = len(unique)
+            take = 3 if remaining in (3,) or remaining >= 5 else 2 if remaining >= 2 else 1
+            paragraph = " ".join(unique[:take]).strip()
+            if paragraph:
+                paragraphs.append(f"<p>{escape(paragraph)}</p>")
+            unique = unique[take:]
+    return "".join(paragraphs)
 
 
 async def parse_and_enrich(html: str, url: str, fetch_desc: bool = True) -> dict[str, Any]:

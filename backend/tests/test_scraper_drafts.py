@@ -32,7 +32,8 @@ def _items():
 def test_scraper_added_product_starts_as_draft_then_publishes():
     client, items = _items()
     item_id = f"draft-item-{uuid.uuid4().hex}"
-    items.insert_one({"id": item_id, "title": "Draft import QA", "price_value": 24.5, "images": [], "category": "other", "item_id": item_id, "url": f"https://www.ebay.com.au/itm/{item_id}"})
+    raw_description = "First draft sentence. Second draft sentence. Third draft sentence. First draft sentence. Fourth draft sentence."
+    items.insert_one({"id": item_id, "title": "Draft import QA", "price_value": 24.5, "images": [], "category": "other", "description": raw_description, "item_id": item_id, "url": f"https://www.ebay.com.au/itm/{item_id}"})
     product_id = None
     try:
         created = requests.post(f"{API}/products/from-item/{item_id}", timeout=20)
@@ -41,6 +42,8 @@ def test_scraper_added_product_starts_as_draft_then_publishes():
         product_id = product["id"]
         assert product["draft"] is True
         assert product["active"] is False
+        assert product["description"].startswith("<p>")
+        assert product["description"].count("First draft sentence.") == 1
 
         saved = requests.patch(f"{API}/products/{product_id}", json={"title": "Draft import updated", "active": False}, timeout=20)
         assert saved.status_code == 200, saved.text

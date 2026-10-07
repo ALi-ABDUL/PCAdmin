@@ -230,6 +230,45 @@ async def _ensure_order_line_fulfillment_backfilled() -> None:
 _ITEM_RESULT_PROJECTION = {"_id": 0, "id": 1, "url": 1, "item_id": 1, "title": 1, "images": 1}
 
 
+def _retry_product_is_live(product: dict) -> bool:
+    """A scheduled retry may only touch an active, sellable linked product."""
+    if not product or product.get("active") is not True or product.get("archived") is True:
+        return False
+    if product.get("stock_status") != "live":
+        return False
+    try:
+        return int(product.get("stock") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+async def _retryable_item_docs(ids: list[str]) -> tuple[list[dict], list[str]]:
+    """Resolve failed item IDs to live products at retry time.
+
+    Scraped item rows can remain after their linked product has been sold,
+    archived, deleted, or deactivated. The product record is authoritative.
+    """
+    requested_ids = [item_id for item_id in ids if item_id]
+    docs = await db.items.find({"id": {"$in": requested_ids}}, _ITEM_RESULT_PROJECTION).to_list(1000)
+    refs = {value for item in docs for value in (item.get("id"), item.get("item_id")) if value}
+    products = await db.products.find(
+        {"source_item_id": {"$in": list(refs)}},
+        {"_id": 0, "source_item_id": 1, "active": 1, "archived": 1, "stock_status": 1, "stock": 1},
+    ).to_list(2000)
+    by_source: dict[str, list[dict]] = {}
+    for product in products:
+        if product.get("source_item_id"):
+            by_source.setdefault(product["source_item_id"], []).append(product)
+    eligible, skipped = [], [item_id for item_id in requested_ids if item_id not in {doc.get("id") for doc in docs}]
+    for item in docs:
+        candidates = by_source.get(item.get("item_id")) or by_source.get(item.get("id")) or []
+        if any(_retry_product_is_live(product) for product in candidates):
+            eligible.append(item)
+        else:
+            skipped.append(item.get("id"))
+    return eligible, [item_id for item_id in skipped if item_id]
+
+
 async def _scrape_one_item(it: dict, method: str = "auto", scrapingbee_key: Optional[str] = None, scraperapi_key: Optional[str] = None) -> dict:
     """Re-scrape a single stored item and return a per-item result row used by
     the Scraper Schedule results breakdown + retry endpoints."""
@@ -276,7 +315,7 @@ async def _retry_scrape_items(ids: list, method: str = "auto") -> dict:
     `last_run_results`, recomputing `last_run_stats`. Powers the per-item Retry
     and Retry-All-Failed buttons."""
     ids = [i for i in ids if i]
-    docs = await db.items.find({"id": {"$in": ids}}, _ITEM_RESULT_PROJECTION).to_list(1000)
+    docs, skipped_ids = await _retryable_item_docs(ids)
     updated = []
     for it in docs:
         updated.append(await _scrape_one_item(it, method=method))
@@ -298,7 +337,7 @@ async def _retry_scrape_items(ids: list, method: str = "auto") -> dict:
         {"$set": {"last_run_results": lrr, "last_run_stats": stats, "last_run_at": datetime.now(timezone.utc).isoformat()}},
         upsert=True,
     )
-    return {"results": lrr, "stats": stats, "retried": len(updated)}
+    return {"results": lrr, "stats": stats, "retried": len(updated), "attempted_ids": [row["id"] for row in updated], "skipped_ids": skipped_ids}
 
 
 async def _get_scraper_schedule() -> dict:
@@ -454,12 +493,16 @@ async def _refresh_all_and_record(method: str = "auto", trigger: str = "schedule
     failed_retry_pending: Optional[dict] = None
     if trigger == "scheduled" and attempt == 1 and failed_ids:
         cfg = await _auto_retry_cfg()
-        if cfg["enabled"]:
+        retry_docs, skipped_ids = await _retryable_item_docs(failed_ids)
+        eligible_ids = [doc["id"] for doc in retry_docs]
+        if skipped_ids:
+            logger.info(f"scraper schedule: skipped {len(skipped_ids)} failed item(s) without active live products")
+        if cfg["enabled"] and eligible_ids:
             retry_at = (finished + timedelta(minutes=cfg["delay_minutes"])).isoformat()
-            failed_retry_pending = {"retry_at": retry_at, "item_ids": failed_ids, "attempt": 1, "schedule_id": schedule_id}
-            logger.info(f"scraper schedule: queued item-retry of {len(failed_ids)} failed item(s) at {retry_at}")
+            failed_retry_pending = {"retry_at": retry_at, "item_ids": eligible_ids, "attempt": 1, "schedule_id": schedule_id}
+            logger.info(f"scraper schedule: queued item-retry of {len(eligible_ids)} active failed item(s) at {retry_at}")
         else:
-            logger.info("scraper schedule: auto-retry disabled — skipping item-retry queue")
+            logger.info("scraper schedule: auto-retry disabled or no active live failed items — skipping item-retry queue")
     await db.scraper_schedule.update_one(
         {"id": "singleton"},
         {"$set": {"failed_retry_pending": failed_retry_pending, "retry_pending": None}},
@@ -526,9 +569,10 @@ async def _run_failed_item_retry(pending: dict) -> None:
     result = await _retry_scrape_items(ids)
     finished = datetime.now(timezone.utc)
     lrr = result.get("results") or []
-    id_set = set(ids)
-    remaining = [r.get("id") for r in lrr if not r.get("ok") and r.get("id") in id_set]
-    recovered = len(ids) - len(remaining)
+    attempted_ids = set(result.get("attempted_ids") or [])
+    skipped_ids = list(result.get("skipped_ids") or [])
+    remaining = [r.get("id") for r in lrr if not r.get("ok") and r.get("id") in attempted_ids]
+    recovered = len(attempted_ids) - len(remaining)
     if not remaining:
         status = "success"
     elif attempt >= max_attempts:
@@ -543,7 +587,7 @@ async def _run_failed_item_retry(pending: dict) -> None:
         "status": status,
         "attempt": attempt,
         "trigger": "item_retry",
-        "stats": {"retried": len(ids), "recovered": recovered, "still_failed": len(remaining), "total": len(lrr)},
+        "stats": {"retried": len(attempted_ids), "skipped_inactive": len(skipped_ids), "recovered": recovered, "still_failed": len(remaining), "total": len(lrr)},
         "error": None,
         "schedule_id": schedule_id,
     })

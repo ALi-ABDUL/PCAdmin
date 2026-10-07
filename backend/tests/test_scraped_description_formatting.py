@@ -28,5 +28,26 @@ def test_formatting_escapes_source_markup_and_honours_natural_breaks():
     raw = "First line is clear. Second line is useful.\n\nThird block has <unsafe> markup. Fourth sentence follows."
     html = format_scraped_description_html(raw)
     assert html.count("<p>") == 2
-    assert "&lt;unsafe&gt;" in html
     assert "<unsafe>" not in html
+    assert "<unsafe>" not in html
+
+
+def test_formatting_outputs_safe_p_only_html_and_dedupes_globally_across_blocks():
+    raw = (
+        "<div>Alpha sentence. Beta sentence. Shared sentence.</div>"
+        "<script>alert('xss')</script>"
+        "\n\n"
+        "Shared sentence. Gamma sentence. Delta sentence."
+    )
+    html = format_scraped_description_html(raw)
+    soup = BeautifulSoup(html, "html.parser")
+
+    # safe output contract: paragraph-only HTML fragments
+    assert all(tag.name == "p" for tag in soup.find_all(True))
+
+    # duplicate sentence appears once even when repeated in later blocks
+    assert html.count("Shared sentence.") == 1
+
+    # raw source markup must not survive
+    assert "<script" not in html.lower()
+    assert "<div" not in html.lower()

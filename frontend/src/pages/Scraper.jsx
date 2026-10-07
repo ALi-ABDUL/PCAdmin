@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { AlertTriangle, BadgeCheck, Boxes, ClipboardPaste, Filter, ImageIcon, Loader2, MapPin, PackageX, Plus, RefreshCw, Search, Tags, Trash2, TrendingUp, X, Zap } from "lucide-react";
-import { API, KEYS, loadKeys, proxyImg } from "../lib/api";
+import { API, proxyImg } from "../lib/api";
 import { BackToTopButton } from "../components/BackToTopButton";
 import { Pagination, usePagePref } from "../components/Pagination";
 import { fmtDate, moneyCents } from "../lib/format";
@@ -11,7 +11,8 @@ import { Orders } from "./Orders";
 import { Products } from "./ProductsList";
 
 export function ScraperPage({ onView, onEditProduct }) {
-  const [url, setUrl] = useState(""); const [method, setMethod] = useState(loadKeys().method);
+  const [url, setUrl] = useState("");
+  const [providers, setProviders] = useState([]); const [selectedProviderId, setSelectedProviderId] = useState(null);
   const [loading, setLoading] = useState(false); const [status, setStatus] = useState("");
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
@@ -41,6 +42,29 @@ export function ScraperPage({ onView, onEditProduct }) {
   useEffect(() => {
     axios.get(`${API}/categories`).then((r) => setCategories(r.data.categories || [])).catch(() => {});
   }, []);
+
+  // The Sourcing selector intentionally lists only providers that have both
+  // been enabled and fully configured in Store Management → Integrations.
+  // Custom providers use their saved label, so entries such as ZenRows appear
+  // here automatically without another frontend release.
+  useEffect(() => {
+    const ready = (provider) => {
+      if (!provider.enabled) return false;
+      if (provider.type === "decodo") return provider.username_set && provider.password_set;
+      if (provider.type === "custom") {
+        const auth = provider.auth_mode || "query";
+        return !!provider.endpoint && (auth === "none" || provider.api_key_set || (provider.username_set && provider.password_set));
+      }
+      return provider.api_key_set;
+    };
+    axios.get(`${API}/scraper/apis`)
+      .then(({ data }) => setProviders((data.providers || []).filter(ready)))
+      .catch(() => setProviders([]));
+  }, []);
+
+  useEffect(() => {
+    if (selectedProviderId && !providers.some((provider) => provider.id === selectedProviderId)) setSelectedProviderId(null);
+  }, [providers, selectedProviderId]);
 
   // Fetch a lightweight existence map of every imported URL/item_id so the paste
   // input can warn about duplicates regardless of the current filter.
@@ -93,10 +117,12 @@ export function ScraperPage({ onView, onEditProduct }) {
     if (!url.trim()) return toast.error("Paste an eBay Australia URL");
     if (!/ebay\.com\.au/i.test(url)) return toast.error("Only ebay.com.au URLs are supported");
     if (dupItem && !window.confirm(`This URL is already imported as "${(dupItem.title || "").slice(0, 80)}". Import again anyway?`)) return;
+    const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
+    const importMethod = selectedProviderId || "auto";
     setLoading(true);
-    setStatus(method === "auto" ? "Trying stealth Chrome fingerprint (curl_cffi) …" : method === "manual" ? "Manual scrape (browser TLS impersonation) …" : `Requesting via ${method} …`);
+    setStatus(selectedProvider ? `Requesting via ${selectedProvider.label} …` : "Trying the automatic fallback chain …");
     try {
-      const { data } = await axios.post(`${API}/scrape`, { url: url.trim(), method, save: true }, { timeout: 120000 });
+      const { data } = await axios.post(`${API}/scrape`, { url: url.trim(), method: importMethod, save: true }, { timeout: 120000 });
       toast.success(`Imported via ${data.method_used}`, { description: data.item?.title?.slice(0, 90) });
       setUrl(""); await load(); await loadExistence();
     } catch (e) { toast.error("Import failed", { description: e?.response?.data?.detail?.slice(0, 220) || e.message }); }
@@ -129,7 +155,7 @@ export function ScraperPage({ onView, onEditProduct }) {
   const del = async (it) => { if (!window.confirm("Delete this scraped item?")) return; await axios.delete(`${API}/items/${it.id}`); toast.success("Deleted"); load(); };
   const refresh = async (it) => {
     toast.loading("Refreshing…", { id: it.id });
-    try { await axios.post(`${API}/items/${it.id}/refresh`, { url: it.url, method: method || "auto", save: true }, { timeout: 120000 });
+    try { await axios.post(`${API}/items/${it.id}/refresh`, { url: it.url, method: "auto", save: true }, { timeout: 120000 });
       toast.success("Refreshed", { id: it.id }); load(); }
     catch (e) { toast.error("Failed", { id: it.id, description: e?.response?.data?.detail?.slice(0,150) || e.message }); }
   };
@@ -139,7 +165,7 @@ export function ScraperPage({ onView, onEditProduct }) {
     if (!window.confirm("Re-scrape ALL eBay AU items now? This may take a while.")) return;
     setRefreshingAll(true); toast.loading("Refreshing all items…", { id: "ra" });
     try {
-      const { data } = await axios.post(`${API}/items/refresh-all`, { method: method || "auto" }, { timeout: 30 * 60 * 1000 });
+      const { data } = await axios.post(`${API}/items/refresh-all`, { method: "auto" }, { timeout: 30 * 60 * 1000 });
       toast.success(`Done · ${data.refreshed}/${data.total} refreshed · ${data.sold_found} sold`, { id: "ra", description: data.failed ? `${data.failed} failed` : undefined });
       await load();
     } catch (e) { toast.error("Refresh failed", { id: "ra", description: e?.response?.data?.detail?.slice(0,200) || e.message }); }
@@ -237,14 +263,19 @@ export function ScraperPage({ onView, onEditProduct }) {
           </div>
         )}
 
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mr-1">Method:</span>
-          {[
-            {id:"auto", label:"Auto"}, {id:"manual", label:"Manual"}, {id:"scrapingbee", label:"ScrapingBee"}, {id:"scraperapi", label:"ScraperAPI"}, {id:"scrapedo", label:"Scrape.do"}, {id:"brightdata", label:"Bright Data"}, {id:"decodo", label:"Decodo"}, {id:"webscrapingapi", label:"WebScrapingAPI"},
-          ].map((m) => (
-            <button key={m.id} data-testid={`method-${m.id}`} onClick={()=>{setMethod(m.id); localStorage.setItem(KEYS.method, m.id);}}
-              className={`chip cursor-pointer ${method===m.id ? "chip-primary" : "chip-neutral hover:bg-slate-100"}`}>{m.label}</button>
-          ))}
+        <div className="mt-5 pt-4 border-t hairline" data-testid="provider-selector">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500">Use a configured provider</div>
+            <div className="text-[11px] text-slate-500" data-testid="provider-selector-status">{selectedProviderId ? `Selected: ${providers.find((provider) => provider.id === selectedProviderId)?.label || "provider"}` : "No provider selected · automatic fallback will be used"}</div>
+          </div>
+          {providers.length > 0 ? (
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Configured scraping providers">
+              {providers.map((provider) => {
+                const selectedProvider = selectedProviderId === provider.id;
+                return <button key={provider.id} type="button" onClick={() => setSelectedProviderId((current) => current === provider.id ? null : provider.id)} aria-pressed={selectedProvider} data-testid={`provider-selector-${provider.id}`} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition-colors ${selectedProvider ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "hairline bg-white text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"}`}><span className={`w-1.5 h-1.5 rounded-full ${selectedProvider ? "bg-white" : "bg-emerald-500"}`}/>{provider.label}</button>;
+              })}
+            </div>
+          ) : <div className="text-sm text-slate-500" data-testid="provider-selector-empty">No enabled, configured providers yet. Importing will use the automatic fallback chain.</div>}
         </div>
 
         {status && <div className="mt-4 text-sm text-slate-500 flex items-center gap-2"><Loader2 size={14} className="animate-spin"/>{status}</div>}

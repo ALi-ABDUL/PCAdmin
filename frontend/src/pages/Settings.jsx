@@ -3,7 +3,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import { AlertTriangle, BadgeCheck, Copy, Database, Download, Globe2, Image as ImageIcon, KeyRound, LayoutGrid, LogIn, Lock, Mail, MailX, Moon, Palette, Pencil, Percent, Plus, RefreshCw, RotateCcw, Search, ShieldCheck, Sparkles, Store as StoreIcon, Sun, Trash2, Upload, UserPlus, X } from "lucide-react";
 import { Field } from "../components/atoms";
-import { API, KEYS, loadKeys } from "../lib/api";
+import { API } from "../lib/api";
 import { applyTheme } from "../lib/theme";
 import { getBranding, refreshBranding, saveBranding } from "../lib/branding";
 import { ADMIN_ROLES, loadAdminSession, saveAdminSession } from "../lib/adminSession";
@@ -196,7 +196,6 @@ export function CacheCard() {
   // rather than exact keys because Pagination/sort prefs use dynamic keys.
   const CACHE_GROUPS = [
     { id: "prefs",   label: "UI preferences",       hint: "Pagination sizes, column sort orders, dashboard layout, settings tab.", prefixes: ["page_size_", "sort_", "dashboard_", "settings_active_tab"] },
-    { id: "scraper", label: "Scraper preference",    hint: "Clears the preferred import method stored in this browser. Provider credentials remain securely saved on the server.", prefixes: [KEYS.method] },
     { id: "session", label: "Admin session",        hint: "Signs you out of the current admin/manager profile. Main admin restores on next load.", prefixes: ["admin_current_id", "admin_current_role"] },
     { id: "all",     label: "Everything (nuclear)", hint: "Wipes every key in localStorage for this browser. Theme falls back to Light.", prefixes: ["*"] },
   ];

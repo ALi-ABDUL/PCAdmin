@@ -14,6 +14,7 @@ import uuid
 from html import escape
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Any
+from urllib.parse import urlparse
 
 import resend
 import bleach
@@ -43,7 +44,7 @@ from models import (
     CATEGORIES, SEED_CATEGORIES, ScrapeRequest, ScrapedItem, WatchlistToggle, ProductCreate, 
     Product, ProductUpdate, ShippingAddress, _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, 
     OrderCreate, OrderLineInput, OrderLineFulfillmentUpdate, CartLineInput, CartUpdate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, CategoryCleanupScheduleUpdate, PaymentGatewayUpdate, PAYMENT_GATEWAY_DEFAULTS, ItemBulkAction, 
-    RefreshAllRequest, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
+    RefreshAllRequest, SCRAPER_API_SETTINGS_DEFAULTS, ScraperApiSettingsUpdate, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
     FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ScheduleEntryBody, ScraperSchedulesReplaceBody, AutoRetryConfigBody, ORDER_STATUSES, ReturnRequest, 
     AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate, PortalProfileUpdate,
     CouponBase, Coupon, ReviewBase, Review, JWT_ALGO, JWT_ACCESS_TTL, PortalRegisterBody, 
@@ -113,6 +114,89 @@ async def root():
 # Scraper
 # ---------------------------------------------------------------------------
 
+_SCRAPER_BUILTIN_IDS = ("scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi")
+
+
+def _mask_scraper_secret(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    return "•" * max(0, len(value) - 4) + value[-4:]
+
+
+async def _get_scraper_api_settings() -> dict:
+    saved = await db.scraper_api_settings.find_one({"id": "singleton"}, {"_id": 0})
+    if not saved:
+        seed = {**SCRAPER_API_SETTINGS_DEFAULTS}
+        await db.scraper_api_settings.insert_one(seed)
+        return seed
+    saved_by_id = {p.get("id"): p for p in (saved.get("providers") or []) if p.get("id")}
+    providers = []
+    for default in SCRAPER_API_SETTINGS_DEFAULTS["providers"]:
+        providers.append({**default, **(saved_by_id.pop(default["id"], {}))})
+    providers.extend(saved_by_id.values())
+    return {**SCRAPER_API_SETTINGS_DEFAULTS, **saved, "providers": providers}
+
+
+def _public_scraper_api_settings(settings: dict) -> dict:
+    public = []
+    for raw in settings.get("providers") or []:
+        provider = {k: v for k, v in raw.items() if k not in {"api_key", "username", "password"}}
+        for field in ("api_key", "username", "password"):
+            value = raw.get(field) or ""
+            provider[f"{field}_set"] = bool(value)
+            provider[f"{field}_masked"] = _mask_scraper_secret(value)
+        public.append(provider)
+    return {"providers": public}
+
+
+def _validate_custom_scraper_provider(provider: dict) -> None:
+    if provider.get("type") != "custom":
+        return
+    endpoint = (provider.get("endpoint") or "").strip()
+    parsed = urlparse(endpoint)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Custom provider endpoint must be a valid HTTPS URL")
+
+
+@api_router.get("/scraper/apis")
+async def get_scraper_apis(current_admin: dict = Depends(get_current_admin)):
+    return _public_scraper_api_settings(await _get_scraper_api_settings())
+
+
+@api_router.patch("/scraper/apis")
+async def patch_scraper_apis(body: ScraperApiSettingsUpdate, current_admin: dict = Depends(get_current_admin)):
+    existing = await _get_scraper_api_settings()
+    existing_by_id = {p.get("id"): p for p in existing.get("providers") or [] if p.get("id")}
+    incoming_ids = [p.id for p in body.providers]
+    if len(incoming_ids) != len(set(incoming_ids)):
+        raise HTTPException(status_code=400, detail="Each scraper provider needs a unique id")
+    updated = []
+    for entry in body.providers:
+        raw = entry.model_dump()
+        provider_id = re.sub(r"[^a-z0-9_-]", "", raw["id"].lower())
+        if not provider_id:
+            raise HTTPException(status_code=400, detail="Provider id is invalid")
+        raw["id"] = provider_id
+        if provider_id in _SCRAPER_BUILTIN_IDS:
+            raw["id"] = provider_id
+            raw["type"] = provider_id
+        elif raw.get("type") != "custom":
+            raise HTTPException(status_code=400, detail="Only the built-in providers or type=custom are supported")
+        _validate_custom_scraper_provider(raw)
+        previous = existing_by_id.get(provider_id, {})
+        # Empty / omitted secrets never wipe a saved credential. This lets the
+        # browser submit the masked public shape without ever receiving a key.
+        for secret in ("api_key", "username", "password"):
+            if not raw.get(secret):
+                raw[secret] = previous.get(secret) or ""
+        updated.append(raw)
+    present = {p["id"] for p in updated}
+    for default in SCRAPER_API_SETTINGS_DEFAULTS["providers"]:
+        if default["id"] not in present:
+            updated.append({**default, **existing_by_id.get(default["id"], {})})
+    await db.scraper_api_settings.update_one({"id": "singleton"}, {"$set": {"providers": updated, "updated_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+    return _public_scraper_api_settings(await _get_scraper_api_settings())
+
 @api_router.post("/scrape")
 async def scrape(req: ScrapeRequest) -> dict:
     try:
@@ -126,6 +210,7 @@ async def scrape(req: ScrapeRequest) -> dict:
             method=req.method,
             scrapingbee_key=req.scrapingbee_key or None,
             scraperapi_key=req.scraperapi_key or None,
+            providers=(await _get_scraper_api_settings()).get("providers") or [],
         )
     except BlockedError as e:
         # Failed / blocked scrapes are silent — no admin notification.

@@ -404,51 +404,177 @@ async def _fetch_scraperapi(url: str, api_key: str) -> str:
         return resp.text
 
 
+async def _fetch_scrapedo(url: str, api_key: str) -> str:
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.get("https://api.scrape.do", params={"token": api_key, "url": url, "country": "au"})
+        if resp.status_code != 200:
+            raise ScrapeError(f"Scrape.do error {resp.status_code}")
+        return resp.text
+
+
+async def _fetch_webscrapingapi(url: str, api_key: str) -> str:
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.get("https://api.webscrapingapi.com/v2", params={"api_key": api_key, "url": url, "country": "au"})
+        if resp.status_code != 200:
+            raise ScrapeError(f"WebScrapingAPI error {resp.status_code}")
+        return resp.text
+
+
+async def _fetch_brightdata(url: str, provider: dict) -> str:
+    key = provider.get("api_key") or ""
+    zone = provider.get("username") or ""
+    if not key:
+        raise ScrapeError("Bright Data API key is required.")
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            provider.get("endpoint") or "https://api.brightdata.com/request",
+            headers={"Authorization": f"Bearer {key}"},
+            json={"zone": zone, "url": url, "format": "raw"},
+        )
+        if resp.status_code != 200:
+            raise ScrapeError(f"Bright Data error {resp.status_code}")
+        return resp.text
+
+
+async def _fetch_decodo(url: str, provider: dict) -> str:
+    username, password = provider.get("username") or "", provider.get("password") or ""
+    if not username or not password:
+        raise ScrapeError("Decodo username and password are required.")
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            provider.get("endpoint") or "https://scrape.decodo.com/v1/tasks",
+            auth=(username, password),
+            json={"target": "universal", "url": url, "headless": "html"},
+        )
+        if resp.status_code != 200:
+            raise ScrapeError(f"Decodo error {resp.status_code}")
+        try:
+            payload = resp.json()
+            return payload.get("results", [{}])[0].get("content") or payload.get("content") or resp.text
+        except Exception:
+            return resp.text
+
+
+async def _fetch_custom(url: str, provider: dict) -> str:
+    endpoint = (provider.get("endpoint") or "").strip()
+    parsed = urlparse(endpoint)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ScrapeError("Custom provider endpoint must be a valid HTTPS URL.")
+    auth_mode = provider.get("auth_mode") or "query"
+    key_param, url_param = provider.get("api_key_param") or "api_key", provider.get("url_param") or "url"
+    payload = {url_param: url}
+    headers: dict[str, str] = {}
+    auth = None
+    if auth_mode == "query":
+        if not provider.get("api_key"):
+            raise ScrapeError("Custom provider API key is required for query authentication.")
+        payload[key_param] = provider["api_key"]
+    elif auth_mode == "bearer":
+        if not provider.get("api_key"):
+            raise ScrapeError("Custom provider API key is required for bearer authentication.")
+        headers["Authorization"] = f"Bearer {provider['api_key']}"
+    elif auth_mode == "basic":
+        if not provider.get("username") or not provider.get("password"):
+            raise ScrapeError("Custom provider username and password are required for basic authentication.")
+        auth = (provider["username"], provider["password"])
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        if (provider.get("request_method") or "get") == "post":
+            resp = await client.post(endpoint, json=payload, headers=headers, auth=auth)
+        else:
+            resp = await client.get(endpoint, params=payload, headers=headers, auth=auth)
+        if resp.status_code != 200:
+            raise ScrapeError(f"Custom provider error {resp.status_code}")
+        try:
+            body = resp.json()
+            if isinstance(body, dict):
+                return body.get("html") or body.get("content") or body.get("body") or resp.text
+        except Exception:
+            pass
+        return resp.text
+
+
+def _provider_ready(provider: dict) -> bool:
+    provider_type = provider.get("type") or provider.get("id")
+    if provider_type == "decodo":
+        return bool(provider.get("username") and provider.get("password"))
+    if provider_type == "custom":
+        mode = provider.get("auth_mode") or "query"
+        return bool(provider.get("endpoint")) and (mode == "none" or bool(provider.get("api_key")) or bool(provider.get("username") and provider.get("password")))
+    return bool(provider.get("api_key"))
+
+
+async def _fetch_provider(url: str, provider: dict) -> str:
+    provider_type = provider.get("type") or provider.get("id")
+    if provider_type == "scrapingbee":
+        return await _fetch_scrapingbee(url, provider.get("api_key") or "")
+    if provider_type == "scraperapi":
+        return await _fetch_scraperapi(url, provider.get("api_key") or "")
+    if provider_type == "scrapedo":
+        return await _fetch_scrapedo(url, provider.get("api_key") or "")
+    if provider_type == "brightdata":
+        return await _fetch_brightdata(url, provider)
+    if provider_type == "decodo":
+        return await _fetch_decodo(url, provider)
+    if provider_type == "webscrapingapi":
+        return await _fetch_webscrapingapi(url, provider.get("api_key") or "")
+    if provider_type == "custom":
+        return await _fetch_custom(url, provider)
+    raise ScrapeError(f"Unknown scraper provider: {provider_type}")
+
+
 async def fetch_html(
     url: str,
     method: str = "auto",
     scrapingbee_key: Optional[str] = None,
     scraperapi_key: Optional[str] = None,
+    providers: Optional[list[dict]] = None,
 ) -> tuple[str, str]:
     """Fetch HTML for a URL, returning (html, method_used).
 
-    method: 'manual', 'scrapingbee', 'scraperapi', or 'auto' (manual -> scrapingbee -> scraperapi).
+    Auto is deterministic: manual, then enabled configured providers in the
+    fixed built-in order, then custom providers in their saved order.
     """
     errors: list[str] = []
 
     if method == "manual":
         return await _fetch_manual(url), "manual"
 
-    if method == "scrapingbee":
-        if not scrapingbee_key:
-            raise ScrapeError("ScrapingBee API key is required for this method.")
-        return await _fetch_scrapingbee(url, scrapingbee_key), "scrapingbee"
+    configured = [dict(p) for p in (providers or [])]
+    # Backwards-compatible request-body keys are only used when there is no
+    # saved value for that legacy provider. The dashboard itself never sends them.
+    for provider_id, legacy_key in (("scrapingbee", scrapingbee_key), ("scraperapi", scraperapi_key)):
+        if legacy_key and not any(p.get("id") == provider_id and p.get("api_key") for p in configured):
+            configured.append({"id": provider_id, "type": provider_id, "label": provider_id, "enabled": True, "api_key": legacy_key})
 
-    if method == "scraperapi":
-        if not scraperapi_key:
-            raise ScrapeError("ScraperAPI API key is required for this method.")
-        return await _fetch_scraperapi(url, scraperapi_key), "scraperapi"
+    by_id = {p.get("id"): p for p in configured if p.get("id")}
+    if method != "auto":
+        provider = by_id.get(method)
+        if not provider:
+            raise ScrapeError(f"{method} is not configured in Scraper APIs settings.")
+        if not provider.get("enabled"):
+            raise ScrapeError(f"{provider.get('label') or method} is disabled in Scraper APIs settings.")
+        if not _provider_ready(provider):
+            raise ScrapeError(f"{provider.get('label') or method} credentials are incomplete.")
+        return await _fetch_provider(url, provider), method
 
-    # auto: manual -> scrapingbee -> scraperapi
+    # auto: manual -> ScrapingBee -> ScraperAPI -> Scrape.do -> Bright Data -> Decodo -> WebScrapingAPI -> custom
     try:
         html = await _fetch_manual(url)
         return html, "manual"
     except Exception as e:
         errors.append(f"manual: {e}")
 
-    if scrapingbee_key:
+    ordered_ids = ["scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi"]
+    ordered_providers = [by_id[pid] for pid in ordered_ids if pid in by_id]
+    ordered_providers.extend(p for p in configured if p.get("type") == "custom" and p.get("enabled") and p not in ordered_providers)
+    for provider in ordered_providers:
+        if not provider.get("enabled") or not _provider_ready(provider):
+            continue
         try:
-            html = await _fetch_scrapingbee(url, scrapingbee_key)
-            return html, "scrapingbee"
+            html = await _fetch_provider(url, provider)
+            return html, provider.get("id") or provider.get("type") or "custom"
         except Exception as e:
-            errors.append(f"scrapingbee: {e}")
-
-    if scraperapi_key:
-        try:
-            html = await _fetch_scraperapi(url, scraperapi_key)
-            return html, "scraperapi"
-        except Exception as e:
-            errors.append(f"scraperapi: {e}")
+            errors.append(f"{provider.get('label') or provider.get('id')}: {e}")
 
     raise BlockedError(" | ".join(errors) if errors else "All scrape methods failed.")
 

@@ -425,6 +425,13 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
 - Testing agent iteration_5.json: 100% pass (backend + frontend), no defects.
 
 ## Backlog / roadmap
+### Scraper API Provider Settings + Dynamic Fallback (2026-10-07) ✅
+- **Secure credentials** — new admin-only `GET/PATCH /api/scraper/apis` stores provider settings in the `scraper_api_settings` Mongo singleton. Raw `api_key`, `username`, and `password` values never leave the server; the dashboard receives only `*_set` and masked metadata.
+- **Providers** — supports ScrapingBee, ScraperAPI, Scrape.do, Bright Data, Decodo, WebScrapingAPI, plus admin-defined custom HTTPS providers with GET/POST, query-key, bearer, basic-auth, or no-auth configurations.
+- **Deterministic Auto chain** — `fetch_html(..., method="auto")` attempts Manual anti-bot retrieval first, then enabled/configured providers in this fixed order: ScrapingBee → ScraperAPI → Scrape.do → Bright Data → Decodo → WebScrapingAPI → custom providers in their saved order. Disabled or incomplete providers are skipped without a network request.
+- **Admin UI** — Settings now includes **Scraper APIs**, with secure credential fields, provider enable toggles, custom-provider builder, and no browser-stored provider keys. Product Sourcing exposes all six explicit provider methods alongside Auto and Manual.
+- **Verification** — `backend/tests/test_scraper_provider_fallback.py` and testing-agent regression `test_scraper_apis_auth_and_settings.py` passed. Frontend build, authenticated settings flow, provider masking, custom-provider persistence/removal, and method-chip rendering passed. No live provider or eBay fetch was executed.
+
 ### P1
 - Bulk import (paste multiple eBay URLs)
 - CSV/JSON export for products & orders

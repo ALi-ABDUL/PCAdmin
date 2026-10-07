@@ -8,6 +8,7 @@ import { applyTheme } from "../lib/theme";
 import { getBranding, refreshBranding, saveBranding } from "../lib/branding";
 import { ADMIN_ROLES, loadAdminSession, saveAdminSession } from "../lib/adminSession";
 import { DASHBOARD_WIDGETS, loadDashboardLayout, resetDashboardLayout, saveDashboardLayout } from "../lib/dashboardLayout";
+import { ScraperApiSettingsCard } from "../components/ScraperApiSettingsCard";
 
 const TABS = [
   { id: "theme",      label: "Theme",            icon: Palette },
@@ -15,6 +16,7 @@ const TABS = [
   { id: "accounts",   label: "Accounts",         icon: ShieldCheck },
   { id: "security",   label: "Security",         icon: Lock },
   { id: "storefront", label: "Storefront",       icon: StoreIcon },
+  { id: "scraper-apis", label: "Scraper APIs",   icon: Globe2 },
   { id: "layout",     label: "Dashboard Layout", icon: LayoutGrid },
   { id: "cache",      label: "Cache",            icon: RotateCcw },
   { id: "backup",     label: "Backup",           icon: Database },
@@ -60,6 +62,7 @@ export function SettingsPage() {
       {activeTab === "accounts" && <AccountsCard/>}
       {activeTab === "security" && <SecurityCard/>}
       {activeTab === "storefront" && <StorefrontDisplayCard/>}
+      {activeTab === "scraper-apis" && <ScraperApiSettingsCard/>}
       {activeTab === "layout"   && <DashboardLayoutCard/>}
       {activeTab === "cache"    && <CacheCard/>}
       {activeTab === "backup"   && <BackupCard/>}
@@ -193,7 +196,7 @@ export function CacheCard() {
   // rather than exact keys because Pagination/sort prefs use dynamic keys.
   const CACHE_GROUPS = [
     { id: "prefs",   label: "UI preferences",       hint: "Pagination sizes, column sort orders, dashboard layout, settings tab.", prefixes: ["page_size_", "sort_", "dashboard_", "settings_active_tab"] },
-    { id: "scraper", label: "Scraper API keys",     hint: "ScrapingBee / ScraperAPI keys stored in this browser.", prefixes: [KEYS.sb, KEYS.sa, KEYS.method] },
+    { id: "scraper", label: "Scraper preference",    hint: "Clears the preferred import method stored in this browser. Provider credentials remain securely saved on the server.", prefixes: [KEYS.method] },
     { id: "session", label: "Admin session",        hint: "Signs you out of the current admin/manager profile. Main admin restores on next load.", prefixes: ["admin_current_id", "admin_current_role"] },
     { id: "all",     label: "Everything (nuclear)", hint: "Wipes every key in localStorage for this browser. Theme falls back to Light.", prefixes: ["*"] },
   ];

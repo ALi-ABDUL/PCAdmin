@@ -93,10 +93,10 @@ export function ScraperPage({ onView, onEditProduct }) {
     if (!url.trim()) return toast.error("Paste an eBay Australia URL");
     if (!/ebay\.com\.au/i.test(url)) return toast.error("Only ebay.com.au URLs are supported");
     if (dupItem && !window.confirm(`This URL is already imported as "${(dupItem.title || "").slice(0, 80)}". Import again anyway?`)) return;
-    const keys = loadKeys(); setLoading(true);
+    setLoading(true);
     setStatus(method === "auto" ? "Trying stealth Chrome fingerprint (curl_cffi) …" : method === "manual" ? "Manual scrape (browser TLS impersonation) …" : `Requesting via ${method} …`);
     try {
-      const { data } = await axios.post(`${API}/scrape`, { url: url.trim(), method, save: true, scrapingbee_key: keys.scrapingbee_key || undefined, scraperapi_key: keys.scraperapi_key || undefined }, { timeout: 120000 });
+      const { data } = await axios.post(`${API}/scrape`, { url: url.trim(), method, save: true }, { timeout: 120000 });
       toast.success(`Imported via ${data.method_used}`, { description: data.item?.title?.slice(0, 90) });
       setUrl(""); await load(); await loadExistence();
     } catch (e) { toast.error("Import failed", { description: e?.response?.data?.detail?.slice(0, 220) || e.message }); }
@@ -128,9 +128,8 @@ export function ScraperPage({ onView, onEditProduct }) {
 
   const del = async (it) => { if (!window.confirm("Delete this scraped item?")) return; await axios.delete(`${API}/items/${it.id}`); toast.success("Deleted"); load(); };
   const refresh = async (it) => {
-    const keys = loadKeys();
     toast.loading("Refreshing…", { id: it.id });
-    try { await axios.post(`${API}/items/${it.id}/refresh`, { url: it.url, method: keys.method || "auto", scrapingbee_key: keys.scrapingbee_key || undefined, scraperapi_key: keys.scraperapi_key || undefined, save: true }, { timeout: 120000 });
+    try { await axios.post(`${API}/items/${it.id}/refresh`, { url: it.url, method: method || "auto", save: true }, { timeout: 120000 });
       toast.success("Refreshed", { id: it.id }); load(); }
     catch (e) { toast.error("Failed", { id: it.id, description: e?.response?.data?.detail?.slice(0,150) || e.message }); }
   };
@@ -138,10 +137,9 @@ export function ScraperPage({ onView, onEditProduct }) {
   const [refreshingAll, setRefreshingAll] = useState(false);
   const refreshAll = async () => {
     if (!window.confirm("Re-scrape ALL eBay AU items now? This may take a while.")) return;
-    const keys = loadKeys();
     setRefreshingAll(true); toast.loading("Refreshing all items…", { id: "ra" });
     try {
-      const { data } = await axios.post(`${API}/items/refresh-all`, { method: keys.method || "auto", scrapingbee_key: keys.scrapingbee_key || undefined, scraperapi_key: keys.scraperapi_key || undefined }, { timeout: 30 * 60 * 1000 });
+      const { data } = await axios.post(`${API}/items/refresh-all`, { method: method || "auto" }, { timeout: 30 * 60 * 1000 });
       toast.success(`Done · ${data.refreshed}/${data.total} refreshed · ${data.sold_found} sold`, { id: "ra", description: data.failed ? `${data.failed} failed` : undefined });
       await load();
     } catch (e) { toast.error("Refresh failed", { id: "ra", description: e?.response?.data?.detail?.slice(0,200) || e.message }); }
@@ -205,7 +203,7 @@ export function ScraperPage({ onView, onEditProduct }) {
           <span className="chip chip-success">Chrome TLS fingerprint</span>
         </div>
         <h2 className="font-display text-2xl md:text-3xl font-bold tracking-tight">Paste an eBay Australia item URL to import</h2>
-        <p className="text-slate-500 text-sm mt-1">Manual server-side stealth scrape (curl_cffi Chrome impersonation) with ScrapingBee & ScraperAPI as fallback. Auto-refreshes every night.</p>
+          <p className="text-slate-500 text-sm mt-1">Manual server-side stealth scraping with a secure, server-managed provider fallback chain. Auto-refreshes every night.</p>
 
         <div className="mt-5 flex flex-col md:flex-row gap-3">
           <div className="relative flex-1">
@@ -242,7 +240,7 @@ export function ScraperPage({ onView, onEditProduct }) {
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <span className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mr-1">Method:</span>
           {[
-            {id:"auto", label:"Auto"}, {id:"manual", label:"Manual"}, {id:"scrapingbee", label:"ScrapingBee"}, {id:"scraperapi", label:"ScraperAPI"},
+            {id:"auto", label:"Auto"}, {id:"manual", label:"Manual"}, {id:"scrapingbee", label:"ScrapingBee"}, {id:"scraperapi", label:"ScraperAPI"}, {id:"scrapedo", label:"Scrape.do"}, {id:"brightdata", label:"Bright Data"}, {id:"decodo", label:"Decodo"}, {id:"webscrapingapi", label:"WebScrapingAPI"},
           ].map((m) => (
             <button key={m.id} data-testid={`method-${m.id}`} onClick={()=>{setMethod(m.id); localStorage.setItem(KEYS.method, m.id);}}
               className={`chip cursor-pointer ${method===m.id ? "chip-primary" : "chip-neutral hover:bg-slate-100"}`}>{m.label}</button>

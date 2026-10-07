@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 
 
-__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'OrderLineInput', 'OrderLineFulfillmentUpdate', 'CartLineInput', 'CartUpdate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'CategoryCleanupScheduleUpdate', 'CATEGORY_CLEANUP_SCHEDULE_DEFAULTS', 'PaymentMethodToggles', 'StripeGatewayUpdate', 'PayPalGatewayUpdate', 'PaymentGatewayUpdate', 'PAYMENT_GATEWAY_DEFAULTS', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'PortalProfileUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'SITE_PAGES', 'SITE_PAGE_SLUGS', 'SITE_MENUS_DEFAULTS', 'GetHelpLinkBody', 'FaqItemBody', 'ContactFormConfigBody', 'FooterLinkBody', 'FooterConfigBody', 'SupportContactBody', 'SiteMenusUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate', '_DEFAULT_STORE_DISPLAY', 'StoreDisplaySettingsUpdate', 'GoogleSignInSettingsUpdate', 'GOOGLE_SIGNIN_SETTINGS_DEFAULTS', 'VerifyTokenBody', 'ResendVerificationBody', 'VERIFICATION_TOKEN_TTL_HOURS', '_DEFAULT_EMAIL_TEMPLATES', 'VerificationTemplate', 'EmailTemplateUpdate', 'EmailBrandUpdate', 'EmailTemplatesUpdate', 'EMAIL_TEMPLATE_IDS', '_DEFAULT_STORE_BRANDING', 'StoreBrandingUpdate', 'TAG_SETTINGS_DEFAULTS', 'TagSettingsUpdate']
+__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'OrderLineInput', 'OrderLineFulfillmentUpdate', 'CartLineInput', 'CartUpdate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'CategoryCleanupScheduleUpdate', 'CATEGORY_CLEANUP_SCHEDULE_DEFAULTS', 'PaymentMethodToggles', 'StripeGatewayUpdate', 'PayPalGatewayUpdate', 'PaymentGatewayUpdate', 'PAYMENT_GATEWAY_DEFAULTS', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_API_SETTINGS_DEFAULTS', 'ScraperApiProviderUpdate', 'ScraperApiSettingsUpdate', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'PortalProfileUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'SITE_PAGES', 'SITE_PAGE_SLUGS', 'SITE_MENUS_DEFAULTS', 'GetHelpLinkBody', 'FaqItemBody', 'ContactFormConfigBody', 'FooterLinkBody', 'FooterConfigBody', 'SupportContactBody', 'SiteMenusUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate', '_DEFAULT_STORE_DISPLAY', 'StoreDisplaySettingsUpdate', 'GoogleSignInSettingsUpdate', 'GOOGLE_SIGNIN_SETTINGS_DEFAULTS', 'VerifyTokenBody', 'ResendVerificationBody', 'VERIFICATION_TOKEN_TTL_HOURS', '_DEFAULT_EMAIL_TEMPLATES', 'VerificationTemplate', 'EmailTemplateUpdate', 'EmailBrandUpdate', 'EmailTemplatesUpdate', 'EMAIL_TEMPLATE_IDS', '_DEFAULT_STORE_BRANDING', 'StoreBrandingUpdate', 'TAG_SETTINGS_DEFAULTS', 'TagSettingsUpdate']
 
 
 CATEGORIES = ["electronics", "home", "tools", "apparel", "other"]
@@ -447,6 +447,40 @@ class RefreshAllRequest(BaseModel):
     method: str = "auto"
     scrapingbee_key: Optional[str] = None
     scraperapi_key: Optional[str] = None
+
+
+# Scraper provider credentials live only in the database. GET responses are
+# masked by the API, while this update model accepts fresh secret values only.
+SCRAPER_API_SETTINGS_DEFAULTS: dict = {
+    "id": "singleton",
+    "providers": [
+        {"id": "scrapingbee", "type": "scrapingbee", "label": "ScrapingBee", "enabled": True},
+        {"id": "scraperapi", "type": "scraperapi", "label": "ScraperAPI", "enabled": True},
+        {"id": "scrapedo", "type": "scrapedo", "label": "Scrape.do", "enabled": True},
+        {"id": "brightdata", "type": "brightdata", "label": "Bright Data", "enabled": True},
+        {"id": "decodo", "type": "decodo", "label": "Decodo", "enabled": True},
+        {"id": "webscrapingapi", "type": "webscrapingapi", "label": "WebScrapingAPI", "enabled": True},
+    ],
+}
+
+
+class ScraperApiProviderUpdate(BaseModel):
+    id: str = Field(min_length=2, max_length=80)
+    type: str = Field(default="custom", max_length=40)
+    label: str = Field(default="Custom provider", min_length=1, max_length=120)
+    enabled: bool = True
+    api_key: Optional[str] = Field(default=None, max_length=4000)
+    username: Optional[str] = Field(default=None, max_length=1000)
+    password: Optional[str] = Field(default=None, max_length=4000)
+    endpoint: Optional[str] = Field(default=None, max_length=2000)
+    request_method: Optional[Literal["get", "post"]] = "get"
+    auth_mode: Optional[Literal["query", "bearer", "basic", "none"]] = "query"
+    api_key_param: Optional[str] = Field(default="api_key", max_length=120)
+    url_param: Optional[str] = Field(default="url", max_length=120)
+
+
+class ScraperApiSettingsUpdate(BaseModel):
+    providers: List[ScraperApiProviderUpdate] = Field(default_factory=list, max_length=30)
 
 SCRAPER_SCHEDULE_DEFAULTS: dict = {
     "id": "singleton",

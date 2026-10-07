@@ -8,7 +8,6 @@ import { applyTheme } from "../lib/theme";
 import { getBranding, refreshBranding, saveBranding } from "../lib/branding";
 import { ADMIN_ROLES, loadAdminSession, saveAdminSession } from "../lib/adminSession";
 import { DASHBOARD_WIDGETS, loadDashboardLayout, resetDashboardLayout, saveDashboardLayout } from "../lib/dashboardLayout";
-import { ScraperApiSettingsCard } from "../components/ScraperApiSettingsCard";
 
 const TABS = [
   { id: "theme",      label: "Theme",            icon: Palette },
@@ -16,7 +15,6 @@ const TABS = [
   { id: "accounts",   label: "Accounts",         icon: ShieldCheck },
   { id: "security",   label: "Security",         icon: Lock },
   { id: "storefront", label: "Storefront",       icon: StoreIcon },
-  { id: "scraper-apis", label: "Scraper APIs",   icon: Globe2 },
   { id: "layout",     label: "Dashboard Layout", icon: LayoutGrid },
   { id: "cache",      label: "Cache",            icon: RotateCcw },
   { id: "backup",     label: "Backup",           icon: Database },
@@ -29,7 +27,10 @@ export function SettingsPage() {
   // where they left off. Small quality-of-life win when hopping between
   // Accounts + Backup during onboarding.
   const [activeTab, setActiveTab] = useState(() => {
-    try { return localStorage.getItem(TAB_STORAGE) || "theme"; } catch { return "theme"; }
+    try {
+      const saved = localStorage.getItem(TAB_STORAGE);
+      return TABS.some((tab) => tab.id === saved) ? saved : "theme";
+    } catch { return "theme"; }
   });
   const pickTab = (id) => {
     setActiveTab(id);
@@ -62,7 +63,6 @@ export function SettingsPage() {
       {activeTab === "accounts" && <AccountsCard/>}
       {activeTab === "security" && <SecurityCard/>}
       {activeTab === "storefront" && <StorefrontDisplayCard/>}
-      {activeTab === "scraper-apis" && <ScraperApiSettingsCard/>}
       {activeTab === "layout"   && <DashboardLayoutCard/>}
       {activeTab === "cache"    && <CacheCard/>}
       {activeTab === "backup"   && <BackupCard/>}

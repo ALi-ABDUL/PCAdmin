@@ -10,6 +10,7 @@ import { STORE_NAV } from "../lib/nav";
 import { calcPricingWithRules, usePricingRules, _refreshPricingRules } from "../lib/pricing";
 import { Analytics } from "./Analytics";
 import { Dashboard } from "./Dashboard";
+import { ScraperApiSettingsCard } from "../components/ScraperApiSettingsCard";
 
 export function PricingRulesEditor() {
   const [rules, setRules] = useState([]);
@@ -1101,6 +1102,10 @@ export function IntegrationsPanel() {
     <div className="grid gap-3" data-testid="integrations-panel">
       <ResendIntegrationCard/>
       <div className="pt-3"><div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2" data-testid="auth-social-integrations-heading">Authentication &amp; social</div><GoogleSignInIntegrationCard/></div>
+      <div className="pt-3" data-testid="scraper-integrations-section">
+        <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2" data-testid="scraper-integrations-heading">Product sourcing</div>
+        <ScraperApiSettingsCard/>
+      </div>
       {others.map((f, i) => (
         <div key={f} className="card p-4 md:p-5 flex items-center justify-between gap-4 group hover:shadow-md transition-shadow">
           <div className="flex items-center gap-3 min-w-0">

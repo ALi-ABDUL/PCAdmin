@@ -431,6 +431,7 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
 - **Deterministic Auto chain** — `fetch_html(..., method="auto")` attempts Manual anti-bot retrieval first, then enabled/configured providers in this fixed order: ScrapingBee → ScraperAPI → Scrape.do → Bright Data → Decodo → WebScrapingAPI → custom providers in their saved order. Disabled or incomplete providers are skipped without a network request.
 - **Admin UI** — Settings now includes **Scraper APIs**, with secure credential fields, provider enable toggles, custom-provider builder, and no browser-stored provider keys. Product Sourcing exposes all six explicit provider methods alongside Auto and Manual.
 - **Verification** — `backend/tests/test_scraper_provider_fallback.py` and testing-agent regression `test_scraper_apis_auth_and_settings.py` passed. Frontend build, authenticated settings flow, provider masking, custom-provider persistence/removal, and method-chip rendering passed. No live provider or eBay fetch was executed.
+- **Navigation update (2026-10-07)** — the Scraper APIs card now lives in **Store Management → Integrations → Product sourcing**, alongside other external service configuration. It was removed from Admin Settings; stale saved Settings-tab selections safely fall back to Theme.
 
 ### P1
 - Bulk import (paste multiple eBay URLs)

@@ -12,7 +12,7 @@ import { Products } from "./ProductsList";
 
 export function ScraperPage({ onView, onEditProduct }) {
   const [url, setUrl] = useState("");
-  const [providers, setProviders] = useState([]); const [selectedProviderId, setSelectedProviderId] = useState(null);
+  const [providers, setProviders] = useState([]); const [scrapeMethod, setScrapeMethod] = useState("auto");
   const [loading, setLoading] = useState(false); const [status, setStatus] = useState("");
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
@@ -63,8 +63,9 @@ export function ScraperPage({ onView, onEditProduct }) {
   }, []);
 
   useEffect(() => {
-    if (selectedProviderId && !providers.some((provider) => provider.id === selectedProviderId)) setSelectedProviderId(null);
-  }, [providers, selectedProviderId]);
+    const isFixedMethod = scrapeMethod === "auto" || scrapeMethod === "manual";
+    if (!isFixedMethod && !providers.some((provider) => provider.id === scrapeMethod)) setScrapeMethod("auto");
+  }, [providers, scrapeMethod]);
 
   // Fetch a lightweight existence map of every imported URL/item_id so the paste
   // input can warn about duplicates regardless of the current filter.
@@ -117,10 +118,10 @@ export function ScraperPage({ onView, onEditProduct }) {
     if (!url.trim()) return toast.error("Paste an eBay Australia URL");
     if (!/ebay\.com\.au/i.test(url)) return toast.error("Only ebay.com.au URLs are supported");
     if (dupItem && !window.confirm(`This URL is already imported as "${(dupItem.title || "").slice(0, 80)}". Import again anyway?`)) return;
-    const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
-    const importMethod = selectedProviderId || "auto";
+    const selectedProvider = providers.find((provider) => provider.id === scrapeMethod);
+    const importMethod = scrapeMethod;
     setLoading(true);
-    setStatus(selectedProvider ? `Requesting via ${selectedProvider.label} …` : "Trying the automatic fallback chain …");
+    setStatus(selectedProvider ? `Requesting via ${selectedProvider.label} …` : scrapeMethod === "manual" ? "Using manual browser TLS impersonation …" : "Trying the automatic fallback chain …");
     try {
       const { data } = await axios.post(`${API}/scrape`, { url: url.trim(), method: importMethod, save: true }, { timeout: 120000 });
       toast.success(`Imported via ${data.method_used}`, { description: data.item?.title?.slice(0, 90) });
@@ -264,18 +265,30 @@ export function ScraperPage({ onView, onEditProduct }) {
         )}
 
         <div className="mt-5 pt-4 border-t hairline" data-testid="provider-selector">
-          <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
-            <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500">Use a configured provider</div>
-            <div className="text-[11px] text-slate-500" data-testid="provider-selector-status">{selectedProviderId ? `Selected: ${providers.find((provider) => provider.id === selectedProviderId)?.label || "provider"}` : "No provider selected · automatic fallback will be used"}</div>
+          <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-2">Scraping method</div>
+          <div className="flex flex-wrap items-center gap-2" data-testid="fixed-method-options">
+            {[{ id: "auto", label: "Auto" }, { id: "manual", label: "Manual" }].map((option) => {
+              const active = scrapeMethod === option.id;
+              return <button key={option.id} type="button" onClick={() => setScrapeMethod(option.id)} aria-pressed={active} data-testid={`sourcing-method-${option.id}`} className={`chip cursor-pointer transition-colors ${active ? "chip-primary" : "chip-neutral hover:bg-slate-100"}`}>{option.label}</button>;
+            })}
           </div>
-          {providers.length > 0 ? (
-            <div className="flex flex-wrap gap-2" role="group" aria-label="Configured scraping providers">
-              {providers.map((provider) => {
-                const selectedProvider = selectedProviderId === provider.id;
-                return <button key={provider.id} type="button" onClick={() => setSelectedProviderId((current) => current === provider.id ? null : provider.id)} aria-pressed={selectedProvider} data-testid={`provider-selector-${provider.id}`} className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition-colors ${selectedProvider ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "hairline bg-white text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"}`}><span className={`w-1.5 h-1.5 rounded-full ${selectedProvider ? "bg-white" : "bg-emerald-500"}`}/>{provider.label}</button>;
-              })}
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-[minmax(0,360px)_1fr] gap-3 items-end">
+            <label className="grid gap-1.5">
+              <span className="text-[11px] font-mono uppercase tracking-widest text-slate-500">Provider API</span>
+              <select value={providers.some((provider) => provider.id === scrapeMethod) ? scrapeMethod : ""} onChange={(event) => setScrapeMethod(event.target.value || "auto")} className="input w-full px-3 py-2.5 text-sm font-medium" data-testid="provider-selector-dropdown">
+                <option value="">Choose a configured provider</option>
+                {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}
+              </select>
+            </label>
+            <div className="text-xs text-slate-500 pb-2" data-testid="provider-selector-status">
+              {providers.some((provider) => provider.id === scrapeMethod)
+                ? `Import item will use ${providers.find((provider) => provider.id === scrapeMethod)?.label}.`
+                : scrapeMethod === "manual"
+                  ? "Import item will use manual browser TLS impersonation."
+                  : "Import item will use the automatic fallback chain."}
             </div>
-          ) : <div className="text-sm text-slate-500" data-testid="provider-selector-empty">No enabled, configured providers yet. Importing will use the automatic fallback chain.</div>}
+          </div>
+          {providers.length === 0 && <div className="mt-2 text-sm text-slate-500" data-testid="provider-selector-empty">No enabled, configured providers yet. Add one under Store Management → Integrations.</div>}
         </div>
 
         {status && <div className="mt-4 text-sm text-slate-500 flex items-center gap-2"><Loader2 size={14} className="animate-spin"/>{status}</div>}

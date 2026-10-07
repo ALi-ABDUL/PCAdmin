@@ -34,6 +34,7 @@ export function ScraperApiSettingsCard() {
   const [providers, setProviders] = useState(null);
   const [saving, setSaving] = useState(false);
   const [revealed, setRevealed] = useState({});
+  const [open, setOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -70,23 +71,32 @@ export function ScraperApiSettingsCard() {
 
   if (providers === null) return <div className="card p-6 text-sm text-slate-500" data-testid="scraper-apis-loading">Loading scraper API settings…</div>;
 
+  const configuredCount = providers.filter((provider) => provider.api_key_set || provider.username_set || provider.password_set).length;
+
   return (
-    <div className="grid gap-4" data-testid="scraper-apis-card">
-      <div className="card p-6">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="font-display font-bold text-lg flex items-center gap-2"><Globe2 size={18} className="text-indigo-600"/> Scraper APIs</div>
-            <div className="text-xs text-slate-500 max-w-2xl mt-1">Credentials are stored on the server and never returned to this browser. Auto tries Manual, then the enabled providers below in order, then enabled custom providers.</div>
+    <div className="card p-5" data-testid="scraper-apis-card">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-11 h-11 rounded-xl grid place-items-center shrink-0 bg-indigo-50 text-indigo-600"><Globe2 size={19}/></div>
+          <div className="min-w-0">
+            <div className="font-display font-bold text-base flex items-center gap-2">Scraper APIs <span className={`chip ${configuredCount ? "chip-success" : "chip-neutral"} text-[10px]`} data-testid="scraper-apis-status">{configuredCount ? `${configuredCount} configured` : "Not configured"}</span></div>
+            <div className="text-xs text-slate-500 mt-0.5">Provider credentials and fallback order for product sourcing.</div>
           </div>
+        </div>
+        <button onClick={() => setOpen((value) => !value)} className="btn btn-ghost text-sm min-h-10" data-testid="scraper-apis-configure-button">{open ? "Close" : "Configure"}</button>
+      </div>
+
+      {open && <div className="mt-5 pt-5 border-t hairline grid gap-4" data-testid="scraper-apis-configure-panel">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="text-xs text-slate-500 max-w-2xl">Credentials are stored on the server and never returned to this browser. Auto tries Manual, then the enabled providers below in order, then enabled custom providers.</div>
           <div className="chip chip-primary text-[10px] font-mono" data-testid="scraper-apis-fallback-order">Auto fallback enabled</div>
         </div>
-      </div>
 
       {providers.map((provider) => {
         const isCustom = provider.type === "custom";
         const fields = credentialFields(provider);
         return (
-          <div className="card p-5" key={provider.id} data-testid={`scraper-provider-${provider.id}`}>
+          <div className="rounded-lg border hairline p-5" key={provider.id} data-testid={`scraper-provider-${provider.id}`}>
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div className="min-w-0">
                 {isCustom ? (
@@ -130,6 +140,7 @@ export function ScraperApiSettingsCard() {
         <button onClick={() => setProviders((current) => [...current, emptyCustom()])} className="btn btn-ghost text-sm" data-testid="scraper-provider-add-custom"><Plus size={14}/> Add custom provider</button>
         <button onClick={save} disabled={saving} className="btn btn-primary text-sm" data-testid="scraper-apis-save-button">{saving ? <Loader2 size={14} className="animate-spin"/> : <KeyRound size={14}/>} Save scraper APIs</button>
       </div>
+      </div>}
     </div>
   );
 }

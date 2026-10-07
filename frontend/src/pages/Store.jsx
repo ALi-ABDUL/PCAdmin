@@ -1097,7 +1097,6 @@ export function GoogleSignInIntegrationCard() {
 }
 
 export function IntegrationsPanel() {
-  const others = ["eBay Australia (source)", "Xero", "MYOB", "Klaviyo", "Mailchimp", "Zapier", "Slack", "Discord"];
   return (
     <div className="grid gap-3" data-testid="integrations-panel">
       <ResendIntegrationCard/>
@@ -1106,18 +1105,6 @@ export function IntegrationsPanel() {
         <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2" data-testid="scraper-integrations-heading">Product sourcing</div>
         <ScraperApiSettingsCard/>
       </div>
-      {others.map((f, i) => (
-        <div key={f} className="card p-4 md:p-5 flex items-center justify-between gap-4 group hover:shadow-md transition-shadow">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-lg grid place-items-center shrink-0 bg-indigo-50 text-indigo-500"><ExternalLink size={16}/></div>
-            <div className="min-w-0">
-              <div className="font-medium text-sm truncate">{f}</div>
-              <div className="text-[11px] text-slate-400 font-mono">{i === 0 ? "Connected · scraper source" : "Not configured"}</div>
-            </div>
-          </div>
-          <button className="btn btn-ghost text-xs !py-1 !px-2" disabled>Configure</button>
-        </div>
-      ))}
     </div>
   );
 }

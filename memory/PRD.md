@@ -432,6 +432,7 @@ Customers / Product Sourcing tab via `onNavigate({tab, section})` passed through
 - **Admin UI** — Settings now includes **Scraper APIs**, with secure credential fields, provider enable toggles, custom-provider builder, and no browser-stored provider keys. Product Sourcing exposes all six explicit provider methods alongside Auto and Manual.
 - **Verification** — `backend/tests/test_scraper_provider_fallback.py` and testing-agent regression `test_scraper_apis_auth_and_settings.py` passed. Frontend build, authenticated settings flow, provider masking, custom-provider persistence/removal, and method-chip rendering passed. No live provider or eBay fetch was executed.
 - **Navigation update (2026-10-07)** — the Scraper APIs card now lives in **Store Management → Integrations → Product sourcing**, alongside other external service configuration. It was removed from Admin Settings; stale saved Settings-tab selections safely fall back to Theme.
+- **Integrations refinement (2026-10-07)** — Integrations now contains only Resend, Google Sign-In, and Scraper APIs. The Scraper APIs configuration is collapsed to a header row by default and expands through a Configure/Close toggle, matching the existing integration-card pattern. Placeholder rows for eBay Australia, Xero, MYOB, Klaviyo, Mailchimp, Zapier, Slack, and Discord were removed.
 
 ### P1
 - Bulk import (paste multiple eBay URLs)

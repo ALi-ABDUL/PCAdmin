@@ -1,0 +1,42 @@
+{
+  "summary": "Validated scraper schedule auth-cookie regression across backend and frontend. Admin login sets HTTP-only cookie, signed-in Scraper Schedule and scraper integrations return 200, and anonymous schedule access remains 401.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/scraper/schedule",
+        "issue": "401 detail message is generic ('Sign in again to send a test email') and not schedule-specific."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_scraper_schedule_cookie_auth.py",
+    "/app/test_reports/pytest/pytest_iteration54_scraper_schedule_cookie_auth.xml"
+  ],
+  "action_items": [
+    "Optional: tailor unauthorized detail text in shared admin auth dependency for non-email endpoints.",
+    "No functional fix required for the requested 401-cookie regression scope."
+  ],
+  "critical_code_review_comments": [
+    "frontend/src/lib/api.js correctly sets axios.defaults.withCredentials = true; this unblocks cookie-authenticated protected calls after fresh login.",
+    "backend/server.py is very large (>5000 lines), which raises regression risk around auth-protected route consistency."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_scraper_schedule_cookie_auth.py",
+    "/app/test_reports/iteration_54.json"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5 targeted pytest tests passed)",
+    "frontend": "100% (login + Store>Scraper Schedule + Integrations auth checks passed)"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Used credentials from /app/memory/test_credentials.md: qa@prettycheap.com.au / QaTest123!. Verified public URL from frontend/.env. Did not trigger scraper run/retry actions. External eBay/provider traffic remained MOCKED/NOT EXECUTED by scope.",
+  "rca of the issue": "Original failure mode was missing credentials on Axios requests (default withCredentials=false for direct Axios usage). Current build now applies global axios.defaults.withCredentials=true, and verified GET /api/scraper/schedule returns 200 after fresh browser login while anonymous request still returns 401."
+}

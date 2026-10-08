@@ -30,7 +30,7 @@ async def get_current_admin(
     if not token and authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
     if not token:
-        raise HTTPException(status_code=401, detail="Sign in again to send a test email")
+        raise HTTPException(status_code=401, detail="Sign in again to continue.")
     try:
         payload = jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALGO])
     except jwt.ExpiredSignatureError:
@@ -44,5 +44,5 @@ async def get_current_admin(
         {"_id": 0, "password_hash": 0},
     )
     if not account or account.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Only administrators can send test emails")
+        raise HTTPException(status_code=403, detail="Only administrators can access this action")
     return account

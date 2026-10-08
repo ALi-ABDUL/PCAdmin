@@ -1,3 +1,9 @@
+import axios from "axios";
+
+// Admin sessions are HTTP-only cookies. Every dashboard API request must let
+// the browser attach that cookie, including protected scraper schedule calls.
+axios.defaults.withCredentials = true;
+
 export const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 // Data URLs (from local uploads) and blob URLs are served in-place; only external
 // http(s) URLs go through the CORS-friendly proxy.

@@ -1,0 +1,37 @@
+{
+  "summary": "Re-validated scraper schedule cookie-auth regression end-to-end: anonymous protected requests return 401, stale localStorage-only sessions are blocked before schedule calls, and fresh login loads Scraper Schedule with 200 responses.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_scraper_schedule_cookie_auth.py",
+    "/app/test_reports/pytest/pytest_iteration55_scraper_schedule_cookie_auth.xml"
+  ],
+  "action_items": [
+    "No functional fix required for requested auth-cookie gating scope.",
+    "Keep scraper third-party actions disabled in this auth regression suite (MOCKED/NOT EXECUTED)."
+  ],
+  "critical_code_review_comments": [
+    "frontend/src/lib/api.js keeps axios.defaults.withCredentials = true globally.",
+    "frontend/src/pages/Store.jsx scraper schedule endpoints explicitly pass withCredentials via ADMIN_SESSION_REQUEST.",
+    "frontend/src/App.js correctly gates protected shell on GET /api/admin-accounts/session before rendering dashboard modules."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_55.json"
+  ],
+  "success_rate": {
+    "backend": "100% (6/6 targeted tests passed)",
+    "frontend": "100% (2/2 requested browser scenarios passed)"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Used public URL from frontend/.env. Credentials from /app/memory/test_credentials.md: qa@prettycheap.com.au / QaTest123!. Browser capture showed legacy localStorage-only state -> login screen + no GET /api/scraper/schedule, and fresh login -> two GET /api/scraper/schedule responses, both 200. eBay/provider run-retry actions remained MOCKED/NOT EXECUTED by scope.",
+  "rca of the issue": "Original 401 loop was caused by relying on localStorage identity without verified admin cookie session. Verified behavior now: App checks /api/admin-accounts/session first, clears stale storage on 401, and prevents scraper schedule mounting until session verification succeeds."
+}

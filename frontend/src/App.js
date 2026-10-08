@@ -11,7 +11,7 @@ import { API } from "./lib/api";
 import { fmtDate } from "./lib/format";
 import { CUSTOMER_NAV, ORDERS_NAV, PAYMENTS_NAV, PRODUCT_NAV, STORE_NAV, SUPPLIER_NAV } from "./lib/nav";
 import { applyTheme, getCachedTheme } from "./lib/theme";
-import { canAccess, hasAdminSession, loadAdminSession } from "./lib/adminSession";
+import { canAccess, clearAdminSession, hasAdminSession, loadAdminSession, saveAdminSession } from "./lib/adminSession";
 import { Analytics } from "./pages/Analytics";
 import { Categories } from "./pages/Categories";
 import { CustomersModule } from "./pages/Customers";
@@ -49,6 +49,9 @@ export default function App() {
   // session which fires `adminsessionchange` → this state flips back to
   // false and the login screen mounts.
   const [signedIn, setSignedIn] = useState(hasAdminSession());
+  // A legacy localStorage identity is not authentication. Keep protected views
+  // unmounted until the HTTP-only cookie is verified by the backend.
+  const [sessionChecked, setSessionChecked] = useState(!hasAdminSession());
   // Branding is fetched once at startup so the sidebar header renders
   // with the admin's custom name / logo instead of a "PCAdmin"
   // flash. Subsequent updates flow through the `brandingchange` event.
@@ -64,10 +67,37 @@ export default function App() {
         if (err?.response?.status === 403 && err?.response?.data?.code === "country_blocked") {
           setAccessDenied(true);
         }
+        const url = err?.config?.url || "";
+        if (err?.response?.status === 401 && hasAdminSession() && !url.includes("/portal/") && !url.includes("/admin-accounts/login")) {
+          clearAdminSession();
+          setSignedIn(false);
+          setSessionChecked(true);
+        }
         return Promise.reject(err);
       },
     );
     return () => axios.interceptors.response.eject(interceptor);
+  }, []);
+  useEffect(() => {
+    let active = true;
+    if (!hasAdminSession()) {
+      setSignedIn(false);
+      setSessionChecked(true);
+      return () => { active = false; };
+    }
+    axios.get(`${API}/admin-accounts/session`, { withCredentials: true })
+      .then(({ data }) => {
+        if (!active) return;
+        saveAdminSession(data);
+        setSignedIn(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        clearAdminSession();
+        setSignedIn(false);
+      })
+      .finally(() => { if (active) setSessionChecked(true); });
+    return () => { active = false; };
   }, []);
   useEffect(() => {
     const on = () => setSignedIn(hasAdminSession());
@@ -220,7 +250,13 @@ export default function App() {
     return <AccessDenied/>;
   }
 
-  // Session gate: no session → render the login screen and nothing else.
+  // Wait for the HTTP-only cookie check so stale local storage can never mount
+  // a protected page and trigger unauthenticated background requests.
+  if (!sessionChecked) {
+    return <div className="min-h-screen grid place-items-center text-sm text-slate-500" data-testid="admin-session-check">Confirming admin session…</div>;
+  }
+
+  // Session gate: no verified session → render the login screen and nothing else.
   if (!signedIn) {
     return (
       <div className="min-h-screen bg-[color:var(--bg)]">

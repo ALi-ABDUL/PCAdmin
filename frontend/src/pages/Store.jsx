@@ -13,6 +13,8 @@ import { Dashboard } from "./Dashboard";
 import { ScraperApiSettingsCard } from "../components/ScraperApiSettingsCard";
 import { ScraperProviderUsageDashboard } from "../components/ScraperProviderUsageDashboard";
 
+const ADMIN_SESSION_REQUEST = { withCredentials: true };
+
 export function PricingRulesEditor() {
   const [rules, setRules] = useState([]);
   const [editing, setEditing] = useState(null); // rule object or {} for new
@@ -1225,16 +1227,20 @@ export function ScraperScheduleEditor() {
   dirtyRef.current = dirty;
 
   const load = useCallback(async () => {
-    const { data } = await axios.get(`${API}/scraper/schedule`);
-    setSched(data);
-    // Don't clobber unsaved edits while the admin is mid-change.
-    if (!dirtyRef.current) setRows(_rowsFromSched(data));
+    try {
+      const { data } = await axios.get(`${API}/scraper/schedule`, ADMIN_SESSION_REQUEST);
+      setSched(data);
+      // Don't clobber unsaved edits while the admin is mid-change.
+      if (!dirtyRef.current) setRows(_rowsFromSched(data));
+    } catch (error) {
+      if (error?.response?.status !== 401) toast.error("Could not load scraper schedule");
+    }
   }, []);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
 
   useEffect(() => {
     let active = true;
-    axios.get(`${API}/scraper/apis`).then(({ data }) => {
+    axios.get(`${API}/scraper/apis`, ADMIN_SESSION_REQUEST).then(({ data }) => {
       if (!active) return;
       const ready = (data.providers || []).filter((provider) => {
         if (!provider.enabled) return false;
@@ -1279,7 +1285,7 @@ export function ScraperScheduleEditor() {
           stop_date: r.stop_date || null,
         })),
       };
-      const { data } = await axios.put(`${API}/scraper/schedules`, payload);
+      const { data } = await axios.put(`${API}/scraper/schedules`, payload, ADMIN_SESSION_REQUEST);
       setSched(data);
       setRows(_rowsFromSched(data));
       setDirty(false);
@@ -1296,7 +1302,7 @@ export function ScraperScheduleEditor() {
     setRunning(true);
     toast.loading("Running full refresh…", { id: "sched-run" });
     try {
-      const { data } = await axios.post(`${API}/scraper/schedule/run-now`, {}, { timeout: 30 * 60 * 1000 });
+      const { data } = await axios.post(`${API}/scraper/schedule/run-now`, {}, { ...ADMIN_SESSION_REQUEST, timeout: 30 * 60 * 1000 });
       setSched(data.schedule);
       const s = data.summary || {};
       toast.success(`Refresh done · ${s.refreshed || 0}/${s.total || 0} refreshed · ${s.sold_found || 0} sold`, { id: "sched-run" });
@@ -1308,7 +1314,7 @@ export function ScraperScheduleEditor() {
   const retryItem = async (id) => {
     setRetryingIds((ids) => [...ids, id]);
     try {
-      const { data } = await axios.post(`${API}/scraper/retry-item`, { id }, { timeout: 5 * 60 * 1000 });
+      const { data } = await axios.post(`${API}/scraper/retry-item`, { id }, { ...ADMIN_SESSION_REQUEST, timeout: 5 * 60 * 1000 });
       setSched(data.schedule);
       const row = (data.results || []).find((r) => r.id === id);
       if (row?.ok) toast.success("Item refreshed"); else toast.error("Retry failed", { description: row?.error?.slice(0, 160) });
@@ -1329,7 +1335,7 @@ export function ScraperScheduleEditor() {
       const { data } = await axios.post(`${API}/scraper/retry-failed`, {
         provider_id: retryProviderId || null,
         request_limit: parsedLimit,
-      }, { timeout: 30 * 60 * 1000 });
+      }, { ...ADMIN_SESSION_REQUEST, timeout: 30 * 60 * 1000 });
       setSched(data.schedule);
       const s = data.stats || {};
       const deferred = (data.deferred_ids || []).length;
@@ -1343,7 +1349,7 @@ export function ScraperScheduleEditor() {
     setArLocal((p) => ({ ...(p || {}), ...patch }));
     setArDirty(false);
     try {
-      const { data } = await axios.patch(`${API}/scraper/auto-retry`, patch);
+      const { data } = await axios.patch(`${API}/scraper/auto-retry`, patch, ADMIN_SESSION_REQUEST);
       setSched(data);
       toast.success("Auto-retry settings saved");
     } catch (e) {
@@ -1370,7 +1376,7 @@ export function ScraperScheduleEditor() {
   const clearHistory = async () => {
     if (!window.confirm("Clear the scraper run history log?")) return;
     try {
-      const { data } = await axios.post(`${API}/scraper/schedule/clear-history`, {});
+      const { data } = await axios.post(`${API}/scraper/schedule/clear-history`, {}, ADMIN_SESSION_REQUEST);
       setSched(data);
       toast.success("Run history cleared");
     } catch (e) { toast.error("Could not clear history"); }

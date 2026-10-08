@@ -2673,6 +2673,12 @@ async def list_admin_accounts(current_admin: dict = Depends(get_current_admin)):
     return {"accounts": accounts}
 
 
+@api_router.get("/admin-accounts/session")
+async def get_admin_session(current_admin: dict = Depends(get_current_admin)):
+    """Verify the HTTP-only admin session before rendering protected dashboard views."""
+    return _admin_row(current_admin)
+
+
 @api_router.post("/admin-accounts")
 async def create_admin_account(body: AdminAccountCreate, current_admin: dict = Depends(get_current_admin)):
     from helpers import _hash_password as hash_pw

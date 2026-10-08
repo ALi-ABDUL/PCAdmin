@@ -71,6 +71,17 @@ def test_anonymous_schedule_request_is_rejected_with_401():
     assert detail.strip() != ""
 
 
+def test_admin_session_verification_requires_cookie_and_accepts_signed_in_admin():
+    anonymous = requests.get(f"{BASE_URL}/api/admin-accounts/session", timeout=30)
+    assert anonymous.status_code == 401
+
+    session, login_response = _admin_login_session()
+    assert login_response.status_code == 200
+    verified = session.get(f"{BASE_URL}/api/admin-accounts/session", timeout=30)
+    assert verified.status_code == 200
+    assert verified.json().get("email") == ADMIN_EMAIL
+
+
 def test_authenticated_schedule_request_succeeds_after_login():
     session, login_response = _admin_login_session()
     assert login_response.status_code == 200

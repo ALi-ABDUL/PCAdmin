@@ -80,3 +80,50 @@ def test_auto_skips_disabled_or_incomplete_providers(monkeypatch):
 def test_explicit_provider_requires_saved_configuration():
     with pytest.raises(scraper.ScrapeError, match="not configured"):
         asyncio.run(scraper.fetch_html("https://www.ebay.com.au/itm/123", method="scrapedo", providers=[]))
+
+
+def test_provider_attempt_callback_counts_success_and_failure(monkeypatch):
+    attempts = []
+
+    async def manual(_url):
+        raise scraper.BlockedError("blocked")
+
+    async def provider(_url, config):
+        if config["id"] == "scrapingbee":
+            raise scraper.ScrapeError("provider failed")
+        return "<html>ok</html>"
+
+    async def tracker(provider_id, succeeded):
+        attempts.append((provider_id, succeeded))
+
+    monkeypatch.setattr(scraper, "_fetch_manual", manual)
+    monkeypatch.setattr(scraper, "_fetch_provider", provider)
+    _, used = asyncio.run(scraper.fetch_html("https://www.ebay.com.au/itm/123", providers=[
+        {"id": "scrapingbee", "type": "scrapingbee", "enabled": True, "api_key": "key"},
+        {"id": "scraperapi", "type": "scraperapi", "enabled": True, "api_key": "key"},
+    ], on_provider_attempt=tracker))
+
+    assert used == "scraperapi"
+    assert attempts == [("scrapingbee", False), ("scraperapi", True)]
+
+
+def test_manual_mode_does_not_emit_provider_attempt(monkeypatch):
+    attempts = []
+
+    async def manual(_url):
+        return "<html>manual-ok</html>"
+
+    async def tracker(provider_id, succeeded):
+        attempts.append((provider_id, succeeded))
+
+    monkeypatch.setattr(scraper, "_fetch_manual", manual)
+    html, used = asyncio.run(scraper.fetch_html(
+        "https://www.ebay.com.au/itm/123",
+        method="manual",
+        providers=[{"id": "scrapingbee", "type": "scrapingbee", "enabled": True, "api_key": "key"}],
+        on_provider_attempt=tracker,
+    ))
+
+    assert used == "manual"
+    assert html == "<html>manual-ok</html>"
+    assert attempts == []

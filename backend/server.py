@@ -158,6 +158,75 @@ def _validate_custom_scraper_provider(provider: dict) -> None:
         raise HTTPException(status_code=400, detail="Custom provider endpoint must be a valid HTTPS URL")
 
 
+def _provider_usage_period(value: Optional[str] = None) -> str:
+    """Return a valid YYYY-MM reporting period, defaulting to the current UTC month."""
+    period = (value or datetime.now(timezone.utc).strftime("%Y-%m")).strip()
+    if not re.match(r"^\d{4}-(0[1-9]|1[0-2])$", period):
+        raise HTTPException(status_code=400, detail="period must use YYYY-MM format")
+    return period
+
+
+async def _record_provider_usage(provider_id: str, succeeded: bool) -> None:
+    """Atomically count one billable third-party provider request for the month."""
+    if not provider_id or provider_id == "manual":
+        return
+    now = datetime.now(timezone.utc)
+    period = _provider_usage_period(now.strftime("%Y-%m"))
+    await db.scraper_provider_usage.update_one(
+        {"provider_id": provider_id, "period": period},
+        {
+            "$inc": {"requests": 1, "successful_requests" if succeeded else "failed_requests": 1},
+            "$set": {"last_used_at": now.isoformat()},
+            "$setOnInsert": {"provider_id": provider_id, "period": period, "created_at": now.isoformat()},
+        },
+        upsert=True,
+    )
+
+
+@api_router.get("/scraper/provider-usage")
+async def get_scraper_provider_usage(period: Optional[str] = None, current_admin: dict = Depends(get_current_admin)):
+    """Current or selected-month usage totals for every configured scraper API."""
+    selected_period = _provider_usage_period(period)
+    settings = await _get_scraper_api_settings()
+    usage_rows = await db.scraper_provider_usage.find({"period": selected_period}, {"_id": 0}).to_list(100)
+    usage_by_id = {row.get("provider_id"): row for row in usage_rows if row.get("provider_id")}
+    providers = []
+    for provider in settings.get("providers") or []:
+        provider_id = provider.get("id")
+        usage = usage_by_id.pop(provider_id, {})
+        requests = int(usage.get("requests") or 0)
+        successful = int(usage.get("successful_requests") or 0)
+        failed = int(usage.get("failed_requests") or 0)
+        providers.append({
+            "id": provider_id,
+            "label": provider.get("label") or provider_id,
+            "type": provider.get("type") or provider_id,
+            "enabled": bool(provider.get("enabled")),
+            "requests": requests,
+            "successful_requests": successful,
+            "failed_requests": failed,
+            "last_used_at": usage.get("last_used_at"),
+        })
+    # Retain visibility into historical custom providers even after removal.
+    for provider_id, usage in usage_by_id.items():
+        providers.append({
+            "id": provider_id,
+            "label": provider_id,
+            "type": "removed",
+            "enabled": False,
+            "requests": int(usage.get("requests") or 0),
+            "successful_requests": int(usage.get("successful_requests") or 0),
+            "failed_requests": int(usage.get("failed_requests") or 0),
+            "last_used_at": usage.get("last_used_at"),
+        })
+    totals = {
+        "requests": sum(row["requests"] for row in providers),
+        "successful_requests": sum(row["successful_requests"] for row in providers),
+        "failed_requests": sum(row["failed_requests"] for row in providers),
+    }
+    return {"period": selected_period, "providers": providers, "totals": totals}
+
+
 @api_router.get("/scraper/apis")
 async def get_scraper_apis(current_admin: dict = Depends(get_current_admin)):
     return _public_scraper_api_settings(await _get_scraper_api_settings())
@@ -211,6 +280,7 @@ async def scrape(req: ScrapeRequest) -> dict:
             scrapingbee_key=req.scrapingbee_key or None,
             scraperapi_key=req.scraperapi_key or None,
             providers=(await _get_scraper_api_settings()).get("providers") or [],
+            on_provider_attempt=_record_provider_usage,
         )
     except BlockedError as e:
         # Failed / blocked scrapes are silent — no admin notification.

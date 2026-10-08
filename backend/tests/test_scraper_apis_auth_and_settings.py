@@ -6,6 +6,7 @@ and add/remove custom provider behavior while preserving built-ins.
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
 from typing import Tuple
 
@@ -62,7 +63,7 @@ def test_admin_login_success_sets_http_only_cookie():
 
 def test_admin_login_lockout_after_five_failures_unique_ip():
     session = requests.Session()
-    fail_headers = {"X-Forwarded-For": "203.0.113.77"}
+    fail_headers = {"X-Forwarded-For": f"203.0.113.{(uuid.uuid4().int % 250) + 1}"}
     statuses = []
     for _ in range(5):
         resp = session.post(
@@ -115,7 +116,13 @@ def test_scraper_apis_patch_add_then_remove_custom_preserves_builtins():
     before_providers = before.json().get("providers") or []
     before_ids = [p.get("id") for p in before_providers]
 
-    custom_id = "custom-qa-provider"
+    def provider_update_shape(provider):
+        row = {key: provider.get(key) for key in ("id", "type", "label", "enabled")}
+        if provider.get("type") == "custom":
+            row.update({key: provider.get(key) for key in ("endpoint", "request_method", "auth_mode", "api_key_param", "url_param")})
+        return row
+
+    custom_id = f"custom-qa-provider-{uuid.uuid4().hex[:8]}"
     custom_payload = {
         "id": custom_id,
         "type": "custom",
@@ -130,7 +137,7 @@ def test_scraper_apis_patch_add_then_remove_custom_preserves_builtins():
 
     add_payload = {
         "providers": [
-            *[{"id": p.get("id"), "type": p.get("type"), "label": p.get("label"), "enabled": bool(p.get("enabled"))} for p in before_providers],
+            *[provider_update_shape(p) for p in before_providers],
             custom_payload,
         ]
     }
@@ -143,8 +150,7 @@ def test_scraper_apis_patch_add_then_remove_custom_preserves_builtins():
 
     remove_payload = {
         "providers": [
-            {"id": p.get("id"), "type": p.get("type"), "label": p.get("label"), "enabled": bool(p.get("enabled"))}
-            for p in before_providers
+            provider_update_shape(p) for p in before_providers
         ]
     }
     remove_resp = session.patch(f"{BASE_URL}/api/scraper/apis", json=remove_payload, timeout=30)

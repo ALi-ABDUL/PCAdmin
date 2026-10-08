@@ -2460,3 +2460,9 @@ Notification Bell deep-links) — zero regressions detected.
 - **P1:** Region presets in Security, tag-chip product filtering, PCStore Google OAuth callback/session exchange.
 - **P2:** Support Inbox and CSV exports for products/orders.
 - Testing agent iteration_50 passed **29/29** targeted backend checks. **MOCKED IN TESTS:** eBay scrape calls were stubbed; temporary Mongo item/product fixtures were cleaned up. Frontend build remains passing with four pre-existing ProductDetail hook-dependency warnings.
+
+## Oct 07, 2026 — Per-Provider Usage Dashboard ✅
+- **Request telemetry** — every actual third-party scraper-provider call now atomically increments a month-scoped `scraper_provider_usage` record. Automatic fallback records both failed attempts and the provider that eventually succeeds; Manual scraping is excluded because it consumes no provider quota.
+- **Usage API** — protected `GET /api/scraper/provider-usage?period=YYYY-MM` returns secret-free provider rows with requests, successful/failed counts, and last-used time. Current configured providers, historical removed custom providers, invalid periods, and unauthenticated callers are handled safely.
+- **Admin UI** — Store Management → Integrations → Product sourcing now shows a Provider usage dashboard with month selection, refresh control, overall request/success/failure totals, and per-provider status rows. Counters begin tracking from this release; zero-use providers remain visible.
+- **Verification** — testing-agent iteration_53 passed the dashboard/fallback scope with **MOCKED** scraper networking; follow-up regression stability work made lockout and custom-provider fixtures unique and repeatable. Final focused scraper suite: **16 passed**. No live eBay or provider request ran.

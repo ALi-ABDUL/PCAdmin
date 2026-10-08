@@ -1,0 +1,51 @@
+{
+  "summary": "Completed requested backend+frontend verification for scraper provider fallback tracking and provider-usage dashboard with MOCKED network behavior (no live eBay/provider calls).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/admin-accounts/login (test harness behavior)",
+        "issue": "Existing regression test lockout case can fail non-deterministically when the reused test IP is already rate-limited from prior runs."
+      },
+      {
+        "endpoint": "/api/scraper/apis (test harness behavior)",
+        "issue": "Existing add/remove custom-provider regression uses a fixed custom id and can fail if that id already exists from interrupted earlier runs."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_scraper_provider_fallback.py",
+    "/app/backend/tests/test_scraper_provider_usage_dashboard.py",
+    "/app/backend/tests/test_scraper_apis_auth_and_settings.py",
+    "/app/test_reports/pytest/pytest_iteration53_provider_usage.xml",
+    "/app/test_reports/pytest/pytest_iteration53_scraper_settings_focus.xml"
+  ],
+  "action_items": [
+    "Optional: harden flaky regression tests by generating unique custom provider IDs and using a unique X-Forwarded-For value per lockout run.",
+    "No functional fixes required for requested provider-usage/fallback feature scope based on this iteration."
+  ],
+  "critical_code_review_comments": [
+    "Requested behavior is implemented: provider attempt tracking is emitted once per third-party attempt and includes failed fallback attempts plus final success; manual mode is excluded.",
+    "GET /api/scraper/provider-usage enforces admin auth and strict YYYY-MM validation, and returns provider rows/totals without secret fields.",
+    "server.py remains very large (>5000 lines), increasing long-term regression risk and making auth/telemetry boundaries harder to reason about."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_scraper_provider_fallback.py",
+    "/app/backend/tests/test_scraper_provider_usage_dashboard.py",
+    "/app/test_reports/iteration_53.json"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 targeted tests passed across provider fallback + provider usage + focused scraper settings checks)",
+    "frontend": "100% (authenticated Integrations flow loaded; usage dashboard controls/totals/rows/month refresh verified)"
+  },
+  "seed_data_creation": "Inserted temporary historical-period MOCKED usage rows for scrapingbee/scraperapi in scraper_provider_usage during one test; cleaned up in test teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Used qa@prettycheap.com.au / QaTest123!. UI check executed on public URL from frontend/.env. Provider networking and eBay scraping stayed MOCKED in backend tests (monkeypatched/manual fixtures), with no live third-party requests.",
+  "rca of the issue": "No blocking product defect reproduced in requested scope. Minor failures seen in broad pre-existing regression file were caused by non-idempotent test assumptions (reused lockout IP and fixed custom provider id), not by provider-usage dashboard functionality."
+}

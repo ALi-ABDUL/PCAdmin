@@ -6,7 +6,7 @@ import json
 import random
 import re
 from html import escape
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -528,6 +528,7 @@ async def fetch_html(
     scrapingbee_key: Optional[str] = None,
     scraperapi_key: Optional[str] = None,
     providers: Optional[list[dict]] = None,
+    on_provider_attempt: Optional[Callable[[str, bool], Awaitable[None]]] = None,
 ) -> tuple[str, str]:
     """Fetch HTML for a URL, returning (html, method_used).
 
@@ -535,6 +536,18 @@ async def fetch_html(
     fixed built-in order, then custom providers in their saved order.
     """
     errors: list[str] = []
+
+    async def track_attempt(provider: dict, succeeded: bool) -> None:
+        if not on_provider_attempt:
+            return
+        provider_id = provider.get("id") or provider.get("type")
+        if not provider_id:
+            return
+        try:
+            await on_provider_attempt(provider_id, succeeded)
+        except Exception:
+            # Usage telemetry must never turn a successful scrape into a failure.
+            pass
 
     if method == "manual":
         return await _fetch_manual(url), "manual"
@@ -555,7 +568,13 @@ async def fetch_html(
             raise ScrapeError(f"{provider.get('label') or method} is disabled in Scraper APIs settings.")
         if not _provider_ready(provider):
             raise ScrapeError(f"{provider.get('label') or method} credentials are incomplete.")
-        return await _fetch_provider(url, provider), method
+        try:
+            html = await _fetch_provider(url, provider)
+            await track_attempt(provider, True)
+            return html, method
+        except Exception:
+            await track_attempt(provider, False)
+            raise
 
     # auto: manual -> ScrapingBee -> ScraperAPI -> Scrape.do -> Bright Data -> Decodo -> WebScrapingAPI -> custom
     try:
@@ -572,8 +591,10 @@ async def fetch_html(
             continue
         try:
             html = await _fetch_provider(url, provider)
+            await track_attempt(provider, True)
             return html, provider.get("id") or provider.get("type") or "custom"
         except Exception as e:
+            await track_attempt(provider, False)
             errors.append(f"{provider.get('label') or provider.get('id')}: {e}")
 
     raise BlockedError(" | ".join(errors) if errors else "All scrape methods failed.")

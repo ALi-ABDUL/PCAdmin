@@ -11,6 +11,7 @@ import { calcPricingWithRules, usePricingRules, _refreshPricingRules } from "../
 import { Analytics } from "./Analytics";
 import { Dashboard } from "./Dashboard";
 import { ScraperApiSettingsCard } from "../components/ScraperApiSettingsCard";
+import { ScraperProviderUsageDashboard } from "../components/ScraperProviderUsageDashboard";
 
 export function PricingRulesEditor() {
   const [rules, setRules] = useState([]);
@@ -1104,6 +1105,7 @@ export function IntegrationsPanel() {
       <div className="pt-3" data-testid="scraper-integrations-section">
         <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2" data-testid="scraper-integrations-heading">Product sourcing</div>
         <ScraperApiSettingsCard/>
+        <div className="mt-3"><ScraperProviderUsageDashboard/></div>
       </div>
     </div>
   );

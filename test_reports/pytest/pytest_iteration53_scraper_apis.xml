@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="7" time="8.415" timestamp="2026-10-08T10:18:56.668050+00:00" hostname="agent-env-cb57c2dc-66e0-464d-897d-463c5d334528"><testcase classname="tests.test_scraper_apis_auth_and_settings" name="test_admin_login_success_sets_http_only_cookie" time="0.950" /><testcase classname="tests.test_scraper_apis_auth_and_settings" name="test_admin_login_lockout_after_five_failures_unique_ip" time="1.953"><failure message="AssertionError: assert [429, 429, 429, 429] == [401, 401, 401, 401]&#10;  &#10;  At index 0 diff: 429 != 401&#10;  &#10;  Full diff:&#10;    [&#10;  -     401,&#10;  ?      ^^...&#10;  &#10;  ...Full output truncated (15 lines hidden), use '-vv' to show">backend/tests/test_scraper_apis_auth_and_settings.py:75: in test_admin_login_lockout_after_five_failures_unique_ip
+    assert statuses[:4] == [401, 401, 401, 401]
+E   AssertionError: assert [429, 429, 429, 429] == [401, 401, 401, 401]
+E     
+E     At index 0 diff: 429 != 401
+E     
+E     Full diff:
+E       [
+E     -     401,
+E     ?      ^^...
+E     
+E     ...Full output truncated (15 lines hidden), use '-vv' to show</failure></testcase><testcase classname="tests.test_scraper_apis_auth_and_settings" name="test_scraper_apis_requires_authenticated_admin" time="0.061" /><testcase classname="tests.test_scraper_apis_auth_and_settings" name="test_scraper_apis_returns_masked_metadata_only" time="1.324" /><testcase classname="tests.test_scraper_apis_auth_and_settings" name="test_scraper_apis_patch_add_then_remove_custom_preserves_builtins" time="1.814"><failure message="assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code">backend/tests/test_scraper_apis_auth_and_settings.py:138: in test_scraper_apis_patch_add_then_remove_custom_preserves_builtins
+    assert add_resp.status_code == 200
+E   assert 400 == 200
+E    +  where 400 = &lt;Response [400]&gt;.status_code</failure></testcase><testcase classname="tests.test_scraper_apis_auth_and_settings" name="test_scraper_apis_rejects_non_https_custom_endpoint" time="1.823" /><testcase classname="tests.test_scraper_apis_auth_and_settings" name="test_admin_login_options_has_explicit_origin_and_credentials_headers" time="0.062" /></testsuite></testsuites>

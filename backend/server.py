@@ -45,7 +45,7 @@ from models import (
     Product, ProductUpdate, ShippingAddress, _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, 
     OrderCreate, OrderLineInput, OrderLineFulfillmentUpdate, CartLineInput, CartUpdate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, CategoryCleanupScheduleUpdate, PaymentGatewayUpdate, PAYMENT_GATEWAY_DEFAULTS, ItemBulkAction, 
     RefreshAllRequest, SCRAPER_API_SETTINGS_DEFAULTS, ScraperApiSettingsUpdate, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
-    FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ScheduleEntryBody, ScraperSchedulesReplaceBody, AutoRetryConfigBody, ORDER_STATUSES, ReturnRequest, 
+    FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ScheduleEntryBody, ScraperSchedulesReplaceBody, AutoRetryConfigBody, RetryFailedBody, ORDER_STATUSES, ReturnRequest, 
     AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate, PortalProfileUpdate,
     CouponBase, Coupon, ReviewBase, Review, JWT_ALGO, JWT_ACCESS_TTL, PortalRegisterBody, 
     PortalLoginBody, PortalReviewBody, PortalReviewVoteBody, MessageBase, Message, StockMove, 
@@ -197,7 +197,7 @@ async def patch_scraper_apis(body: ScraperApiSettingsUpdate, current_admin: dict
     await db.scraper_api_settings.update_one({"id": "singleton"}, {"$set": {"providers": updated, "updated_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
     return _public_scraper_api_settings(await _get_scraper_api_settings())
 
-@api_router.post("/scrape")
+@api_router.post("/scrape", dependencies=[Depends(get_current_admin)])
 async def scrape(req: ScrapeRequest) -> dict:
     try:
         url = validate_ebay_au_url(req.url)
@@ -547,7 +547,7 @@ async def toggle_watchlist(item_id: str, body: WatchlistToggle):
     return item
 
 
-@api_router.post("/items/{item_id}/refresh")
+@api_router.post("/items/{item_id}/refresh", dependencies=[Depends(get_current_admin)])
 async def refresh_item(item_id: str, req: ScrapeRequest):
     existing = await db.items.find_one({"id": item_id}, {"_id": 0})
     if not existing:
@@ -565,12 +565,12 @@ async def update_item_features(item_id: str, features: dict):
     return await db.items.find_one({"id": item_id}, {"_id": 0})
 
 
-@api_router.post("/items/refresh-all")
+@api_router.post("/items/refresh-all", dependencies=[Depends(get_current_admin)])
 async def refresh_all_items(body: RefreshAllRequest):
     return await _refresh_all_items(body.method, body.scrapingbee_key, body.scraperapi_key)
 
 
-@api_router.get("/scraper/schedule")
+@api_router.get("/scraper/schedule", dependencies=[Depends(get_current_admin)])
 async def get_scraper_schedule():
     sched = await _get_scraper_schedule()
     # Always refresh per-entry `next_run_at` on read so the UI is accurate.
@@ -599,7 +599,7 @@ async def get_scraper_schedule():
     return sched
 
 
-@api_router.put("/scraper/schedules")
+@api_router.put("/scraper/schedules", dependencies=[Depends(get_current_admin)])
 async def replace_scraper_schedules(body: ScraperSchedulesReplaceBody):
     """Replace the entire schedule list. Called by the multi-schedule UI's
     single Save button — one round-trip persists every add / edit / remove."""
@@ -649,7 +649,7 @@ async def replace_scraper_schedules(body: ScraperSchedulesReplaceBody):
     return await get_scraper_schedule()
 
 
-@api_router.patch("/scraper/schedule")
+@api_router.patch("/scraper/schedule", dependencies=[Depends(get_current_admin)])
 async def update_scraper_schedule(body: ScraperScheduleUpdate):
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     if body.frequency is not None and body.frequency not in FREQ_INTERVAL_SECONDS:
@@ -676,13 +676,13 @@ async def update_scraper_schedule(body: ScraperScheduleUpdate):
     return await get_scraper_schedule()
 
 
-@api_router.post("/scraper/schedule/run-now")
+@api_router.post("/scraper/schedule/run-now", dependencies=[Depends(get_current_admin)])
 async def scraper_schedule_run_now():
     summary = await _refresh_all_and_record(method="auto", trigger="manual", attempt=1)
     return {"ok": True, "summary": summary, "schedule": await get_scraper_schedule()}
 
 
-@api_router.post("/scraper/schedule/clear-history")
+@api_router.post("/scraper/schedule/clear-history", dependencies=[Depends(get_current_admin)])
 async def clear_scraper_history():
     await db.scraper_schedule.update_one(
         {"id": "singleton"},
@@ -692,7 +692,7 @@ async def clear_scraper_history():
     return await get_scraper_schedule()
 
 
-@api_router.patch("/scraper/auto-retry")
+@api_router.patch("/scraper/auto-retry", dependencies=[Depends(get_current_admin)])
 async def update_auto_retry(body: AutoRetryConfigBody):
     """Update the scheduler's failed-item auto-retry settings (on/off, delay, attempts)."""
     sched = await _get_scraper_schedule()
@@ -703,7 +703,7 @@ async def update_auto_retry(body: AutoRetryConfigBody):
     return await get_scraper_schedule()
 
 
-@api_router.post("/scraper/retry-item")
+@api_router.post("/scraper/retry-item", dependencies=[Depends(get_current_admin)])
 async def scraper_retry_item(body: dict):
     """Retry the scrape for ONE item from the last run's results breakdown."""
     iid = body.get("id") or body.get("item_id")
@@ -713,15 +713,23 @@ async def scraper_retry_item(body: dict):
     return {"ok": True, **result, "schedule": await get_scraper_schedule()}
 
 
-@api_router.post("/scraper/retry-failed")
-async def scraper_retry_failed():
-    """Retry every failed item from the last run's results breakdown in one go."""
+@api_router.post("/scraper/retry-failed", dependencies=[Depends(get_current_admin)])
+async def scraper_retry_failed(body: RetryFailedBody):
+    """Retry failed items with an optional configured-provider override and cap."""
     sched = await _get_scraper_schedule()
     lrr = sched.get("last_run_results") or []
     ids = [r.get("id") for r in lrr if not r.get("ok") and r.get("id")]
+    method = (body.provider_id or "auto").strip().lower()
+    if method != "auto":
+        settings = await _get_scraper_api_settings()
+        provider = next((row for row in settings.get("providers") or [] if row.get("id") == method), None)
+        if not provider:
+            raise HTTPException(status_code=400, detail="Selected scraper provider is no longer configured")
+        if not provider.get("enabled"):
+            raise HTTPException(status_code=400, detail="Selected scraper provider is disabled")
     if not ids:
-        return {"ok": True, "results": lrr, "stats": sched.get("last_run_stats"), "retried": 0, "schedule": await get_scraper_schedule()}
-    result = await _retry_scrape_items(ids)
+        return {"ok": True, "results": lrr, "stats": sched.get("last_run_stats"), "retried": 0, "deferred_ids": [], "limit_reached": False, "schedule": await get_scraper_schedule()}
+    result = await _retry_scrape_items(ids, method=method, request_limit=body.request_limit)
     return {"ok": True, **result, "schedule": await get_scraper_schedule()}
 
 

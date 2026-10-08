@@ -186,6 +186,43 @@ class TestSchedulerHistoryAndRetry:
         finally:
             _run(cleanup())
 
+    def test_manual_retry_request_limit_defers_remaining_eligible_items(self, monkeypatch):
+        prefix = f"retry-limit-{uuid.uuid4().hex[:8]}"
+        item_ids = [f"{prefix}-{index}" for index in range(3)]
+
+        async def seed():
+            for item_id in item_ids:
+                await server.db.items.insert_one({"id": item_id, "item_id": item_id, "title": item_id, "url": f"https://example.com/{item_id}", "images": []})
+                await server.db.products.insert_one({"id": f"product-{item_id}", "source_item_id": item_id, "active": True, "stock_status": "live", "stock": 1, "archived": False})
+            await server.db.scraper_schedule.update_one(
+                {"id": "singleton"},
+                {"$set": {**server.SCRAPER_SCHEDULE_DEFAULTS, "last_run_results": [{"id": item_id, "item_id": item_id, "ok": False} for item_id in item_ids]}},
+                upsert=True,
+            )
+
+        async def cleanup():
+            await server.db.items.delete_many({"id": {"$in": item_ids}})
+            await server.db.products.delete_many({"id": {"$in": [f"product-{item_id}" for item_id in item_ids]}})
+
+        calls = []
+        async def fake_scrape(item, **_kwargs):
+            calls.append(item["id"])
+            return {"id": item["id"], "item_id": item["item_id"], "ok": True, "sold": False}
+
+        _run(seed())
+        monkeypatch.setattr(helpers, "_scrape_one_item", fake_scrape)
+        try:
+            result = _run(helpers._retry_scrape_items(item_ids, method="scraperapi", request_limit=2))
+            assert calls == item_ids[:2]
+            assert result["retried"] == 2
+            assert result["attempted_ids"] == item_ids[:2]
+            assert result["deferred_ids"] == [item_ids[2]]
+            assert result["limit_reached"] is True
+            remaining = next(row for row in result["results"] if row["id"] == item_ids[2])
+            assert remaining["ok"] is False
+        finally:
+            _run(cleanup())
+
     def test_scheduled_auto_retry_queues_only_live_product_items(self, monkeypatch):
         prefix = f"retry-queue-{uuid.uuid4().hex[:8]}"
         active_id, sold_id = f"{prefix}-active", f"{prefix}-sold"

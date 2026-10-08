@@ -1,0 +1,48 @@
+{
+  "summary": "Tested scraper failed-item retry override/limit backend + frontend behavior. Requested flows pass, but critical auth gap found on scraper schedule/retry APIs.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/scraper/schedule (and related scraper schedule/retry endpoints)",
+        "issue": "Endpoints are accessible without admin authentication. Reproduced via public curl returning 200 for schedule and processing retry-failed validation without auth.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_scraper_retry_failed_endpoint.py",
+    "/app/backend/tests/test_scheduler_history_and_retry.py",
+    "/app/test_reports/pytest/pytest_iteration52_retry_failed.xml"
+  ],
+  "action_items": [
+    "Add admin auth guards (Depends(get_current_admin)) to scraper schedule/retry mutating and read endpoints.",
+    "Re-test unauthenticated access returns 401/403 after auth guard fix.",
+    "Keep request_limit validation and retry defer semantics unchanged while applying auth fix."
+  ],
+  "critical_code_review_comments": [
+    "Requested P0 behavior is implemented: RetryFailedBody accepts optional provider_id and optional request_limit (null allowed, ge=1 enforced), and helper request_limit logic defers untouched IDs while keeping them failed.",
+    "Regression checks passed for manual item retry + scheduled auto-retry queueing behavior in test_scheduler_history_and_retry.py.",
+    "server.py is very large (>5000 lines), increasing regression risk; consider further modular split for schedule/scraper auth boundaries."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_scraper_retry_failed_endpoint.py",
+    "/app/tests/seed_retry_failed_ui_state.py",
+    "/app/tests/cleanup_retry_failed_ui_state.py",
+    "/app/test_reports/iteration_52.json"
+  ],
+  "success_rate": {
+    "backend": "93% (15/15 targeted tests passed, plus 1 critical unauthenticated-access defect found by live endpoint probe)",
+    "frontend": "100% (requested retry-control visibility + payload serialization checks passed)"
+  },
+  "seed_data_creation": "Created MOCKED scraper schedule last_run_results for UI verification, then cleaned all mock rows in cleanup script.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "UI verification used qa@prettycheap.com.au / QaTest123!. MOCKED provider/eBay behavior preserved (no live third-party scraping). Retry-control payload capture confirmed: blank limit -> null, numeric limit -> integer. Cleaned temporary ui-mock-* schedule rows after test.",
+  "rca of the issue": "Root cause of critical defect: scraper schedule/retry endpoints (e.g., /api/scraper/schedule, /api/scraper/retry-failed) are defined without admin auth dependency, so public callers can read scheduler state and attempt retry actions. Repro: curl GET /api/scraper/schedule returns 200 without cookie/token; curl POST /api/scraper/retry-failed with body validates and responds without auth. Mitigation: enforce Depends(get_current_admin) consistently across scraper schedule and retry routes; add auth regression tests for 401/403 unauthenticated requests."
+}

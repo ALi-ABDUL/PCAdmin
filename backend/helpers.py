@@ -310,12 +310,17 @@ async def _refresh_all_items(method: str = "auto", scrapingbee_key: Optional[str
     return {**_summarise_results(results), "results": results}
 
 
-async def _retry_scrape_items(ids: list, method: str = "auto") -> dict:
+async def _retry_scrape_items(ids: list, method: str = "auto", request_limit: Optional[int] = None) -> dict:
     """Re-scrape a specific set of items by id and merge the fresh outcomes into
     `last_run_results`, recomputing `last_run_stats`. Powers the per-item Retry
     and Retry-All-Failed buttons."""
     ids = [i for i in ids if i]
     docs, skipped_ids = await _retryable_item_docs(ids)
+    limit = int(request_limit) if request_limit is not None else None
+    if limit is not None and limit < 1:
+        raise ValueError("request_limit must be at least 1")
+    deferred_docs = docs[limit:] if limit is not None else []
+    docs = docs[:limit] if limit is not None else docs
     updated = []
     for it in docs:
         updated.append(await _scrape_one_item(it, method=method))
@@ -337,7 +342,15 @@ async def _retry_scrape_items(ids: list, method: str = "auto") -> dict:
         {"$set": {"last_run_results": lrr, "last_run_stats": stats, "last_run_at": datetime.now(timezone.utc).isoformat()}},
         upsert=True,
     )
-    return {"results": lrr, "stats": stats, "retried": len(updated), "attempted_ids": [row["id"] for row in updated], "skipped_ids": skipped_ids}
+    return {
+        "results": lrr,
+        "stats": stats,
+        "retried": len(updated),
+        "attempted_ids": [row["id"] for row in updated],
+        "skipped_ids": skipped_ids,
+        "deferred_ids": [row["id"] for row in deferred_docs],
+        "limit_reached": bool(deferred_docs),
+    }
 
 
 async def _get_scraper_schedule() -> dict:

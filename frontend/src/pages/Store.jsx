@@ -1214,6 +1214,9 @@ export function ScraperScheduleEditor() {
   const [running, setRunning] = useState(false);
   const [retryingIds, setRetryingIds] = useState([]);
   const [retryingAll, setRetryingAll] = useState(false);
+  const [retryProviderId, setRetryProviderId] = useState("");
+  const [retryRequestLimit, setRetryRequestLimit] = useState("");
+  const [retryProviders, setRetryProviders] = useState([]);
   const [arLocal, setArLocal] = useState(null);
   const [arDirty, setArDirty] = useState(false);
   const dirtyRef = useRef(false);
@@ -1226,6 +1229,26 @@ export function ScraperScheduleEditor() {
     if (!dirtyRef.current) setRows(_rowsFromSched(data));
   }, []);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+
+  useEffect(() => {
+    let active = true;
+    axios.get(`${API}/scraper/apis`).then(({ data }) => {
+      if (!active) return;
+      const ready = (data.providers || []).filter((provider) => {
+        if (!provider.enabled) return false;
+        if (provider.type === "decodo") return provider.username_set && provider.password_set;
+        if (provider.type === "custom") {
+          if (!provider.endpoint) return false;
+          return provider.auth_mode === "none"
+            || provider.api_key_set
+            || (provider.username_set && provider.password_set);
+        }
+        return provider.api_key_set;
+      });
+      setRetryProviders(ready);
+    }).catch(() => active && setRetryProviders([]));
+    return () => { active = false; };
+  }, []);
 
   // Keep the auto-retry settings form in sync with the server unless the admin
   // is mid-edit.
@@ -1293,13 +1316,22 @@ export function ScraperScheduleEditor() {
   };
 
   const retryAllFailed = async () => {
+    const parsedLimit = retryRequestLimit === "" ? null : Number(retryRequestLimit);
+    if (parsedLimit !== null && (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 1000)) {
+      toast.error("Request limit must be a whole number from 1 to 1000");
+      return;
+    }
     setRetryingAll(true);
     toast.loading("Retrying all failed items…", { id: "retry-all" });
     try {
-      const { data } = await axios.post(`${API}/scraper/retry-failed`, {}, { timeout: 30 * 60 * 1000 });
+      const { data } = await axios.post(`${API}/scraper/retry-failed`, {
+        provider_id: retryProviderId || null,
+        request_limit: parsedLimit,
+      }, { timeout: 30 * 60 * 1000 });
       setSched(data.schedule);
       const s = data.stats || {};
-      toast.success(`Done · ${s.refreshed || 0}/${s.total || 0} now refreshed · ${s.failed || 0} still failing`, { id: "retry-all" });
+      const deferred = (data.deferred_ids || []).length;
+      toast.success(`Done · ${s.refreshed || 0}/${s.total || 0} now refreshed · ${s.failed || 0} still failing${deferred ? ` · ${deferred} left for later` : ""}`, { id: "retry-all" });
     } catch (e) {
       toast.error("Retry failed", { id: "retry-all", description: e?.response?.data?.detail?.slice(0, 160) || e.message });
     } finally { setRetryingAll(false); }
@@ -1602,9 +1634,37 @@ export function ScraperScheduleEditor() {
               </div>
             </div>
             {failedResults.length > 0 && (
-              <button onClick={retryAllFailed} disabled={retryingAll} className="btn btn-primary text-sm disabled:opacity-50" data-testid="sched-retry-all">
-                {retryingAll ? <Loader2 size={14} className="animate-spin"/> : <RefreshCw size={14}/>} Retry all failed ({failedResults.length})
-              </button>
+              <div className="flex flex-wrap items-end justify-end gap-2" data-testid="sched-retry-controls">
+                <label className="grid gap-1 text-[10px] font-mono uppercase tracking-widest text-slate-500" data-testid="sched-retry-provider-label">
+                  Provider override
+                  <select
+                    value={retryProviderId}
+                    onChange={(event) => setRetryProviderId(event.target.value)}
+                    className="input min-w-44 px-2.5 py-1.5 text-xs normal-case tracking-normal"
+                    data-testid="sched-retry-provider"
+                  >
+                    <option value="">Auto fallback chain</option>
+                    {retryProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.label || provider.id}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-[10px] font-mono uppercase tracking-widest text-slate-500" data-testid="sched-retry-limit-label">
+                  Max requests
+                  <input
+                    type="number"
+                    min="1"
+                    max="1000"
+                    step="1"
+                    value={retryRequestLimit}
+                    onChange={(event) => setRetryRequestLimit(event.target.value)}
+                    placeholder="All"
+                    className="input w-28 px-2.5 py-1.5 text-xs font-mono normal-case tracking-normal"
+                    data-testid="sched-retry-request-limit"
+                  />
+                </label>
+                <button onClick={retryAllFailed} disabled={retryingAll} className="btn btn-primary text-sm disabled:opacity-50" data-testid="sched-retry-all">
+                  {retryingAll ? <Loader2 size={14} className="animate-spin"/> : <RefreshCw size={14}/>} Retry all failed ({failedResults.length})
+                </button>
+              </div>
             )}
           </div>
 

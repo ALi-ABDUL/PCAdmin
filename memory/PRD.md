@@ -2449,4 +2449,14 @@ Notification Bell deep-links) — zero regressions detected.
 ## Jun 2026 — Scraped description formatting and active-only auto-retry
 - eBay description ingestion now cleans raw text into escaped `<p>` HTML before saving: it globally removes duplicate sentences (including repeats separated by other content), respects natural blank-line breaks, and groups regular copy into readable two- or three-sentence paragraphs. The formatted HTML flows into product drafts and the rich editor/PCStore description field.
 - Tightened Scraper Schedule → Auto-retry failed items. Both queue creation and retry execution now resolve each item’s linked product from MongoDB and permit rescan only when `active=true`, `stock_status=live`, stock is positive, and the product is not archived. Deleted/missing links, drafts/inactive products, sold/removed products, and out-of-stock products are skipped and never re-queued.
+
+## Oct 07, 2026 — Capped, Provider-Aware Failed-Item Retries ✅
+- **Manual retry controls** — the Scraper Schedule’s Last run breakdown now provides a secure **Provider override** dropdown (Auto fallback chain or configured/ready APIs) and an optional **Max requests** input beside **Retry all failed**. Leaving the limit blank retries every eligible failed item.
+- **Safe server enforcement** — `POST /api/scraper/retry-failed` accepts validated `provider_id` and `request_limit` values. `_retry_scrape_items` stops once the positive cap is reached, returns `deferred_ids` / `limit_reached`, and deliberately leaves unattempted rows failed so they can be retried later. The provider selection is passed directly to every attempted retry.
+- **Admin access hardening** — existing HTTP-only admin-session checks now protect scraper schedule reads/writes, manual retries, scheduled run-now/clear-history controls, and direct scrape/refresh actions. Unauthenticated callers receive `401`; a signed-in admin retains access.
+- **Verification** — 23 targeted backend tests passed (including limit defer semantics and anonymous-route guards); external curl verified schedule access changes from `401` anonymous to `200` authenticated. Browser verification used **MOCKED** schedule rows and provider/eBay fetches were never executed.
+
+### Current priorities
+- **P1:** Region presets in Security, tag-chip product filtering, PCStore Google OAuth callback/session exchange.
+- **P2:** Support Inbox and CSV exports for products/orders.
 - Testing agent iteration_50 passed **29/29** targeted backend checks. **MOCKED IN TESTS:** eBay scrape calls were stubbed; temporary Mongo item/product fixtures were cleaned up. Frontend build remains passing with four pre-existing ProductDetail hook-dependency warnings.

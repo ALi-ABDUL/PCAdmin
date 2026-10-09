@@ -157,6 +157,60 @@ def test_scrapebadger_fetch_invalid_json_raises_safe_error(monkeypatch):
         asyncio.run(scraper._fetch_scrapebadger("https://www.ebay.com.au/itm/1234567890", {"api_key": "test-key"}))
 
 
+def test_structured_json_provider_uses_header_auth_and_maps_paths(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        def json(self): return {"product": {"name": "Mapped Widget", "price": "42.50", "images": [{"url": "https://img.example/widget.jpg"}], "description": "JSON description"}, "shipping": {"cost": "8.50"}, "inventory": {"quantity": 4}}
+
+    class FakeClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): return False
+        async def get(self, url, params, headers):
+            captured.update({"url": url, "params": params, "headers": headers})
+            return FakeResponse()
+
+    monkeypatch.setattr(scraper.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+    provider = {
+        "id": "chocodata", "type": "structured_json", "label": "Chocodata", "api_key": "test-key",
+        "endpoint": "https://api.example.com/products/{item_id}", "structured_auth_mode": "header", "structured_auth_name": "X-API-Key",
+        "field_mappings": {"title": "product.name", "price": "product.price", "images": "product.images[*].url", "description": "product.description", "shipping_cost": "shipping.cost", "stock_quantity": "inventory.quantity"},
+    }
+    result = asyncio.run(scraper._fetch_structured_json("https://www.ebay.com.au/itm/1234567890", provider))
+    mapped = scraper.parse_structured_json_item(result, "https://www.ebay.com.au/itm/1234567890")
+    assert captured["url"].endswith("/1234567890")
+    assert captured["headers"] == {"X-API-Key": "test-key"}
+    assert captured["params"] == {}
+    assert mapped["title"] == "Mapped Widget"
+    assert mapped["price_value"] == 42.5
+    assert mapped["postage_fee"] == 8.5
+    assert mapped["images"] == ["https://img.example/widget.jpg"]
+    assert mapped["quantity_available"] == 4
+
+
+def test_structured_json_provider_uses_query_auth_and_key_placeholder(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        def json(self): return {"title": "Query item"}
+
+    class FakeClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): return False
+        async def get(self, url, params, headers):
+            captured.update({"url": url, "params": params, "headers": headers})
+            return FakeResponse()
+
+    monkeypatch.setattr(scraper.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+    provider = {"id": "json-query", "type": "structured_json", "api_key": "test-key", "endpoint": "https://api.example.com/items/{item_id}?token={key}", "structured_auth_mode": "query", "structured_auth_name": "api_key", "field_mappings": {"title": "title"}}
+    asyncio.run(scraper._fetch_structured_json("https://www.ebay.com.au/itm/1234567890", provider))
+    assert "token=test-key" in captured["url"]
+    assert captured["params"] == {"api_key": "test-key"}
+    assert captured["headers"] == {}
+
+
 def test_scrapebadger_mapper_flags_out_of_stock_quantity_zero():
     payload = {
         "item": {

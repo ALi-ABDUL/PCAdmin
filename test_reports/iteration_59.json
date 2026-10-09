@@ -1,0 +1,45 @@
+{
+  "summary": "Executed targeted backend + frontend testing for new Structured JSON API provider type in Scraper APIs. UI controls, add-flow, and late-initial-load overwrite guard passed. Backend persistence/masking/placeholder/auth validation mostly passed, with one validation gap reproduced.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/scraper/apis",
+        "issue": "Unsafe JSON mapping path is accepted for structured_json providers (e.g., field_mappings.title='product[0].__proto__') instead of being rejected.",
+        "priority": "HIGH/CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_scraper_apis_auth_and_settings.py",
+    "/app/backend/tests/test_scraper_provider_fallback.py",
+    "/app/test_reports/pytest/pytest_iteration59_structured_json.xml"
+  ],
+  "action_items": [
+    "Harden structured_json mapping validator to reject unsafe path segments like __proto__, constructor, and prototype.",
+    "After backend fix, rerun test_scraper_apis_rejects_structured_json_unsafe_mapping_path and full scraper-provider suite.",
+    "MOCKED: all third-party scraping/provider calls were tested via mocked HTTP clients only; no live provider requests were made."
+  ],
+  "critical_code_review_comments": [
+    "server.py::_validate_custom_scraper_provider path regex currently allows dangerous object keys (e.g., __proto__), conflicting with the requirement to reject unsafe JSON paths.",
+    "backend/server.py is very large; route-level modularization would reduce regression risk in validation/security logic changes."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_scraper_apis_auth_and_settings.py",
+    "/app/test_reports/iteration_59.json"
+  ],
+  "success_rate": {
+    "backend": "96% (26/27 targeted tests passed)",
+    "frontend": "100% (targeted Structured JSON Scraper APIs UI flow passed)"
+  },
+  "seed_data_creation": "None. Temporary unsafe test provider created earlier was explicitly removed and scraper settings restored.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Use admin credentials from /app/memory/test_credentials.md (qa@prettycheap.com.au / QaTest123!). Frontend smoke verified Store Management > Integrations > Scraper APIs: provider-type select shows HTML scraper + Structured JSON API, new structured form renders all requested fields, and unsaved provider is not overwritten by delayed initial load. Backend suite added placeholder/auth/mapping validation coverage; only unsafe mapping rejection is failing.",
+  "rca of the issue": "RCA: /api/scraper/apis validation uses a permissive path regex that accepts '__proto__' as a valid identifier in structured JSON mappings. Repro: PATCH scraper settings with structured_json provider and field_mappings.title='product[0].__proto__' returns 200. Expected: 400 for unsafe path. Mitigation: explicitly deny reserved dangerous segments (e.g., __proto__, prototype, constructor) during mapping validation before save."
+}

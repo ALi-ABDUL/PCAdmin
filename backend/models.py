@@ -478,6 +478,10 @@ class ScraperApiProviderUpdate(BaseModel):
     auth_mode: Optional[Literal["query", "bearer", "basic", "none"]] = "query"
     api_key_param: Optional[str] = Field(default="api_key", max_length=120)
     url_param: Optional[str] = Field(default="url", max_length=120)
+    api_key_label: Optional[str] = Field(default="API key / token", max_length=120)
+    structured_auth_mode: Optional[Literal["query", "header"]] = "header"
+    structured_auth_name: Optional[str] = Field(default="X-API-Key", max_length=120)
+    field_mappings: Optional[dict] = None
 
 
 class ScraperApiSettingsUpdate(BaseModel):

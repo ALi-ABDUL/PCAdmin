@@ -530,6 +530,78 @@ async def _fetch_scrapebadger(url: str, provider: dict) -> dict[str, Any]:
     return payload
 
 
+_JSON_PATH_PART_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\[(\*|\d+)\])?$")
+_JSON_PATH_RESERVED_SEGMENTS = {"__proto__", "prototype", "constructor"}
+
+
+def _structured_json_path(payload: Any, path: str) -> Any:
+    """Resolve a deliberately small dot/index JSON path without expressions."""
+    if not path:
+        return None
+    current = [payload]
+    saw_many = False
+    for part in path.split("."):
+        match = _JSON_PATH_PART_RE.match(part)
+        if not match:
+            return None
+        key, index = match.groups()
+        if key.lower() in _JSON_PATH_RESERVED_SEGMENTS:
+            return None
+        next_values = []
+        for value in current:
+            if not isinstance(value, dict) or key not in value:
+                continue
+            child = value[key]
+            if index == "*":
+                saw_many = True
+                next_values.extend(child if isinstance(child, list) else [])
+            elif index is not None:
+                if isinstance(child, list):
+                    try:
+                        next_values.append(child[int(index)])
+                    except (IndexError, ValueError):
+                        pass
+            else:
+                next_values.append(child)
+        current = next_values
+        if not current:
+            return [] if saw_many else None
+    return current if saw_many or len(current) != 1 else current[0]
+
+
+def _render_structured_endpoint(template: str, item_id: str, api_key: str) -> str:
+    from urllib.parse import quote
+    return template.replace("{item_id}", quote(item_id, safe="")).replace("{key}", quote(api_key, safe=""))
+
+
+async def _fetch_structured_json(url: str, provider: dict) -> dict[str, Any]:
+    """Server-side request for a configurable structured product JSON API."""
+    api_key = provider.get("api_key") or ""
+    if not api_key:
+        raise ScrapeError(f"{provider.get('label') or 'Structured JSON API'} API key is required.")
+    item_id = ebay_item_id_from_url(url)
+    endpoint = _render_structured_endpoint(provider.get("endpoint") or "", item_id, api_key)
+    auth_name = provider.get("structured_auth_name") or "X-API-Key"
+    auth_mode = provider.get("structured_auth_mode") or "header"
+    headers = {auth_name: api_key} if auth_mode == "header" else {}
+    params = {auth_name: api_key} if auth_mode == "query" else {}
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=False) as client:
+        response = await client.get(endpoint, params=params, headers=headers)
+    if response.status_code in {401, 403}:
+        raise ScrapeError(f"{provider.get('label') or 'Structured JSON API'} authentication or permission failed.")
+    if response.status_code == 402:
+        raise ScrapeError(f"{provider.get('label') or 'Structured JSON API'} credits are exhausted.")
+    if response.status_code != 200:
+        raise ScrapeError(f"{provider.get('label') or 'Structured JSON API'} error {response.status_code}")
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise ScrapeError(f"{provider.get('label') or 'Structured JSON API'} returned invalid JSON.") from exc
+    if not isinstance(payload, (dict, list)):
+        raise ScrapeError(f"{provider.get('label') or 'Structured JSON API'} returned an invalid JSON response.")
+    return {"_pcadmin_structured_json": True, "payload": payload, "mappings": provider.get("field_mappings") or {}, "provider_id": provider.get("id")}
+
+
 def _provider_ready(provider: dict) -> bool:
     provider_type = provider.get("type") or provider.get("id")
     if provider_type == "decodo":
@@ -537,6 +609,8 @@ def _provider_ready(provider: dict) -> bool:
     if provider_type == "custom":
         mode = provider.get("auth_mode") or "query"
         return bool(provider.get("endpoint")) and (mode == "none" or bool(provider.get("api_key")) or bool(provider.get("username") and provider.get("password")))
+    if provider_type == "structured_json":
+        return bool(provider.get("endpoint") and provider.get("api_key") and (provider.get("field_mappings") or {}).get("title"))
     return bool(provider.get("api_key"))
 
 
@@ -556,6 +630,8 @@ async def _fetch_provider(url: str, provider: dict) -> str:
         return await _fetch_webscrapingapi(url, provider.get("api_key") or "")
     if provider_type == "scrapebadger":
         return await _fetch_scrapebadger(url, provider)
+    if provider_type == "structured_json":
+        return await _fetch_structured_json(url, provider)
     if provider_type == "custom":
         return await _fetch_custom(url, provider)
     raise ScrapeError(f"Unknown scraper provider: {provider_type}")
@@ -624,7 +700,7 @@ async def fetch_html(
 
     ordered_ids = ["scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi", "scrapebadger"]
     ordered_providers = [by_id[pid] for pid in ordered_ids if pid in by_id]
-    ordered_providers.extend(p for p in configured if p.get("type") == "custom" and p.get("enabled") and p not in ordered_providers)
+    ordered_providers.extend(p for p in configured if p.get("type") in {"custom", "structured_json"} and p.get("enabled") and p not in ordered_providers)
     for provider in ordered_providers:
         if not provider.get("enabled") or not _provider_ready(provider):
             continue
@@ -1333,6 +1409,49 @@ def parse_scrapebadger_item(payload: dict[str, Any], url: str) -> dict[str, Any]
         "payment_methods": item.get("payment_methods"), "is_sold": is_sold, "stock_status": stock_status,
         "images": _scrapebadger_images(item), "specifics": specifics, "ebay_category_path": item.get("category_path") or [],
         "variants": item.get("variants") or [], "shipping_options": shipping_options, "quantity_available": quantity,
+    }
+
+
+def _structured_json_image_urls(value: Any) -> list[str]:
+    values = value if isinstance(value, list) else [value]
+    images = []
+    for raw in values:
+        if isinstance(raw, dict):
+            raw = raw.get("url") or raw.get("src") or raw.get("image_url")
+        if isinstance(raw, str) and raw.startswith(("https://", "http://")) and raw not in images:
+            images.append(raw)
+    return images[:8]
+
+
+def parse_structured_json_item(result: dict[str, Any], url: str) -> dict[str, Any]:
+    """Map an admin-configured JSON response into the standard item schema."""
+    payload, mappings = result.get("payload"), result.get("mappings") or {}
+    if not isinstance(payload, (dict, list)):
+        raise ScrapeError("Structured JSON provider payload is invalid.")
+    get = lambda name: _structured_json_path(payload, str(mappings.get(name) or ""))
+    title = clean_ebay_title(str(get("title") or "").strip()) or None
+    price_raw, shipping_raw, stock_raw = get("price"), get("shipping_cost"), get("stock_quantity")
+    price_value, postage_fee = _scrapebadger_price(price_raw), _scrapebadger_price(shipping_raw)
+    quantity = stock_raw
+    quantity_zero = False
+    try:
+        quantity_zero = quantity is not None and int(quantity) <= 0
+    except (TypeError, ValueError):
+        pass
+    description = get("description")
+    if isinstance(description, (dict, list)):
+        description = json.dumps(description, ensure_ascii=False)
+    return {
+        "url": url, "item_id": ebay_item_id_from_url(url), "title": title,
+        "price_display": f"AU ${price_value:.2f}" if price_value is not None else None,
+        "price_value": price_value, "currency": "AUD", "condition": None, "seller": None, "location": None,
+        "shipping": f"AU ${postage_fee:.2f}" if postage_fee is not None else None, "availability": None,
+        "description": description, "description_iframe_url": None,
+        "postage_display": f"AU ${postage_fee:.2f}" if postage_fee is not None else None, "postage_fee": postage_fee,
+        "delivery_estimate": None, "delivery_speed": None, "delivery_date_range": None, "collection": None,
+        "returns_policy": None, "payment_methods": None, "is_sold": quantity_zero,
+        "stock_status": "out_of_stock" if quantity_zero else "live", "images": _structured_json_image_urls(get("images")),
+        "specifics": {}, "ebay_category_path": [], "variants": [], "quantity_available": quantity,
     }
 
 

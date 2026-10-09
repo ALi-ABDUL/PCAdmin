@@ -23,6 +23,27 @@ const emptyCustom = () => ({
   password: "",
 });
 
+const emptyStructuredJson = () => ({
+  id: `structured-json-${Date.now()}`,
+  type: "structured_json",
+  label: "Structured JSON API",
+  enabled: true,
+  endpoint: "https://api.example.com/items/{item_id}",
+  api_key_label: "API key / token",
+  structured_auth_mode: "header",
+  structured_auth_name: "X-API-Key",
+  field_mappings: { title: "", price: "", images: "", description: "", shipping_cost: "", stock_quantity: "" },
+  api_key: "",
+  username: "",
+  password: "",
+});
+
+const STRUCTURED_MAPPING_FIELDS = [
+  ["title", "Title", "product.title"], ["price", "Price", "pricing.amount"],
+  ["images", "Images", "media.images[*].url"], ["description", "Description", "product.description"],
+  ["shipping_cost", "Shipping cost", "shipping.cost"], ["stock_quantity", "Stock quantity", "inventory.quantity"],
+];
+
 const credentialFields = (provider) => {
   if (provider.type === "decodo") return ["username", "password"];
   if (provider.type === "custom" && provider.auth_mode === "basic") return ["username", "password"];
@@ -35,11 +56,15 @@ export function ScraperApiSettingsCard() {
   const [saving, setSaving] = useState(false);
   const [revealed, setRevealed] = useState({});
   const [open, setOpen] = useState(false);
+  const [newProviderType, setNewProviderType] = useState("custom");
 
   const load = useCallback(async () => {
     try {
       const { data } = await axios.get(`${API}/scraper/apis`);
-      setProviders((data.providers || []).map((provider) => ({ ...provider, api_key: "", username: "", password: "" })));
+      const loaded = (data.providers || []).map((provider) => ({ ...provider, api_key: "", username: "", password: "" }));
+      // React development mode can issue a second initial request. Never let a
+      // late response replace an admin's just-added, unsaved provider.
+      setProviders((current) => current ?? loaded);
     } catch (error) {
       toast.error("Couldn’t load scraper API settings", { description: error?.response?.data?.detail || error.message });
     }
@@ -94,22 +119,24 @@ export function ScraperApiSettingsCard() {
 
       {providers.map((provider) => {
         const isCustom = provider.type === "custom";
+        const isStructured = provider.type === "structured_json";
+        const isEditable = isCustom || isStructured;
         const fields = credentialFields(provider);
         return (
           <div className="rounded-lg border hairline p-5" key={provider.id} data-testid={`scraper-provider-${provider.id}`}>
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div className="min-w-0">
-                {isCustom ? (
+                {isEditable ? (
                   <input value={provider.label} onChange={(event) => update(provider.id, { label: event.target.value })} className="input px-3 py-1.5 font-display font-bold text-sm" data-testid={`scraper-provider-label-${provider.id}`}/>
                 ) : <div className="font-display font-bold text-base" data-testid={`scraper-provider-name-${provider.id}`}>{provider.label}</div>}
-                <div className="text-xs text-slate-500 mt-1">{isCustom ? "Custom HTTPS endpoint runs after the built-in providers." : provider.type === "scrapebadger" ? "Structured eBay AU JSON fallback · item-detail credits apply" : `Built-in fallback provider · ${provider.type}`}</div>
+                <div className="text-xs text-slate-500 mt-1">{isCustom ? "HTML scraper · raw response is parsed as an eBay page." : isStructured ? "Structured JSON API · response fields are mapped directly to product data." : provider.type === "scrapebadger" ? "Structured eBay AU JSON fallback · item-detail credits apply" : `Built-in fallback provider · ${provider.type}`}</div>
               </div>
               <div className="flex items-center gap-2">
                 <label className="inline-flex items-center gap-2 text-xs text-slate-600" data-testid={`scraper-provider-toggle-${provider.id}`}>
                   <input type="checkbox" checked={!!provider.enabled} onChange={(event) => update(provider.id, { enabled: event.target.checked })} className="accent-indigo-600" data-testid={`scraper-provider-enabled-${provider.id}`}/>
                   Enabled
                 </label>
-                {isCustom && <button onClick={() => removeCustom(provider.id)} className="btn btn-danger !p-2" title="Remove provider" data-testid={`scraper-provider-remove-${provider.id}`}><Trash2 size={13}/></button>}
+                {isEditable && <button onClick={() => removeCustom(provider.id)} className="btn btn-danger !p-2" title="Remove provider" data-testid={`scraper-provider-remove-${provider.id}`}><Trash2 size={13}/></button>}
               </div>
             </div>
 
@@ -119,6 +146,20 @@ export function ScraperApiSettingsCard() {
                 <Field label="Request method"><select value={provider.request_method || "get"} onChange={(event) => update(provider.id, { request_method: event.target.value })} className="input w-full px-3 py-2" data-testid={`scraper-provider-method-${provider.id}`}><option value="get">GET</option><option value="post">POST</option></select></Field>
                 <Field label="Authentication"><select value={provider.auth_mode || "query"} onChange={(event) => update(provider.id, { auth_mode: event.target.value })} className="input w-full px-3 py-2" data-testid={`scraper-provider-auth-${provider.id}`}><option value="query">API key in query</option><option value="bearer">Bearer token</option><option value="basic">Basic username/password</option><option value="none">No authentication</option></select></Field>
                 <div className="grid grid-cols-2 gap-3"><Field label="URL parameter"><input value={provider.url_param || "url"} onChange={(event) => update(provider.id, { url_param: event.target.value })} className="input w-full px-3 py-2 font-mono text-sm" data-testid={`scraper-provider-url-param-${provider.id}`}/></Field><Field label="API key parameter"><input value={provider.api_key_param || "api_key"} onChange={(event) => update(provider.id, { api_key_param: event.target.value })} className="input w-full px-3 py-2 font-mono text-sm" data-testid={`scraper-provider-key-param-${provider.id}`}/></Field></div>
+              </div>
+            )}
+
+            {isStructured && (
+              <div className="mt-4 grid gap-4" data-testid={`scraper-provider-structured-settings-${provider.id}`}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Field label="Endpoint URL template"><input value={provider.endpoint || ""} onChange={(event) => update(provider.id, { endpoint: event.target.value })} placeholder="https://api.example.com/items/{item_id}" className="input w-full px-3 py-2 font-mono text-sm" data-testid={`scraper-provider-endpoint-${provider.id}`}/></Field>
+                  <Field label="API key field label"><input value={provider.api_key_label || ""} onChange={(event) => update(provider.id, { api_key_label: event.target.value })} placeholder="Production API key" className="input w-full px-3 py-2 text-sm" data-testid={`scraper-provider-key-label-${provider.id}`}/></Field>
+                  <Field label="Authentication method"><select value={provider.structured_auth_mode || "header"} onChange={(event) => update(provider.id, { structured_auth_mode: event.target.value })} className="input w-full px-3 py-2" data-testid={`scraper-provider-auth-mode-${provider.id}`}><option value="header">Request header</option><option value="query">Query parameter</option></select></Field>
+                  <Field label={provider.structured_auth_mode === "query" ? "Query parameter name" : "Header name"}><input value={provider.structured_auth_name || ""} onChange={(event) => update(provider.id, { structured_auth_name: event.target.value })} placeholder={provider.structured_auth_mode === "query" ? "api_key" : "X-API-Key"} className="input w-full px-3 py-2 font-mono text-sm" data-testid={`scraper-provider-auth-name-${provider.id}`}/></Field>
+                </div>
+                <div className="border-t hairline pt-4"><div className="text-xs font-medium text-slate-700">JSON field mappings</div><div className="text-[11px] text-slate-500 mt-0.5">Use dot paths and array wildcards, e.g. <span className="font-mono">media.images[*].url</span>.</div><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
+                  {STRUCTURED_MAPPING_FIELDS.map(([key, label, placeholder]) => <Field key={key} label={label}><input value={provider.field_mappings?.[key] || ""} onChange={(event) => update(provider.id, { field_mappings: { ...(provider.field_mappings || {}), [key]: event.target.value } })} placeholder={placeholder} className="input w-full px-3 py-2 font-mono text-sm" data-testid={`scraper-provider-mapping-${key}-${provider.id}`}/></Field>)}
+                </div></div>
               </div>
             )}
 
@@ -137,7 +178,7 @@ export function ScraperApiSettingsCard() {
       })}
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <button onClick={() => setProviders((current) => [...current, emptyCustom()])} className="btn btn-ghost text-sm" data-testid="scraper-provider-add-custom"><Plus size={14}/> Add custom provider</button>
+        <div className="flex items-center gap-2 flex-wrap"><select value={newProviderType} onChange={(event) => setNewProviderType(event.target.value)} className="input px-3 py-2 text-sm" data-testid="scraper-provider-type-choice"><option value="custom">HTML scraper</option><option value="structured_json">Structured JSON API</option></select><button type="button" onClick={() => setProviders((current) => [...current, newProviderType === "structured_json" ? emptyStructuredJson() : emptyCustom()])} className="btn btn-ghost text-sm" data-testid="scraper-provider-add-custom"><Plus size={14}/> Add provider</button></div>
         <button onClick={save} disabled={saving} className="btn btn-primary text-sm" data-testid="scraper-apis-save-button">{saving ? <Loader2 size={14} className="animate-spin"/> : <KeyRound size={14}/>} Save scraper APIs</button>
       </div>
       </div>}

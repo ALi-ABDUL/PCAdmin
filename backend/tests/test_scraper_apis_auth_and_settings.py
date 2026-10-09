@@ -48,6 +48,15 @@ def _login_admin() -> Tuple[requests.Session, requests.Response]:
     return session, resp
 
 
+def _provider_update_shape(provider: dict) -> dict:
+    row = {key: provider.get(key) for key in ("id", "type", "label", "enabled")}
+    if provider.get("type") == "custom":
+        row.update({key: provider.get(key) for key in ("endpoint", "request_method", "auth_mode", "api_key_param", "url_param")})
+    if provider.get("type") == "structured_json":
+        row.update({key: provider.get(key) for key in ("endpoint", "api_key_label", "structured_auth_mode", "structured_auth_name", "field_mappings")})
+    return row
+
+
 def test_admin_login_success_sets_http_only_cookie():
     session, resp = _login_admin()
     assert resp.status_code == 200
@@ -116,12 +125,6 @@ def test_scraper_apis_patch_add_then_remove_custom_preserves_builtins():
     before_providers = before.json().get("providers") or []
     before_ids = [p.get("id") for p in before_providers]
 
-    def provider_update_shape(provider):
-        row = {key: provider.get(key) for key in ("id", "type", "label", "enabled")}
-        if provider.get("type") == "custom":
-            row.update({key: provider.get(key) for key in ("endpoint", "request_method", "auth_mode", "api_key_param", "url_param")})
-        return row
-
     custom_id = f"custom-qa-provider-{uuid.uuid4().hex[:8]}"
     custom_payload = {
         "id": custom_id,
@@ -137,7 +140,7 @@ def test_scraper_apis_patch_add_then_remove_custom_preserves_builtins():
 
     add_payload = {
         "providers": [
-            *[provider_update_shape(p) for p in before_providers],
+            *[_provider_update_shape(p) for p in before_providers],
             custom_payload,
         ]
     }
@@ -150,7 +153,7 @@ def test_scraper_apis_patch_add_then_remove_custom_preserves_builtins():
 
     remove_payload = {
         "providers": [
-            provider_update_shape(p) for p in before_providers
+            _provider_update_shape(p) for p in before_providers
         ]
     }
     remove_resp = session.patch(f"{BASE_URL}/api/scraper/apis", json=remove_payload, timeout=30)
@@ -164,6 +167,32 @@ def test_scraper_apis_patch_add_then_remove_custom_preserves_builtins():
         assert builtin_id in before_ids
 
 
+def test_scraper_apis_persists_structured_json_provider_masked():
+    session, login_resp = _login_admin()
+    assert login_resp.status_code == 200
+    before = session.get(f"{BASE_URL}/api/scraper/apis", timeout=30)
+    assert before.status_code == 200
+    before_providers = before.json().get("providers") or []
+
+    provider_id = f"structured-qa-{uuid.uuid4().hex[:8]}"
+    structured = {
+        "id": provider_id, "type": "structured_json", "label": "QA JSON Provider", "enabled": True,
+        "endpoint": "https://api.example.com/items/{item_id}?token={key}", "api_key": "qa-temporary-key",
+        "api_key_label": "QA API key", "structured_auth_mode": "header", "structured_auth_name": "X-API-Key",
+        "field_mappings": {"title": "product.title", "price": "product.price", "images": "product.images[*].url", "description": "product.description", "shipping_cost": "shipping.cost", "stock_quantity": "inventory.quantity"},
+    }
+    try:
+        saved = session.patch(f"{BASE_URL}/api/scraper/apis", json={"providers": [*[_provider_update_shape(p) for p in before_providers], structured]}, timeout=30)
+        assert saved.status_code == 200, saved.text
+        result = next(p for p in saved.json()["providers"] if p["id"] == provider_id)
+        assert result["type"] == "structured_json"
+        assert result["api_key_set"] is True and "api_key" not in result
+        assert result["field_mappings"]["images"] == "product.images[*].url"
+    finally:
+        restored = session.patch(f"{BASE_URL}/api/scraper/apis", json={"providers": [_provider_update_shape(p) for p in before_providers]}, timeout=30)
+        assert restored.status_code == 200, restored.text
+
+
 def test_scraper_apis_rejects_non_https_custom_endpoint():
     session, login_resp = _login_admin()
     assert login_resp.status_code == 200
@@ -174,7 +203,7 @@ def test_scraper_apis_rejects_non_https_custom_endpoint():
     providers = current.json().get("providers") or []
     payload = {
         "providers": [
-            *[{"id": p.get("id"), "type": p.get("type"), "label": p.get("label"), "enabled": bool(p.get("enabled"))} for p in providers],
+            *[_provider_update_shape(p) for p in providers],
             {
                 "id": "custom-http-provider",
                 "type": "custom",
@@ -189,6 +218,124 @@ def test_scraper_apis_rejects_non_https_custom_endpoint():
     resp = session.patch(f"{BASE_URL}/api/scraper/apis", json=payload, timeout=30)
     assert resp.status_code == 400
     assert "HTTPS" in (resp.json().get("detail") or "")
+
+
+def test_scraper_apis_rejects_structured_json_missing_item_id_placeholder():
+    session, login_resp = _login_admin()
+    assert login_resp.status_code == 200
+
+    current = session.get(f"{BASE_URL}/api/scraper/apis", timeout=30)
+    assert current.status_code == 200
+    providers = current.json().get("providers") or []
+    payload = {
+        "providers": [
+            *[_provider_update_shape(p) for p in providers],
+            {
+                "id": "structured-missing-itemid",
+                "type": "structured_json",
+                "label": "Invalid missing placeholder",
+                "enabled": True,
+                "endpoint": "https://api.example.com/items?token={key}",
+                "structured_auth_mode": "header",
+                "structured_auth_name": "X-API-Key",
+                "field_mappings": {"title": "product.title"},
+            },
+        ]
+    }
+    resp = session.patch(f"{BASE_URL}/api/scraper/apis", json=payload, timeout=30)
+    assert resp.status_code == 400
+    assert "must include {item_id}" in (resp.json().get("detail") or "")
+
+
+def test_scraper_apis_rejects_structured_json_unsupported_placeholder():
+    session, login_resp = _login_admin()
+    assert login_resp.status_code == 200
+
+    current = session.get(f"{BASE_URL}/api/scraper/apis", timeout=30)
+    assert current.status_code == 200
+    providers = current.json().get("providers") or []
+    payload = {
+        "providers": [
+            *[_provider_update_shape(p) for p in providers],
+            {
+                "id": "structured-unsupported-ph",
+                "type": "structured_json",
+                "label": "Invalid placeholder",
+                "enabled": True,
+                "endpoint": "https://api.example.com/items/{item_id}/{foo}",
+                "structured_auth_mode": "header",
+                "structured_auth_name": "X-API-Key",
+                "field_mappings": {"title": "product.title"},
+            },
+        ]
+    }
+    resp = session.patch(f"{BASE_URL}/api/scraper/apis", json=payload, timeout=30)
+    assert resp.status_code == 400
+    assert "may only use {item_id} or {key}" in (resp.json().get("detail") or "")
+
+
+def test_scraper_apis_rejects_structured_json_invalid_auth_name_and_mapping_path():
+    session, login_resp = _login_admin()
+    assert login_resp.status_code == 200
+
+    current = session.get(f"{BASE_URL}/api/scraper/apis", timeout=30)
+    assert current.status_code == 200
+    providers = current.json().get("providers") or []
+    payload = {
+        "providers": [
+            *[_provider_update_shape(p) for p in providers],
+            {
+                "id": "structured-invalid-fields",
+                "type": "structured_json",
+                "label": "Invalid mapping/auth",
+                "enabled": True,
+                "endpoint": "https://api.example.com/items/{item_id}",
+                "structured_auth_mode": "query",
+                "structured_auth_name": "X API Key",
+                "field_mappings": {"title": "product['title']"},
+            },
+        ]
+    }
+    resp = session.patch(f"{BASE_URL}/api/scraper/apis", json=payload, timeout=30)
+    assert resp.status_code == 400
+    detail = resp.json().get("detail") or ""
+    assert "authentication name is invalid" in detail or "mapping for title is invalid" in detail
+
+
+def test_scraper_apis_rejects_structured_json_unsafe_mapping_path():
+    session, login_resp = _login_admin()
+    assert login_resp.status_code == 200
+
+    current = session.get(f"{BASE_URL}/api/scraper/apis", timeout=30)
+    assert current.status_code == 200
+    providers = current.json().get("providers") or []
+    provider_id = f"structured-unsafe-mapping-{uuid.uuid4().hex[:8]}"
+    try:
+        payload = {
+            "providers": [
+                *[_provider_update_shape(p) for p in providers],
+                {
+                    "id": provider_id,
+                    "type": "structured_json",
+                    "label": "Unsafe mapping",
+                    "enabled": True,
+                    "endpoint": "https://api.example.com/items/{item_id}",
+                    "structured_auth_mode": "header",
+                    "structured_auth_name": "X-API-Key",
+                    "field_mappings": {"title": "product[0].__proto__"},
+                },
+            ]
+        }
+        resp = session.patch(f"{BASE_URL}/api/scraper/apis", json=payload, timeout=30)
+        assert resp.status_code == 400
+        assert "mapping for title is invalid" in (resp.json().get("detail") or "")
+    finally:
+        restored = session.patch(
+            f"{BASE_URL}/api/scraper/apis",
+            json={"providers": [_provider_update_shape(p) for p in providers]},
+            timeout=30,
+        )
+        assert restored.status_code == 200, restored.text
 
 
 def test_admin_login_options_has_explicit_origin_and_credentials_headers():

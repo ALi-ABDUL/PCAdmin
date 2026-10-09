@@ -24,7 +24,7 @@ import jwt
 from deps import app, api_router, db, client, logger
 from scraper import (
     ScrapeError, NotEbayAUError, BlockedError,
-    validate_ebay_au_url, fetch_html, parse_and_enrich, parse_scrapebadger_item,
+    validate_ebay_au_url, fetch_html, parse_and_enrich, parse_scrapebadger_item, parse_structured_json_item,
 )
 
 
@@ -150,12 +150,31 @@ def _public_scraper_api_settings(settings: dict) -> dict:
 
 
 def _validate_custom_scraper_provider(provider: dict) -> None:
-    if provider.get("type") != "custom":
+    provider_type = provider.get("type")
+    if provider_type not in {"custom", "structured_json"}:
         return
     endpoint = (provider.get("endpoint") or "").strip()
     parsed = urlparse(endpoint)
     if parsed.scheme != "https" or not parsed.netloc:
         raise HTTPException(status_code=400, detail="Custom provider endpoint must be a valid HTTPS URL")
+    if provider_type != "structured_json":
+        return
+    placeholders = re.findall(r"\{([^{}]+)\}", endpoint)
+    if "item_id" not in placeholders or any(value not in {"item_id", "key"} for value in placeholders):
+        raise HTTPException(status_code=400, detail="Structured JSON endpoints must include {item_id} and may only use {item_id} or {key} placeholders")
+    auth_name = (provider.get("structured_auth_name") or "").strip()
+    if not re.match(r"^[A-Za-z0-9_.-]{1,120}$", auth_name):
+        raise HTTPException(status_code=400, detail="Structured JSON authentication name is invalid")
+    mappings = provider.get("field_mappings") or {}
+    if not isinstance(mappings, dict):
+        raise HTTPException(status_code=400, detail="Structured JSON field mappings must be an object")
+    path_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[(?:\*|\d+)\])?(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[(?:\*|\d+)\])?)*$")
+    reserved_path_segments = {"__proto__", "prototype", "constructor"}
+    for target in ("title", "price", "images", "description", "shipping_cost", "stock_quantity"):
+        value = (mappings.get(target) or "").strip()
+        path_segments = [segment.split("[", 1)[0].lower() for segment in value.split(".")] if value else []
+        if value and (not path_re.match(value) or any(segment in reserved_path_segments for segment in path_segments)):
+            raise HTTPException(status_code=400, detail=f"Structured JSON mapping for {target} is invalid")
 
 
 def _provider_usage_period(value: Optional[str] = None) -> str:
@@ -249,8 +268,8 @@ async def patch_scraper_apis(body: ScraperApiSettingsUpdate, current_admin: dict
         if provider_id in _SCRAPER_BUILTIN_IDS:
             raw["id"] = provider_id
             raw["type"] = provider_id
-        elif raw.get("type") != "custom":
-            raise HTTPException(status_code=400, detail="Only the built-in providers or type=custom are supported")
+        elif raw.get("type") not in {"custom", "structured_json"}:
+            raise HTTPException(status_code=400, detail="Only built-in, HTML scraper, or Structured JSON API providers are supported")
         _validate_custom_scraper_provider(raw)
         previous = existing_by_id.get(provider_id, {})
         # Empty / omitted secrets never wipe a saved credential. This lets the
@@ -292,7 +311,12 @@ async def scrape(req: ScrapeRequest) -> dict:
         raise HTTPException(status_code=500, detail=f"Unexpected scrape error: {e}")
 
     try:
-        data = parse_scrapebadger_item(html, url) if method_used == "scrapebadger" else await parse_and_enrich(html, url, fetch_desc=True)
+        if isinstance(html, dict) and html.get("_pcadmin_structured_json"):
+            data = parse_structured_json_item(html, url)
+        elif method_used == "scrapebadger":
+            data = parse_scrapebadger_item(html, url)
+        else:
+            data = await parse_and_enrich(html, url, fetch_desc=True)
     except BlockedError as e:
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:

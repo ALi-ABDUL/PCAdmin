@@ -209,6 +209,7 @@ USER_AGENTS = [
 ACCEPT_LANGS = ["en-AU,en;q=0.9", "en-AU,en-US;q=0.9,en;q=0.8", "en-GB,en-AU;q=0.9,en;q=0.8"]
 
 EBAY_AU_HOST_RE = re.compile(r"^(www\.)?ebay\.com\.au$", re.IGNORECASE)
+EBAY_ITEM_ID_RE = re.compile(r"/itm/(?:[^/]+/)?(\d{6,20})(?:[/?#]|$)", re.IGNORECASE)
 
 
 class ScrapeError(Exception):
@@ -236,6 +237,18 @@ def validate_ebay_au_url(url: str) -> str:
             f"Only eBay Australia URLs are supported (ebay.com.au). Got: {parsed.netloc}"
         )
     return url
+
+
+def ebay_item_id_from_url(url: str) -> str:
+    """Extract an eBay AU item ID only after validating the marketplace URL."""
+    normalised = validate_ebay_au_url(url)
+    parsed = urlparse(normalised)
+    match = EBAY_ITEM_ID_RE.search(parsed.path)
+    if not match:
+        match = re.search(r"(?:^|[?&])item=(\d{6,20})(?:&|$)", parsed.query)
+    if not match:
+        raise ScrapeError("Could not extract an eBay item ID from this URL for ScrapeBadger.")
+    return match.group(1)
 
 
 def _build_headers(referer: str = "https://www.ebay.com.au/") -> dict[str, str]:
@@ -493,6 +506,30 @@ async def _fetch_custom(url: str, provider: dict) -> str:
         return resp.text
 
 
+async def _fetch_scrapebadger(url: str, provider: dict) -> dict[str, Any]:
+    """Fetch structured eBay AU item data from ScrapeBadger (never HTML)."""
+    api_key = provider.get("api_key") or ""
+    if not api_key:
+        raise ScrapeError("ScrapeBadger API key is required.")
+    item_id = ebay_item_id_from_url(url)
+    endpoint = f"https://scrapebadger.com/v1/ebay/items/{item_id}"
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.get(endpoint, params={"domain": "com.au"}, headers={"x-api-key": api_key})
+    if response.status_code in {401, 403}:
+        raise ScrapeError("ScrapeBadger authentication or permission failed.")
+    if response.status_code == 402:
+        raise ScrapeError("ScrapeBadger credits are exhausted.")
+    if response.status_code != 200:
+        raise ScrapeError(f"ScrapeBadger error {response.status_code}")
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise ScrapeError("ScrapeBadger returned invalid JSON.") from exc
+    if not isinstance(payload, dict):
+        raise ScrapeError("ScrapeBadger returned an invalid item payload.")
+    return payload
+
+
 def _provider_ready(provider: dict) -> bool:
     provider_type = provider.get("type") or provider.get("id")
     if provider_type == "decodo":
@@ -517,6 +554,8 @@ async def _fetch_provider(url: str, provider: dict) -> str:
         return await _fetch_decodo(url, provider)
     if provider_type == "webscrapingapi":
         return await _fetch_webscrapingapi(url, provider.get("api_key") or "")
+    if provider_type == "scrapebadger":
+        return await _fetch_scrapebadger(url, provider)
     if provider_type == "custom":
         return await _fetch_custom(url, provider)
     raise ScrapeError(f"Unknown scraper provider: {provider_type}")
@@ -529,8 +568,8 @@ async def fetch_html(
     scraperapi_key: Optional[str] = None,
     providers: Optional[list[dict]] = None,
     on_provider_attempt: Optional[Callable[[str, bool], Awaitable[None]]] = None,
-) -> tuple[str, str]:
-    """Fetch HTML for a URL, returning (html, method_used).
+) -> tuple[Any, str]:
+    """Fetch page content for a URL, returning (content, method_used).
 
     Auto is deterministic: manual, then enabled configured providers in the
     fixed built-in order, then custom providers in their saved order.
@@ -576,14 +615,14 @@ async def fetch_html(
             await track_attempt(provider, False)
             raise
 
-    # auto: manual -> ScrapingBee -> ScraperAPI -> Scrape.do -> Bright Data -> Decodo -> WebScrapingAPI -> custom
+    # auto: manual -> ScrapingBee -> ScraperAPI -> Scrape.do -> Bright Data -> Decodo -> WebScrapingAPI -> ScrapeBadger -> custom
     try:
         html = await _fetch_manual(url)
         return html, "manual"
     except Exception as e:
         errors.append(f"manual: {e}")
 
-    ordered_ids = ["scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi"]
+    ordered_ids = ["scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi", "scrapebadger"]
     ordered_providers = [by_id[pid] for pid in ordered_ids if pid in by_id]
     ordered_providers.extend(p for p in configured if p.get("type") == "custom" and p.get("enabled") and p not in ordered_providers)
     for provider in ordered_providers:
@@ -1201,6 +1240,100 @@ async def parse_and_enrich(html: str, url: str, fetch_desc: bool = True) -> dict
         if desc:
             data["description"] = desc
     return data
+
+
+def _scrapebadger_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return value.get("value", value.get("amount", value.get("price", value.get("display"))))
+    return value
+
+
+def _scrapebadger_price(value: Any) -> Optional[float]:
+    value = _scrapebadger_value(value)
+    if value is None or value == "":
+        return None
+    try:
+        return float(str(value).replace("AU$", "").replace("A$", "").replace("$", "").replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _scrapebadger_images(item: dict) -> list[str]:
+    raw_images = item.get("images") or item.get("image_urls") or []
+    if isinstance(raw_images, (str, dict)):
+        raw_images = [raw_images]
+    candidates = [item.get("main_image"), item.get("image"), item.get("primary_image")]
+    images = []
+    for raw in [*candidates, *raw_images]:
+        if isinstance(raw, dict):
+            raw = raw.get("url") or raw.get("image_url") or raw.get("src")
+        if isinstance(raw, str) and raw.startswith(("https://", "http://")) and raw not in images:
+            images.append(raw)
+    return images[:8]
+
+
+def parse_scrapebadger_item(payload: dict[str, Any], url: str) -> dict[str, Any]:
+    """Map ScrapeBadger's structured eBay response into PCAdmin's item schema."""
+    item = payload.get("item") or payload.get("data") or payload
+    if isinstance(item, dict) and isinstance(item.get("item"), dict):
+        item = item["item"]
+    if not isinstance(item, dict):
+        raise ScrapeError("ScrapeBadger response did not include an item object.")
+    item_id = str(item.get("item_id") or item.get("id") or ebay_item_id_from_url(url))
+    title = clean_ebay_title(str(item.get("title") or item.get("name") or "").strip()) or None
+    price_raw = item.get("price") or item.get("current_price") or item.get("buy_it_now_price")
+    price_value = _scrapebadger_price(price_raw)
+    price_display = str(_scrapebadger_value(price_raw) or "").strip() or (f"AU ${price_value:.2f}" if price_value is not None else None)
+    currency = (item.get("currency") or (price_raw.get("currency") if isinstance(price_raw, dict) else None) or "AUD").upper()
+    shipping_info = item.get("shipping") if isinstance(item.get("shipping"), dict) else {}
+    shipping_options = item.get("shipping_options") or shipping_info.get("options") or []
+    shipping_cost = item.get("shipping_cost") or shipping_info.get("cost") or shipping_info.get("price")
+    postage_fee = _scrapebadger_price(shipping_cost)
+    free_shipping = bool(item.get("free_shipping") or shipping_info.get("free_shipping"))
+    postage_display = "Free shipping" if free_shipping else (f"AU ${postage_fee:.2f}" if postage_fee is not None else None)
+    availability = str(item.get("availability") or item.get("stock_status") or "").strip() or None
+    quantity = item.get("quantity_available")
+    if quantity is None:
+        quantity = item.get("quantity")
+    availability_lc = (availability or "").lower()
+    is_sold = bool(item.get("is_sold") or item.get("sold")) or any(token in availability_lc for token in ("out of stock", "sold", "ended", "unavailable"))
+    quantity_zero = False
+    if quantity is not None:
+        try:
+            quantity_zero = int(quantity) <= 0
+            is_sold = is_sold or quantity_zero
+        except (TypeError, ValueError):
+            pass
+    if not is_sold:
+        stock_status = "live"
+    elif "ended" in availability_lc or "sold" in availability_lc:
+        stock_status = "sold"
+    elif "stock" in availability_lc or quantity_zero:
+        stock_status = "out_of_stock"
+    else:
+        stock_status = "sold"
+    raw_specifics = item.get("specifics") or item.get("item_specifics") or {}
+    if isinstance(raw_specifics, list):
+        specifics = {str(row.get("name")): str(row.get("value")) for row in raw_specifics if isinstance(row, dict) and row.get("name") and row.get("value")}
+    else:
+        specifics = raw_specifics if isinstance(raw_specifics, dict) else {}
+    description = item.get("description_html") or item.get("description") or None
+    if isinstance(description, dict):
+        description = description.get("html") or description.get("text")
+    return {
+        "url": url, "item_id": item_id, "title": title, "price_display": price_display,
+        "price_value": price_value, "currency": currency, "condition": item.get("condition"),
+        "seller": item.get("seller") or item.get("seller_name"), "location": item.get("location") or item.get("item_location"),
+        "shipping": "Free shipping" if free_shipping else (str(shipping_options[0]) if shipping_options else postage_display),
+        "availability": availability, "description": description, "description_iframe_url": None,
+        "postage_display": postage_display, "postage_fee": postage_fee,
+        "delivery_estimate": item.get("delivery_estimate") or shipping_info.get("delivery_estimate"),
+        "delivery_speed": item.get("delivery_speed"), "delivery_date_range": item.get("delivery_date_range"),
+        "collection": item.get("collection"), "returns_policy": item.get("returns") or item.get("returns_policy"),
+        "payment_methods": item.get("payment_methods"), "is_sold": is_sold, "stock_status": stock_status,
+        "images": _scrapebadger_images(item), "specifics": specifics, "ebay_category_path": item.get("category_path") or [],
+        "variants": item.get("variants") or [], "shipping_options": shipping_options, "quantity_available": quantity,
+    }
 
 
 def parse_ebay_item(html: str, url: str) -> dict[str, Any]:

@@ -1,0 +1,41 @@
+{
+  "summary": "Completed backend+frontend verification for ScrapeBadger provider integration. Confirmed masked credential metadata, provider visibility in Integrations UI, deterministic fallback placement, ScrapeBadger request construction via mocks, URL/item-id validation, malformed JSON safety, and provider usage/auth regressions.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_scraper_provider_fallback.py",
+    "/app/backend/tests/test_scraper_apis_auth_and_settings.py",
+    "/app/backend/tests/test_scraper_provider_usage_dashboard.py",
+    "/app/test_reports/pytest/pytest_iteration58_scrapebadger.xml"
+  ],
+  "action_items": [
+    "No open functional defects in requested scope after retest.",
+    "Consider refactoring backend/server.py (>5k lines) into route modules to reduce regression risk.",
+    "MOCKED: ScrapeBadger/eBay/provider network calls were validated only through mocked tests; no live provider calls were made."
+  ],
+  "critical_code_review_comments": [
+    "Fixed a real mapping edge case in backend/scraper.py: quantity_available=0 was previously lost by truthy-coalescing, causing incorrect stock mapping.",
+    "Adjusted stock_status derivation so zero quantity maps to out_of_stock unless availability explicitly indicates sold/ended."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_scraper_provider_fallback.py",
+    "/app/backend/scraper.py",
+    "/app/test_reports/iteration_58.json"
+  ],
+  "success_rate": {
+    "backend": "100% (23/23 targeted tests passed)",
+    "frontend": "100% (targeted Integrations/ScrapeBadger UI flow passed)"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Used public URL from frontend/.env and admin creds from /app/memory/test_credentials.md (qa@prettycheap.com.au / QaTest123!). Verified ScrapeBadger row exists in Store Management > Integrations > Scraper APIs, with masked saved key metadata and empty credential input value. Backend pytest file now includes extra coverage for eBay AU item-id extraction and invalid JSON handling.",
+  "rca of the issue": "RCA: ScrapeBadger mapper used `quantity_available or quantity`, so quantity=0 collapsed to fallback None due Python truthiness; this prevented quantity-based sold/out_of_stock detection. Reproduction: parse payload with quantity_available=0 and no explicit availability token. Mitigation applied: preserve zero with explicit None check and derive stock_status using quantity_zero + availability semantics; validated by new targeted tests."
+}

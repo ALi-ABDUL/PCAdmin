@@ -5,7 +5,7 @@ import { CheckCircle2, Eye, EyeOff, Globe2, KeyRound, Loader2, Plus, Trash2 } fr
 import { API } from "../lib/api";
 import { Field } from "./atoms";
 
-const BUILTIN_IDS = new Set(["scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi"]);
+const BUILTIN_IDS = new Set(["scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi", "scrapebadger"]);
 const SECRET_FIELDS = ["api_key", "username", "password"];
 
 const emptyCustom = () => ({
@@ -102,7 +102,7 @@ export function ScraperApiSettingsCard() {
                 {isCustom ? (
                   <input value={provider.label} onChange={(event) => update(provider.id, { label: event.target.value })} className="input px-3 py-1.5 font-display font-bold text-sm" data-testid={`scraper-provider-label-${provider.id}`}/>
                 ) : <div className="font-display font-bold text-base" data-testid={`scraper-provider-name-${provider.id}`}>{provider.label}</div>}
-                <div className="text-xs text-slate-500 mt-1">{isCustom ? "Custom HTTPS endpoint runs after the built-in providers." : `Built-in fallback provider · ${provider.type}`}</div>
+                <div className="text-xs text-slate-500 mt-1">{isCustom ? "Custom HTTPS endpoint runs after the built-in providers." : provider.type === "scrapebadger" ? "Structured eBay AU JSON fallback · item-detail credits apply" : `Built-in fallback provider · ${provider.type}`}</div>
               </div>
               <div className="flex items-center gap-2">
                 <label className="inline-flex items-center gap-2 text-xs text-slate-600" data-testid={`scraper-provider-toggle-${provider.id}`}>

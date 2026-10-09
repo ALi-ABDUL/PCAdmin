@@ -24,7 +24,7 @@ import jwt
 from deps import app, api_router, db, client, logger
 from scraper import (
     ScrapeError, NotEbayAUError, BlockedError,
-    validate_ebay_au_url, fetch_html, parse_and_enrich,
+    validate_ebay_au_url, fetch_html, parse_and_enrich, parse_scrapebadger_item,
 )
 
 
@@ -114,7 +114,7 @@ async def root():
 # Scraper
 # ---------------------------------------------------------------------------
 
-_SCRAPER_BUILTIN_IDS = ("scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi")
+_SCRAPER_BUILTIN_IDS = ("scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi", "scrapebadger")
 
 
 def _mask_scraper_secret(value: Optional[str]) -> str:
@@ -292,7 +292,7 @@ async def scrape(req: ScrapeRequest) -> dict:
         raise HTTPException(status_code=500, detail=f"Unexpected scrape error: {e}")
 
     try:
-        data = await parse_and_enrich(html, url, fetch_desc=True)
+        data = parse_scrapebadger_item(html, url) if method_used == "scrapebadger" else await parse_and_enrich(html, url, fetch_desc=True)
     except BlockedError as e:
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:

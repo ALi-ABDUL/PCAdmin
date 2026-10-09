@@ -91,9 +91,9 @@ def test_scraper_apis_returns_masked_metadata_only():
     data = resp.json()
     providers = data.get("providers") or []
 
-    assert len(providers) >= 6
+    assert len(providers) >= 7
     ids = [p.get("id") for p in providers]
-    for builtin_id in ["scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi"]:
+    for builtin_id in ["scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi", "scrapebadger"]:
         assert builtin_id in ids
 
     for p in providers:
@@ -144,7 +144,7 @@ def test_scraper_apis_patch_add_then_remove_custom_preserves_builtins():
     add_resp = session.patch(f"{BASE_URL}/api/scraper/apis", json=add_payload, timeout=30)
     assert add_resp.status_code == 200
     add_ids = [p.get("id") for p in (add_resp.json().get("providers") or [])]
-    for builtin_id in ["scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi"]:
+    for builtin_id in ["scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi", "scrapebadger"]:
         assert builtin_id in add_ids
     assert custom_id in add_ids
 
@@ -156,7 +156,7 @@ def test_scraper_apis_patch_add_then_remove_custom_preserves_builtins():
     remove_resp = session.patch(f"{BASE_URL}/api/scraper/apis", json=remove_payload, timeout=30)
     assert remove_resp.status_code == 200
     remove_ids = [p.get("id") for p in (remove_resp.json().get("providers") or [])]
-    for builtin_id in ["scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi"]:
+    for builtin_id in ["scrapingbee", "scraperapi", "scrapedo", "brightdata", "decodo", "webscrapingapi", "scrapebadger"]:
         assert builtin_id in remove_ids
     assert custom_id not in remove_ids
     # Ensure no built-in disappeared after roundtrip.

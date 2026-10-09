@@ -460,6 +460,7 @@ SCRAPER_API_SETTINGS_DEFAULTS: dict = {
         {"id": "brightdata", "type": "brightdata", "label": "Bright Data", "enabled": True},
         {"id": "decodo", "type": "decodo", "label": "Decodo", "enabled": True},
         {"id": "webscrapingapi", "type": "webscrapingapi", "label": "WebScrapingAPI", "enabled": True},
+        {"id": "scrapebadger", "type": "scrapebadger", "label": "ScrapeBadger (eBay AU JSON)", "enabled": True},
     ],
 }
 

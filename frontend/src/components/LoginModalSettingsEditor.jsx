@@ -54,6 +54,11 @@ export function LoginModalSettingsEditor() {
         <Field label="Modal headline"><input value={form.header_title || ""} onChange={(event) => set({ header_title: event.target.value })} className="input w-full px-3 py-2 text-sm" data-testid="login-modal-header-title" /></Field>
         <Field label="Offer message"><textarea value={form.offer_message || ""} onChange={(event) => set({ offer_message: event.target.value })} rows={2} className="input w-full px-3 py-2 text-sm resize-y" data-testid="login-modal-offer-message" /></Field>
         <Field label="Helper line / demo notice"><input value={form.demo_notice || ""} onChange={(event) => set({ demo_notice: event.target.value })} className="input w-full px-3 py-2 text-sm" data-testid="login-modal-demo-notice" /></Field>
+        <Field label="Footer text"><textarea value={form.footer_text || ""} onChange={(event) => set({ footer_text: event.target.value })} rows={2} className="input w-full px-3 py-2 text-sm resize-y" data-testid="login-modal-footer-text" /></Field>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Field label="Terms of Use URL"><input type="url" value={form.terms_of_use_url || ""} onChange={(event) => set({ terms_of_use_url: event.target.value })} placeholder="https://example.com/terms" className="input w-full px-3 py-2 text-sm" data-testid="login-modal-terms-url" /></Field>
+          <Field label="Privacy Policy URL"><input type="url" value={form.privacy_policy_url || ""} onChange={(event) => set({ privacy_policy_url: event.target.value })} placeholder="https://example.com/privacy" className="input w-full px-3 py-2 text-sm" data-testid="login-modal-privacy-url" /></Field>
+        </div>
       </div>
 
       <div className="border-t hairline pt-5">

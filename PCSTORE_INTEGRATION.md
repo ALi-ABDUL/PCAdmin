@@ -172,6 +172,9 @@ configuration without refetching branding.
   "header_title": "prettycheap.com.au",
   "offer_message": "Want 15% off your first order? Log in or sign up to unlock it.",
   "demo_notice": "Demo login: demo@prettycheap.com.au / demo123",
+  "footer_text": "By continuing you agree to the :: PrettyCheap :: Terms of Use and Privacy Policy.",
+  "terms_of_use_url": "https://example.com/terms",
+  "privacy_policy_url": "https://example.com/privacy",
   "signup_fields": [
     {"key": "first_name", "label": "First name", "placeholder": "First name", "type": "text", "required": false},
     {"key": "phone", "label": "Mobile number", "placeholder": "04…", "type": "tel", "required": true}
@@ -193,6 +196,11 @@ await apiPost("/portal/register", {
 Only keys returned by the current configuration are accepted; required fields
 are validated server-side. Changes from **PCAdmin → Store Management → Store
 Settings → Login modal settings** are live immediately.
+
+Render `footer_text` as the disclaimer line. When either legal URL is present,
+render the matching **Terms of Use** or **Privacy Policy** text as an external
+link using `target="_blank" rel="noopener noreferrer"`; this opens legal pages
+in a new tab without allowing the linked page to control PCStore.
 
 Suggested PCStore usage:
 ```js

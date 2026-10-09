@@ -48,6 +48,9 @@ def restore_login_modal_settings(admin_session: requests.Session):
         "header_title": original.get("header_title", ""),
         "offer_message": original.get("offer_message", ""),
         "demo_notice": original.get("demo_notice", ""),
+        "footer_text": original.get("footer_text", ""),
+        "terms_of_use_url": original.get("terms_of_use_url", ""),
+        "privacy_policy_url": original.get("privacy_policy_url", ""),
         "signup_fields": original.get("signup_fields", []),
     }
     restored = admin_session.patch(f"{API}/login-modal-settings", json=restore_payload, timeout=30)
@@ -68,6 +71,9 @@ def test_admin_can_save_login_modal_and_public_apis_reflect_changes(
         "header_title": f"Member access {marker}",
         "offer_message": "Unlock member pricing when you create your account.",
         "demo_notice": "Demo mode available",
+        "footer_text": "By continuing, you agree to the Terms of Use and Privacy Policy.",
+        "terms_of_use_url": "https://example.com/terms",
+        "privacy_policy_url": "https://example.com/privacy",
         "signup_fields": [
             {"key": "first_name", "label": "First name", "placeholder": "First name", "type": "text", "required": False},
             {"key": "phone", "label": "Mobile number", "placeholder": "04xx xxx xxx", "type": "tel", "required": True},
@@ -79,6 +85,8 @@ def test_admin_can_save_login_modal_and_public_apis_reflect_changes(
     assert saved_json["header_title"] == updated["header_title"]
     assert [f["key"] for f in saved_json["signup_fields"]] == ["first_name", "phone"]
     assert saved_json["signup_fields"][1]["required"] is True
+    assert saved_json["terms_of_use_url"] == updated["terms_of_use_url"]
+    assert saved_json["privacy_policy_url"] == updated["privacy_policy_url"]
 
     public_modal = requests.get(f"{API}/store/login-modal", timeout=30)
     assert public_modal.status_code == 200, public_modal.text
@@ -86,14 +94,36 @@ def test_admin_can_save_login_modal_and_public_apis_reflect_changes(
     assert public_json["header_title"] == updated["header_title"]
     assert public_json["offer_message"] == updated["offer_message"]
     assert public_json["signup_fields"][1]["key"] == "phone"
+    assert public_json["footer_text"] == updated["footer_text"]
+    assert public_json["terms_of_use_url"] == updated["terms_of_use_url"]
+    assert public_json["privacy_policy_url"] == updated["privacy_policy_url"]
 
     public_config = requests.get(f"{API}/store/config", timeout=30)
     assert public_config.status_code == 200, public_config.text
     cfg = public_config.json()
     assert cfg["login_modal"]["header_title"] == updated["header_title"]
+    assert cfg["login_modal"]["footer_text"] == updated["footer_text"]
+    assert cfg["login_modal"]["terms_of_use_url"] == updated["terms_of_use_url"]
+    assert cfg["login_modal"]["privacy_policy_url"] == updated["privacy_policy_url"]
     # Public endpoints must not expose secrets.
     assert "google_client_secret" not in cfg
     assert "pcstore_internal_secret" not in cfg
+
+
+def test_patch_rejects_unsafe_legal_link_url(admin_session: requests.Session):
+    response = admin_session.patch(f"{API}/login-modal-settings", json={"terms_of_use_url": "javascript:alert(1)"}, timeout=30)
+    assert response.status_code == 422
+    assert "url" in str(response.json().get("detail", "")).lower()
+
+
+def test_patch_rejects_non_http_scheme_for_legal_links(admin_session: requests.Session):
+    response = admin_session.patch(
+        f"{API}/login-modal-settings",
+        json={"privacy_policy_url": "ftp://example.com/privacy"},
+        timeout=30,
+    )
+    assert response.status_code == 422
+    assert "http" in str(response.json().get("detail", "")).lower()
 
 
 def test_patch_rejects_duplicate_signup_field_keys(admin_session: requests.Session):

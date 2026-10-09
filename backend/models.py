@@ -1314,6 +1314,9 @@ LOGIN_MODAL_SETTINGS_DEFAULTS = {
     "header_title": "prettycheap.com.au",
     "offer_message": "Want 15% off your first order? Log in or sign up to unlock it.",
     "demo_notice": "Demo login: demo@prettycheap.com.au / demo123",
+    "footer_text": "By continuing you agree to the :: PrettyCheap :: Terms of Use and Privacy Policy.",
+    "terms_of_use_url": "",
+    "privacy_policy_url": "",
     "signup_fields": [
         {"key": "first_name", "label": "First name", "placeholder": "First name", "type": "text", "required": False},
         {"key": "last_name", "label": "Last name", "placeholder": "Last name", "type": "text", "required": False},
@@ -1325,6 +1328,9 @@ class LoginModalSettingsUpdate(BaseModel):
     header_title: Optional[str] = Field(default=None, max_length=160)
     offer_message: Optional[str] = Field(default=None, max_length=500)
     demo_notice: Optional[str] = Field(default=None, max_length=500)
+    footer_text: Optional[str] = Field(default=None, max_length=1000)
+    terms_of_use_url: Optional[str] = Field(default=None, max_length=2000)
+    privacy_policy_url: Optional[str] = Field(default=None, max_length=2000)
     signup_fields: Optional[List[dict]] = Field(default=None, max_length=12)
 
 

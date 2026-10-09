@@ -5033,6 +5033,16 @@ def _clean_login_modal_signup_fields(fields: list[dict]) -> list[dict]:
     return cleaned
 
 
+def _clean_login_modal_legal_url(value: str, label: str) -> str:
+    url = (value or "").strip()
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    if parsed.scheme not in {"https", "http"} or not parsed.netloc:
+        raise HTTPException(status_code=422, detail=f"{label} must be a complete http(s) URL")
+    return url
+
+
 async def _validated_signup_profile_fields(values: dict) -> dict:
     """Accept only active PCStore-configured profile values at registration."""
     if not isinstance(values, dict):
@@ -5411,9 +5421,12 @@ async def get_login_modal_settings(current_admin: dict = Depends(get_current_adm
 async def patch_login_modal_settings(body: LoginModalSettingsUpdate, current_admin: dict = Depends(get_current_admin)):
     payload = body.model_dump(exclude_unset=True)
     fields = {}
-    for key in ("header_title", "offer_message", "demo_notice"):
+    for key in ("header_title", "offer_message", "demo_notice", "footer_text"):
         if key in payload:
             fields[key] = (payload[key] or "").strip()
+    for key, label in (("terms_of_use_url", "Terms of Use URL"), ("privacy_policy_url", "Privacy Policy URL")):
+        if key in payload:
+            fields[key] = _clean_login_modal_legal_url(payload[key], label)
     if "signup_fields" in payload:
         fields["signup_fields"] = _clean_login_modal_signup_fields(payload["signup_fields"] or [])
     if not fields:

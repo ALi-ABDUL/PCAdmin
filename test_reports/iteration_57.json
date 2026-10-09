@@ -1,0 +1,38 @@
+{
+  "summary": "Completed targeted backend + frontend regression for Login Modal legal fields. Admin-authenticated GET/PATCH persists footer_text + legal URLs, public /api/store/login-modal and /api/store/config.login_modal reflect saved values, unsafe non-http(s) URLs are rejected, and Store Settings UI edits/saves/restores these fields successfully.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_login_modal_settings.py",
+    "/app/test_reports/pytest/pytest_iteration57_login_modal.xml"
+  ],
+  "action_items": [
+    "No feature-scope functional fixes required.",
+    "Consider aligning _ensure_main_admin_seeded with playbook expectation to update existing seeded admin credentials when password policy/seed changes.",
+    "MOCKED/NOT EXECUTED: successful portal registration/Resend welcome-verification sends, eBay scraper/provider actions."
+  ],
+  "critical_code_review_comments": [
+    "backend/helpers.py::_ensure_main_admin_seeded currently exits when any admin exists; it does not reconcile/update an existing seeded main admin account if credentials change.",
+    "backend/server.py remains very large (>5k lines); splitting auth/storefront/store-settings routes into focused modules would reduce regression risk."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_login_modal_settings.py",
+    "/app/test_reports/iteration_57.json"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 targeted tests passed)",
+    "frontend": "100% (requested Store Settings legal fields flow passed)"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Used credentials from /app/memory/test_credentials.md (qa@prettycheap.com.au / QaTest123!). Frontend test logged in, navigated to Store Management > Store Settings, edited footer/terms/privacy fields, saved, verified reflection on /api/store/login-modal, then restored original values. Backend pytest covers admin-cookie gating, persistence, public reflection in both /api/store/login-modal and /api/store/config.login_modal, invalid legal URL schemes, and signup schema validation.",
+  "rca of the issue": "No feature bug reproduced for the requested legal-links/login-modal scope. Additional auth playbook review found a potential maintenance gap: seeded main admin reconciliation is not idempotent when existing admin documents already exist."
+}

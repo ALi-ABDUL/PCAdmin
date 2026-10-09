@@ -162,6 +162,38 @@ from it so brand changes in PCAdmin reflect on PCStore with **no code change**.
 }
 ```
 
+The response also includes `login_modal`, the database-backed configuration for
+the PCStore customer login/signup modal. It is available separately at
+`GET /api/store/login-modal` when the storefront needs to refresh just this
+configuration without refetching branding.
+
+```json
+{
+  "header_title": "prettycheap.com.au",
+  "offer_message": "Want 15% off your first order? Log in or sign up to unlock it.",
+  "demo_notice": "Demo login: demo@prettycheap.com.au / demo123",
+  "signup_fields": [
+    {"key": "first_name", "label": "First name", "placeholder": "First name", "type": "text", "required": false},
+    {"key": "phone", "label": "Mobile number", "placeholder": "04…", "type": "tel", "required": true}
+  ]
+}
+```
+
+Render `signup_fields` in array order. Keep email, password, and password
+confirmation as required PCStore-controlled credentials. On registration, send
+the entered dynamic values as `profile_fields`, for example:
+
+```js
+await apiPost("/portal/register", {
+  email, password,
+  profile_fields: { first_name: "Ada", phone: "0412 345 678" }
+});
+```
+
+Only keys returned by the current configuration are accepted; required fields
+are validated server-side. Changes from **PCAdmin → Store Management → Store
+Settings → Login modal settings** are live immediately.
+
 Suggested PCStore usage:
 ```js
 const cfg = await fetch(`${API}/api/store/config`).then(r => r.json());
@@ -201,7 +233,7 @@ via `PATCH /api/security/disposable-domains`) return
 
 | method | path                        | body / auth                          | returns                                         |
 | ------ | --------------------------- | ------------------------------------ | ----------------------------------------------- |
-| `POST` | `/api/portal/register`      | `{ email, password, name?, first_name?, last_name? }` | `{ token, customer }`              |
+| `POST` | `/api/portal/register`      | `{ email, password, name?, first_name?, last_name?, profile_fields? }` | `{ token, customer }`              |
 | `POST` | `/api/portal/login`         | `{ email, password, session_id? }`   | `{ token, customer, cart }`                     |
 | `GET`  | `/api/portal/me`            | Bearer token                          | `{ customer }`                                  |
 | `PATCH`| `/api/portal/me`            | Bearer token, `{ first_name?, last_name?, name?, phone? }` | `{ customer }`             |

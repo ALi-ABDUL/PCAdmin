@@ -58,7 +58,7 @@ from models import (
     ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
     DisposableDomainsUpdate, DISPOSABLE_EMAIL_ERROR,
-    _DEFAULT_STORE_DISPLAY, StoreDisplaySettingsUpdate, _DEFAULT_STORE_BRANDING, StoreBrandingUpdate, GoogleSignInSettingsUpdate, GOOGLE_SIGNIN_SETTINGS_DEFAULTS,
+    _DEFAULT_STORE_DISPLAY, StoreDisplaySettingsUpdate, LOGIN_MODAL_SETTINGS_DEFAULTS, LoginModalSettingsUpdate, _DEFAULT_STORE_BRANDING, StoreBrandingUpdate, GoogleSignInSettingsUpdate, GOOGLE_SIGNIN_SETTINGS_DEFAULTS,
     VerifyTokenBody, ResendVerificationBody, EmailTemplatesUpdate, EmailTemplateUpdate, EmailBrandUpdate, EMAIL_TEMPLATE_IDS,
     CountdownStart, BrandingUpdate, TagSettingsUpdate,
 )
@@ -1702,6 +1702,7 @@ async def portal_register(body: PortalRegisterBody):
         raise HTTPException(status_code=400, detail=DISPOSABLE_EMAIL_ERROR)
     if len(body.password or "") < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    profile_fields = await _validated_signup_profile_fields(body.profile_fields)
     existing = await db.customer_accounts.find_one({"email": email})
     if existing:
         raise HTTPException(status_code=409, detail="An account with this email already exists — please sign in")
@@ -1718,17 +1719,26 @@ async def portal_register(body: PortalRegisterBody):
         _first = (body.first_name or "").strip() or _first
         _last = (body.last_name or "").strip() or _last
         display_name = _compose_name(_first, _last, display_name)
+    if profile_fields.get("first_name"):
+        _first = profile_fields["first_name"]
+    if profile_fields.get("last_name"):
+        _last = profile_fields["last_name"]
+    if profile_fields.get("first_name") or profile_fields.get("last_name"):
+        display_name = _compose_name(_first, _last, display_name)
     doc = {
         "id": str(uuid.uuid4()),
         "email": email,
         "name": display_name,
         "first_name": _first,
         "last_name": _last,
+        "signup_profile": profile_fields,
         "password_hash": _hash_password(body.password),
         "verified": False,
         "verified_at": None,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    if profile_fields.get("phone"):
+        doc["phone"] = profile_fields["phone"]
     await db.customer_accounts.insert_one(doc)
     # Bug-2 fix: mirror the registrant into the `customers` collection so they
     # show up in PCAdmin → Customers. Registration requires an existing order,
@@ -4989,6 +4999,61 @@ async def _get_store_display() -> dict:
     return {**{k: v for k, v in _DEFAULT_STORE_DISPLAY.items() if k != "_id"}, **doc}
 
 
+async def _get_login_modal_settings() -> dict:
+    """Fetch and lazily seed the public PCStore login/signup modal settings."""
+    doc = await db.login_modal_settings.find_one({"_id": "singleton"}, {"_id": 0})
+    base = {key: value for key, value in LOGIN_MODAL_SETTINGS_DEFAULTS.items() if key != "_id"}
+    if not doc:
+        await db.login_modal_settings.update_one({"_id": "singleton"}, {"$set": base}, upsert=True)
+        return dict(base)
+    return {**base, **doc}
+
+
+_LOGIN_MODAL_FIELD_KEY = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+_LOGIN_MODAL_RESERVED_KEYS = {"email", "password", "confirm_password", "name", "profile_fields"}
+
+
+def _clean_login_modal_signup_fields(fields: list[dict]) -> list[dict]:
+    cleaned, seen = [], set()
+    for raw in fields:
+        key = str(raw.get("key") or "").strip().lower()
+        label = str(raw.get("label") or "").strip()
+        placeholder = str(raw.get("placeholder") or "").strip()
+        input_type = str(raw.get("type") or "text").strip().lower()
+        if not _LOGIN_MODAL_FIELD_KEY.match(key) or key in _LOGIN_MODAL_RESERVED_KEYS:
+            raise HTTPException(status_code=422, detail="Signup field keys must use lowercase letters, numbers, and underscores")
+        if key in seen:
+            raise HTTPException(status_code=422, detail="Signup field keys must be unique")
+        if not label or len(label) > 80 or len(placeholder) > 120:
+            raise HTTPException(status_code=422, detail="Each signup field needs a label of 80 characters or fewer")
+        if input_type not in {"text", "tel"}:
+            raise HTTPException(status_code=422, detail="Signup field type must be text or tel")
+        seen.add(key)
+        cleaned.append({"key": key, "label": label, "placeholder": placeholder, "type": input_type, "required": bool(raw.get("required"))})
+    return cleaned
+
+
+async def _validated_signup_profile_fields(values: dict) -> dict:
+    """Accept only active PCStore-configured profile values at registration."""
+    if not isinstance(values, dict):
+        raise HTTPException(status_code=422, detail="profile_fields must be an object")
+    settings = await _get_login_modal_settings()
+    schema = {field["key"]: field for field in settings.get("signup_fields") or []}
+    unknown = set(values) - set(schema)
+    if unknown:
+        raise HTTPException(status_code=422, detail="One or more signup fields are not enabled")
+    cleaned = {}
+    for key, field in schema.items():
+        value = str(values.get(key) or "").strip()
+        if field.get("required") and not value:
+            raise HTTPException(status_code=400, detail=f"{field['label']} is required")
+        if len(value) > 300:
+            raise HTTPException(status_code=422, detail=f"{field['label']} is too long")
+        if value:
+            cleaned[key] = value
+    return cleaned
+
+
 def _shape_storefront_product(p: dict, discount_min: int = 0) -> dict:
     """Whittle a full product doc down to fields safe + useful for a
     public storefront. Drops cost / supplier / internal notes.
@@ -5277,6 +5342,7 @@ async def store_config():
         "favicon": b.get("favicon"),
         "tab_title": b.get("tab_title") or b.get("store_name"),
         "discount_badge_min_percent": int(display.get("discount_badge_min_percent", 0) or 0),
+        "login_modal": await _get_login_modal_settings(),
     }
 
 
@@ -5328,6 +5394,32 @@ def _validate_data_image(value, label):
 @api_router.get("/store-branding")
 async def get_store_branding():
     return await _get_store_branding()
+
+
+@api_router.get("/store/login-modal")
+async def get_public_login_modal_settings():
+    """Public dynamic login/signup modal configuration for PCStore."""
+    return await _get_login_modal_settings()
+
+
+@api_router.get("/login-modal-settings")
+async def get_login_modal_settings(current_admin: dict = Depends(get_current_admin)):
+    return await _get_login_modal_settings()
+
+
+@api_router.patch("/login-modal-settings")
+async def patch_login_modal_settings(body: LoginModalSettingsUpdate, current_admin: dict = Depends(get_current_admin)):
+    payload = body.model_dump(exclude_unset=True)
+    fields = {}
+    for key in ("header_title", "offer_message", "demo_notice"):
+        if key in payload:
+            fields[key] = (payload[key] or "").strip()
+    if "signup_fields" in payload:
+        fields["signup_fields"] = _clean_login_modal_signup_fields(payload["signup_fields"] or [])
+    if not fields:
+        raise HTTPException(status_code=400, detail="No login modal settings were supplied")
+    await db.login_modal_settings.update_one({"_id": "singleton"}, {"$set": fields}, upsert=True)
+    return await _get_login_modal_settings()
 
 
 @api_router.patch("/store-branding")

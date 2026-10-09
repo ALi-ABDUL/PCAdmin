@@ -12,6 +12,7 @@ import { Analytics } from "./Analytics";
 import { Dashboard } from "./Dashboard";
 import { ScraperApiSettingsCard } from "../components/ScraperApiSettingsCard";
 import { ScraperProviderUsageDashboard } from "../components/ScraperProviderUsageDashboard";
+import { LoginModalSettingsEditor } from "../components/LoginModalSettingsEditor";
 
 const ADMIN_SESSION_REQUEST = { withCredentials: true };
 
@@ -1975,6 +1976,7 @@ export function StoreSettingsPanel() {
   return (
     <div className="grid gap-3" data-testid="store-settings-panel">
       <StoreBrandingEditor/>
+      <LoginModalSettingsEditor/>
       {others.map((f) => (
         <div key={f} className="card p-4 md:p-5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">

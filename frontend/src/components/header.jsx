@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Bell, BellOff, ChevronRight, DollarSign, HelpCircle, ImageIcon, LogIn, LogOut, Menu, Moon, PackageMinus, RefreshCw, Search, ShieldCheck, ShoppingBag, Store, Sun, Timer, TrendingDown, TrendingUp, UserCircle, UserPlus, XCircle } from "lucide-react";
+import { BadgeCheck, Ban, Bell, BellOff, ChevronRight, DollarSign, HelpCircle, ImageIcon, LogIn, LogOut, Menu, MessageCircle, Moon, PackageMinus, RefreshCw, Search, ShieldCheck, ShoppingBag, Store, Sun, Timer, TrendingDown, TrendingUp, UserCircle, UserPlus, XCircle } from "lucide-react";
 import { API, proxyImg } from "../lib/api";
 import { applyTheme, getCachedTheme } from "../lib/theme";
 import { clearAdminSession, loadAdminSession, saveAdminSession } from "../lib/adminSession";
@@ -198,6 +198,10 @@ export function NotificationBell({ onNavigate }) {
       onNavigate?.({ tab: "customers", filter: { customerId: n.customer_id } });
       return;
     }
+    if (n.type === "support_message" && (n.data?.ticket_id || n.data?.support_message_id)) {
+      onNavigate?.({ tab: "customers", section: "messages", filter: { ticketId: n.data?.ticket_id || n.data?.support_message_id } });
+      return;
+    }
     // Generic deep-link chain: prefer order → product → customer → item detail
     if (n.order_id) onNavigate?.({ tab: "orders", section: "all", filter: { orderId: n.order_id } });
     else if (n.product_id) onNavigate?.({ tab: "products", section: "all", filter: { productId: n.product_id } });
@@ -261,6 +265,7 @@ export const NOTIF_META = {
   low_stock:            { icon: PackageMinus, color: "#D97706", bg: "#FEF3C7" },
   cancellation_request: { icon: Ban,          color: "#DC2626", bg: "#FEE2E2" },
   new_customer:         { icon: UserPlus,     color: "#7C3AED", bg: "#EDE9FE" },
+  support_message:      { icon: MessageCircle,color: "#D97706", bg: "#FEF3C7" },
   countdown_expired:    { icon: Timer,        color: "#E11D48", bg: "#FFE4E6" },
 };
 

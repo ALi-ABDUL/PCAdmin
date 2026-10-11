@@ -325,7 +325,7 @@ export default function App() {
               {tab === "dashboard" && <Dashboard navigateTo={navigateTo}/>}
               {tab === "store"     && <StoreManagement section={storeSection} setSection={setStoreSection}/>}
               {tab === "suppliers" && <Suppliers section={supplierSection} setSection={changeSupplierSection} supplierDetailId={supplierDetailId} openSupplierDetail={setSupplierDetailId} openProductDetail={(pid) => { setTab("products"); setSupplierDetailId(null); setProductDetailId(pid); }}/>}
-              {tab === "customers" && <CustomersModule section={customerSection} setSection={changeCustomerSection} customerDetailId={customerDetailId} openCustomerDetail={setCustomerDetailId} onMessageSent={refreshUnread} navigateTo={navigateTo}/>}
+              {tab === "customers" && <CustomersModule section={customerSection} setSection={changeCustomerSection} customerDetailId={customerDetailId} openCustomerDetail={setCustomerDetailId} onMessageSent={refreshUnread} navigateTo={navigateTo} deepLink={deepLink} clearDeepLink={clearDeepLink}/>} 
               {tab === "products"  && <ProductsModule section={productSection} setSection={changeProductSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openProductDetail={setProductDetailId} productDetailId={productDetailId}/>}
               {tab === "orders"    && <OrdersModule section={ordersSection} setSection={changeOrdersSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openOrderDetail={setOrderDetailId} orderDetailId={orderDetailId}/>}
               {tab === "payments"  && <PaymentsModule section={paymentsSection} setSection={setPaymentsSection}/>}

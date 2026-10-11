@@ -54,7 +54,7 @@ from models import (
     _DEFAULT_PRICING_RULES, BulkProductIds,
     PostagePresetBase, PostagePreset, PostagePresetUpdate, POSTAGE_PRESET_KINDS,
     DeliverySettingsUpdate,
-    SITE_PAGES, SITE_PAGE_SLUGS, SiteMenusUpdate, SupportContactBody,
+    SITE_PAGES, SITE_PAGE_SLUGS, SiteMenusUpdate, SupportContactBody, SupportTicketReplyBody, SupportTicketStatusBody, SUPPORT_TICKET_STATUSES,
     ADMIN_ROLES, AdminAccountCreate, AdminAccountUpdate, AdminAccount,
     CountryAccessUpdate, BYPASS_SESSION_TTL_SECONDS,
     DisposableDomainsUpdate, DISPOSABLE_EMAIL_ERROR,
@@ -2630,6 +2630,109 @@ async def update_site_menus(body: SiteMenusUpdate):
     return data
 
 
+def _safe_ticket_attachments(attachments: list[str]) -> list[str]:
+    safe = []
+    for raw in attachments or []:
+        url = (raw or "").strip()
+        parsed = urlparse(url)
+        if parsed.scheme not in {"https", "http"} or not parsed.netloc:
+            raise HTTPException(status_code=422, detail="Ticket attachments must use complete http(s) URLs")
+        if url not in safe:
+            safe.append(url)
+    return safe[:8]
+
+
+def _shape_support_ticket(ticket: dict) -> dict:
+    """Read legacy single-message records as a normalized ticket without _id."""
+    doc = {key: value for key, value in ticket.items() if key != "_id"}
+    status = doc.get("status") if doc.get("status") in SUPPORT_TICKET_STATUSES else "new"
+    messages = doc.get("messages") or []
+    if not messages:
+        messages = [{
+            "id": f"{doc.get('id', 'ticket')}-initial", "direction": "inbound", "body": doc.get("message") or "",
+            "attachments": doc.get("attachments") or [], "created_at": doc.get("created_at"),
+            "author_name": doc.get("name") or "Customer", "author_email": doc.get("email") or "",
+        }]
+    clean_messages = []
+    for row in messages:
+        clean_messages.append({
+            "id": row.get("id") or str(uuid.uuid4()), "direction": row.get("direction") if row.get("direction") in {"inbound", "outbound"} else "inbound",
+            "body": row.get("body") or row.get("message") or "", "attachments": row.get("attachments") or [],
+            "created_at": row.get("created_at") or doc.get("created_at"), "author_name": row.get("author_name") or (doc.get("name") if row.get("direction") != "outbound" else "PCAdmin"),
+            "author_email": row.get("author_email") or (doc.get("email") if row.get("direction") != "outbound" else ""),
+        })
+    last_message_at = doc.get("last_message_at") or max((row.get("created_at") or "" for row in clean_messages), default=doc.get("created_at") or "")
+    return {
+        "id": doc.get("id"), "customer_id": doc.get("customer_id"), "customer_name": doc.get("customer_name") or doc.get("name") or "Customer",
+        "customer_email": doc.get("customer_email") or doc.get("email") or "", "subject": doc.get("subject") or "Support request",
+        "status": status, "unread": bool(doc.get("unread", doc.get("status") == "unread")), "created_at": doc.get("created_at"),
+        "updated_at": doc.get("updated_at") or last_message_at, "last_message_at": last_message_at, "messages": clean_messages,
+    }
+
+
+async def _get_support_ticket(ticket_id: str, mark_read: bool = False) -> dict:
+    ticket = await db.support_messages.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support ticket not found")
+    shaped = _shape_support_ticket(ticket)
+    legacy_updates = {}
+    if "messages" not in ticket:
+        legacy_updates["messages"] = shaped["messages"]
+        legacy_updates["status"] = shaped["status"]
+        legacy_updates["unread"] = shaped["unread"]
+    if mark_read and shaped["unread"]:
+        legacy_updates["unread"] = False
+        shaped["unread"] = False
+        await db.notifications.update_many({"data.support_message_id": ticket_id}, {"$set": {"read": True}})
+    if legacy_updates:
+        await db.support_messages.update_one({"id": ticket_id}, {"$set": legacy_updates})
+    return shaped
+
+
+@api_router.get("/support/tickets")
+async def list_support_tickets(current_admin: dict = Depends(get_current_admin)):
+    rows = await db.support_messages.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    groups: dict[str, dict] = {}
+    for raw in rows:
+        ticket = _shape_support_ticket(raw)
+        key = ticket.get("customer_id") or (ticket.get("customer_email") or "").lower() or ticket["id"]
+        group = groups.setdefault(key, {"id": key, "name": ticket["customer_name"], "email": ticket["customer_email"], "customer_id": ticket.get("customer_id"), "open_count": 0, "tickets": []})
+        group["tickets"].append(ticket)
+        if ticket["status"] not in {"resolved", "closed"}:
+            group["open_count"] += 1
+    customers = sorted(groups.values(), key=lambda group: max((ticket.get("last_message_at") or "" for ticket in group["tickets"]), default=""), reverse=True)
+    return {"customers": customers, "total": len(rows), "unread": sum(1 for row in rows if _shape_support_ticket(row)["unread"])}
+
+
+@api_router.get("/support/tickets/{ticket_id}")
+async def get_support_ticket(ticket_id: str, current_admin: dict = Depends(get_current_admin)):
+    return await _get_support_ticket(ticket_id, mark_read=True)
+
+
+@api_router.patch("/support/tickets/{ticket_id}/status")
+async def update_support_ticket_status(ticket_id: str, body: SupportTicketStatusBody, current_admin: dict = Depends(get_current_admin)):
+    ticket = await _get_support_ticket(ticket_id)
+    now = datetime.now(timezone.utc).isoformat()
+    await db.support_messages.update_one({"id": ticket_id}, {"$set": {"status": body.status, "updated_at": now}})
+    return {**ticket, "status": body.status, "updated_at": now}
+
+
+@api_router.post("/support/tickets/{ticket_id}/replies")
+async def reply_to_support_ticket(ticket_id: str, body: SupportTicketReplyBody, current_admin: dict = Depends(get_current_admin)):
+    ticket = await _get_support_ticket(ticket_id, mark_read=True)
+    recipient = (ticket.get("customer_email") or "").strip()
+    if not recipient:
+        raise HTTPException(status_code=400, detail="This ticket has no customer email address")
+    now = datetime.now(timezone.utc).isoformat()
+    message = {"id": str(uuid.uuid4()), "direction": "outbound", "body": body.body.strip(), "attachments": _safe_ticket_attachments(body.attachments), "created_at": now, "author_name": current_admin.get("name") or "PCAdmin", "author_email": current_admin.get("email") or ""}
+    safe_body = escape(message["body"]).replace("\n", "<br/>")
+    safe_subject = escape(ticket["subject"])
+    html = f"""<!doctype html><html><body style="margin:0;padding:24px;background:#f3f4f6;font-family:Arial,sans-serif;color:#172033"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border:1px solid #e5e7eb"><tr><td style="padding:24px"><p style="margin:0 0 10px;font-size:13px;color:#64748b">Reply to your support request</p><h1 style="font-size:20px;margin:0 0 18px">{safe_subject}</h1><div style="font-size:14px;line-height:1.65">{safe_body}</div><p style="font-size:11px;color:#94a3b8;margin:22px 0 0">Sent by {escape(EMAIL_FROM_NAME)}</p></td></tr></table></td></tr></table></body></html>"""
+    delivery_id = await send_managed_email(to=recipient, subject=f"Re: {ticket['subject']}", html=html)
+    await db.support_messages.update_one({"id": ticket_id}, {"$push": {"messages": message}, "$set": {"updated_at": now, "last_message_at": now, "unread": False}})
+    return {"ok": True, "message": message, "delivery_id": delivery_id}
+
+
 @api_router.post("/support/contact")
 async def submit_support_contact(
     body: SupportContactBody,
@@ -2646,11 +2749,14 @@ async def submit_support_contact(
     if not menus["contact_form"].get("enabled", True):
         raise HTTPException(status_code=403, detail="The support contact form is currently unavailable")
     now = datetime.now(timezone.utc).isoformat()
+    ticket_id = str(uuid.uuid4())
+    attachments = _safe_ticket_attachments(body.attachments)
     support_message = {
-        "id": str(uuid.uuid4()), "name": body.name.strip(), "email": email,
-        "subject": body.subject.strip(), "message": body.message.strip(),
-        "customer_id": body.customer_id.strip() if body.customer_id else None,
-        "created_at": now, "status": "unread",
+        "id": ticket_id, "name": body.name.strip(), "email": email, "customer_name": body.name.strip(), "customer_email": email,
+        "subject": body.subject.strip(), "message": body.message.strip(), "attachments": attachments,
+        "customer_id": body.customer_id.strip() if body.customer_id else None, "created_at": now, "updated_at": now, "last_message_at": now,
+        "status": "new", "unread": True,
+        "messages": [{"id": str(uuid.uuid4()), "direction": "inbound", "body": body.message.strip(), "attachments": attachments, "created_at": now, "author_name": body.name.strip(), "author_email": email}],
     }
     await db.support_messages.insert_one(dict(support_message))
 
@@ -2659,7 +2765,7 @@ async def submit_support_contact(
         title=f"New support message from {support_message['name']}",
         body=support_message["subject"],
         customer_id=support_message["customer_id"],
-        data={"support_message_id": support_message["id"], "name": support_message["name"], "subject": support_message["subject"]},
+        data={"support_message_id": support_message["id"], "ticket_id": support_message["id"], "name": support_message["name"], "subject": support_message["subject"]},
         at=now,
     )
     await db.notifications.insert_one(notification.model_dump())

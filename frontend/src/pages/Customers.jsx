@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Award, BadgeCheck, Clock3, History, Loader2, MessageCircle, Plus, Reply, Search, Star as StarIcon, Tags, Ticket, Trash2, Upload } from "lucide-react";
+import { Award, BadgeCheck, Clock3, History, Loader2, MessageCircle, Plus, Search, Star as StarIcon, Tags, Ticket, Trash2, Upload } from "lucide-react";
 import { Field, StatusChip, SubHero } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, fmtLongDateTime, moneyCents } from "../lib/format";
@@ -10,17 +10,16 @@ import { Pagination, usePagePref } from "../components/Pagination";
 import { SortableTh, useSortPref } from "../components/SortableTh";
 import { CustomerPortal } from "./CustomerPortal";
 import { CustomerDetailPage } from "./CustomerDetail";
-import { MessageCustomerDialog } from "../components/MessageCustomerDialog";
+import { SupportTickets } from "../components/SupportTickets";
 import { Orders } from "./Orders";
 import { Products } from "./ProductsList";
 
-export function CustomersModule({ section, setSection, customerDetailId, openCustomerDetail, onMessageSent, navigateTo }) {
+export function CustomersModule({ section, setSection, customerDetailId, openCustomerDetail, onMessageSent, navigateTo, deepLink, clearDeepLink }) {
   const [list, setList] = useState([]); const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
   const [q, setQ] = useState("");
   const { field: sortField, dir: sortDir, sortParam, toggle: toggleSort } = useSortPref("customers", "created_at", "desc");
   const [page, setPage] = useState(1); const [pageSize, setPageSize] = usePagePref("customers", 50);
-  const [messages, setMessages] = useState([]);
   const [coupons, setCoupons] = useState([]);
   const [reviews, setReviews] = useState([]);
   // Bumped whenever a write happens outside the list (e.g. a portal
@@ -47,7 +46,6 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
   }, [JSON.stringify(params), refreshTick]); // eslint-disable-line
   useEffect(() => { load(); }, [load]);
   useEffect(() => { axios.get(`${API}/customers/summary`).then(r => setSummary(r.data)); }, [list.length, refreshTick]);
-  useEffect(() => { if (section === "messages") axios.get(`${API}/messages`).then(r => setMessages(r.data.messages)); }, [section]);
   useEffect(() => { if (section === "coupons") axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons)); }, [section]);
   useEffect(() => { if (section === "reviews") axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews)); }, [section]);
   // Reset to page 1 when filters, section, or page size change.
@@ -71,7 +69,7 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
     create:"Add a customer profile manually.", import:"Bulk-import customers via JSON.",
     all:"Every customer in your database.", pending:"Awaiting verification.", active:"Verified & shopping.",
     guest:"One-off shoppers without an account.", registered:"Customers with an account.",
-    messages:"Inbound contact-form messages.", top:"Highest lifetime value.",
+    messages:"Support tickets and customer conversations.", top:"Highest lifetime value.",
     addresses:"Customer shipping & billing addresses.", orders:"All orders across all customers.",
     wishlist:"Products customers have starred.", reviews:"Product reviews left by customers.",
     coupons:"Discount codes and campaigns.", activity:"Recent customer activity.", notes:"Internal notes on customers.",
@@ -86,7 +84,7 @@ export function CustomersModule({ section, setSection, customerDetailId, openCus
       {section === "import"     && <ImportCustomers onImported={() => { load(); setSection("all"); }}/>}
       {(["all","pending","active","guest","registered","blocked"].includes(section)) && <CustomerTable list={list} total={total} q={q} setQ={setQ} sortField={sortField} sortDir={sortDir} toggleSort={toggleSort} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} onChanged={load} onOpen={openCustomerDetail}/>}
       {section === "top"        && <TopCustomers list={summary?.top || []}/>}
-      {section === "messages"   && <CustomerMessages messages={messages} reload={() => axios.get(`${API}/messages`).then(r => setMessages(r.data.messages))}/>}
+      {section === "messages"   && <SupportTickets initialTicketId={deepLink?.ticketId} onTicketOpened={clearDeepLink}/>} 
       {section === "coupons"    && <CouponsView coupons={coupons} reload={() => axios.get(`${API}/coupons`).then(r => setCoupons(r.data.coupons))}/>}
       {section === "reviews"    && <ReviewsView reviews={reviews} reload={() => axios.get(`${API}/reviews`).then(r => setReviews(r.data.reviews))}/>}
       {section === "orders"     && <CustomerOrdersView/>}
@@ -324,87 +322,6 @@ export function TopCustomers({ list }) {
   );
 }
 
-export function CustomerMessages({ messages, reload }) {
-  const [f, setF] = useState({ customer_name:"", customer_email:"", subject:"", body:"" });
-  const [replyOpen, setReplyOpen] = useState(false);
-  const [replyCustomer, setReplyCustomer] = useState(null);
-  const [replyMessage, setReplyMessage] = useState(null);
-  const [replyLoadingId, setReplyLoadingId] = useState(null);
-  const send = async () => { if(!f.customer_name || !f.body) return toast.error("Name & message required"); await axios.post(`${API}/messages`, f); setF({ customer_name:"", customer_email:"", subject:"", body:"" }); toast.success("Message added"); reload(); };
-  // Look the customer up by email so we can hit /customers/:id/message which
-  // handles Resend delivery + outbound message logging. If none is found we
-  // fall through with a toast so the admin knows to create a profile first.
-  const openReply = async (m) => {
-    const email = (m.customer_email || "").trim();
-    if (!email) { toast.error("This message has no email on file"); return; }
-    setReplyLoadingId(m.id);
-    try {
-      const { data } = await axios.get(`${API}/customers`, { params: { q: email, limit: 5 } });
-      const cust = (data.customers || []).find(c => (c.email || "").toLowerCase() === email.toLowerCase()) || (data.customers || [])[0];
-      if (!cust) { toast.error("No customer profile found", { description: "Create a customer with this email first, then reply." }); return; }
-      setReplyCustomer(cust);
-      setReplyMessage(m);
-      setReplyOpen(true);
-    } catch { toast.error("Could not load customer profile"); }
-    finally { setReplyLoadingId(null); }
-  };
-  return (
-    <div className="grid gap-4">
-      <div className="card p-5">
-        <div className="font-display font-bold mb-3">Log a message</div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-          <input placeholder="Customer name" className="input px-3 py-2" value={f.customer_name} onChange={(e)=>setF({...f, customer_name:e.target.value})}/>
-          <input placeholder="Email" className="input px-3 py-2" value={f.customer_email} onChange={(e)=>setF({...f, customer_email:e.target.value})}/>
-          <input placeholder="Subject" className="input px-3 py-2" value={f.subject} onChange={(e)=>setF({...f, subject:e.target.value})}/>
-        </div>
-        <textarea placeholder="Message body" className="input px-3 py-2 mt-2 w-full h-24" value={f.body} onChange={(e)=>setF({...f, body:e.target.value})}/>
-        <div className="mt-3 flex justify-end"><button onClick={send} className="btn btn-primary text-sm"><MessageCircle size={14}/> Add message</button></div>
-      </div>
-      <div className="card overflow-hidden">
-        {messages.length === 0 && <div className="p-10 text-center text-slate-500">No messages yet</div>}
-        {messages.map(m => {
-          const direction = m.direction || "inbound";
-          const isInbound = direction === "inbound";
-          const canReply = isInbound && !!(m.customer_email || "").trim();
-          return (
-            <div key={m.id} className="p-4 border-b hairline last:border-0" data-testid={`inbox-msg-${m.id}`}>
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className={`chip !text-[10px] ${isInbound ? "chip-primary" : "chip-neutral"}`}>{isInbound ? "In" : "Out"}</span>
-                  <div className="font-medium text-sm truncate">{m.customer_name} <span className="text-slate-400 text-xs font-mono">· {m.customer_email || "no email"}</span></div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`chip chip-${m.status==='new'?'primary':'neutral'}`}>{m.status}</span>
-                  {canReply && (
-                    <button
-                      onClick={() => openReply(m)}
-                      disabled={replyLoadingId === m.id}
-                      className="btn btn-primary text-xs !py-1.5 !px-3"
-                      data-testid={`inbox-reply-${m.id}`}
-                      title="Reply to this message"
-                    >
-                      {replyLoadingId === m.id ? <Loader2 className="animate-spin" size={11}/> : <Reply size={11}/>} Reply
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="text-sm font-medium mt-1">{m.subject}</div>
-              <div className="text-sm text-slate-600 mt-1 whitespace-pre-wrap">{m.body}</div>
-              <div className="text-[11px] text-slate-400 mt-1 font-mono">{fmtDate(m.created_at)}</div>
-            </div>
-          );
-        })}
-      </div>
-      <MessageCustomerDialog
-        open={replyOpen}
-        customer={replyCustomer}
-        replyTo={replyMessage}
-        onClose={() => setReplyOpen(false)}
-        onSent={() => { setReplyOpen(false); reload(); }}
-      />
-    </div>
-  );
-}
 
 export function CustomerOrdersView() {
   const [orders, setOrders] = useState([]);

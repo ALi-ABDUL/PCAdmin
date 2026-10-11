@@ -54,7 +54,8 @@ async def test_support_tickets_end_to_end_regression_with_mocked_email(monkeypat
     )
 
     created = await server_mod.submit_support_contact(body, x_pcstore_secret=os.environ["PCADMIN_INTERNAL_SECRET"])
-    opened = await server_mod.get_support_ticket(created["id"], {"id": "admin", "role": "admin"})
+    access = {"via": "admin", "admin": {"id": "admin", "role": "admin"}}
+    opened = await server_mod.get_support_ticket(created["id"], access)
 
     legacy_marker = f"TEST_support_legacy_{uuid.uuid4().hex[:8]}"
     legacy_email = f"{legacy_marker}@example.com"
@@ -106,14 +107,14 @@ async def test_support_tickets_end_to_end_regression_with_mocked_email(monkeypat
         assert opened["id"] == created["id"]
         assert captured[0]["to"] == os.environ["SUPPORT_NOTIFICATION_EMAIL"]
 
-        grouped = await server_mod.list_support_tickets({"id": "admin", "role": "admin"})
+        grouped = await server_mod.list_support_tickets(email=None, access=access)
         legacy_group = next(g for g in grouped["customers"] if g["email"] == legacy_email)
         legacy_ticket = next(t for t in legacy_group["tickets"] if t["id"] == legacy_ticket_id)
         assert legacy_ticket["status"] == "new"
         assert legacy_ticket["unread"] is True
         assert legacy_group["open_count"] >= 1
 
-        legacy_opened = await server_mod.get_support_ticket(legacy_ticket_id, {"id": "admin", "role": "admin"})
+        legacy_opened = await server_mod.get_support_ticket(legacy_ticket_id, access)
         assert legacy_opened["unread"] is False
         assert legacy_opened["messages"][0]["direction"] == "inbound"
         assert legacy_opened["messages"][0]["body"] == "legacy body"

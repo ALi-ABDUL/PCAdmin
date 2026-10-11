@@ -72,8 +72,9 @@ def test_trusted_contact_saves_message_bell_alert_and_fixed_admin_email(monkeypa
     )
     async def ticket_workflow():
         created = await server_mod.submit_support_contact(body, x_pcstore_secret=os.environ["PCADMIN_INTERNAL_SECRET"])
-        listed = await server_mod.list_support_tickets({"id": "admin", "role": "admin"})
-        opened = await server_mod.get_support_ticket(created["id"], {"id": "admin", "role": "admin"})
+        access = {"via": "admin", "admin": {"id": "admin", "role": "admin"}}
+        listed = await server_mod.list_support_tickets(email=None, access=access)
+        opened = await server_mod.get_support_ticket(created["id"], access)
         updated = await server_mod.update_support_ticket_status(created["id"], SupportTicketStatusBody(status="in_progress"), {"id": "admin", "role": "admin"})
         reply = await server_mod.reply_to_support_ticket(created["id"], SupportTicketReplyBody(body="We are checking this now."), {"id": "admin", "role": "admin", "name": "Support Agent", "email": "agent@example.com"})
         ticket = await server_mod._get_support_ticket(created["id"])

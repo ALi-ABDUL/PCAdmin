@@ -2689,24 +2689,50 @@ async def _get_support_ticket(ticket_id: str, mark_read: bool = False) -> dict:
     return shaped
 
 
+async def _support_ticket_access(
+    request: Request,
+    x_pcstore_secret: Optional[str] = Header(default=None, alias="X-PCStore-Secret"),
+) -> dict:
+    """Route-local dual auth for PCAdmin tickets and trusted PCStore sync only."""
+    if x_pcstore_secret is not None:
+        expected = os.environ.get("PCADMIN_INTERNAL_SECRET")
+        if not expected or not x_pcstore_secret or not secrets.compare_digest(x_pcstore_secret, expected):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return {"via": "pcstore", "admin": None}
+    try:
+        admin = await get_current_admin(
+            admin_access_token=request.cookies.get("admin_access_token"),
+            authorization=request.headers.get("authorization"),
+        )
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return {"via": "admin", "admin": admin}
+
+
 @api_router.get("/support/tickets")
-async def list_support_tickets(current_admin: dict = Depends(get_current_admin)):
-    rows = await db.support_messages.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+async def list_support_tickets(email: Optional[str] = Query(default=None), access: dict = Depends(_support_ticket_access)):
+    normalized_email = (email or "").strip().lower()
+    if access["via"] == "pcstore" and not normalized_email:
+        raise HTTPException(status_code=400, detail="email is required for PCStore ticket sync")
+    query = {"$or": [{"customer_email": normalized_email}, {"email": normalized_email}]} if normalized_email else {}
+    rows = await db.support_messages.find(query, {"_id": 0}).sort("last_message_at", -1).to_list(1000)
+    tickets = [_shape_support_ticket(raw) for raw in rows]
+    if access["via"] == "pcstore":
+        return {"tickets": tickets, "total": len(tickets)}
     groups: dict[str, dict] = {}
-    for raw in rows:
-        ticket = _shape_support_ticket(raw)
+    for ticket in tickets:
         key = ticket.get("customer_id") or (ticket.get("customer_email") or "").lower() or ticket["id"]
         group = groups.setdefault(key, {"id": key, "name": ticket["customer_name"], "email": ticket["customer_email"], "customer_id": ticket.get("customer_id"), "open_count": 0, "tickets": []})
         group["tickets"].append(ticket)
         if ticket["status"] not in {"resolved", "closed"}:
             group["open_count"] += 1
     customers = sorted(groups.values(), key=lambda group: max((ticket.get("last_message_at") or "" for ticket in group["tickets"]), default=""), reverse=True)
-    return {"customers": customers, "total": len(rows), "unread": sum(1 for row in rows if _shape_support_ticket(row)["unread"])}
+    return {"customers": customers, "total": len(rows), "unread": sum(1 for ticket in tickets if ticket["unread"])}
 
 
 @api_router.get("/support/tickets/{ticket_id}")
-async def get_support_ticket(ticket_id: str, current_admin: dict = Depends(get_current_admin)):
-    return await _get_support_ticket(ticket_id, mark_read=True)
+async def get_support_ticket(ticket_id: str, access: dict = Depends(_support_ticket_access)):
+    return await _get_support_ticket(ticket_id, mark_read=access["via"] == "admin")
 
 
 @api_router.patch("/support/tickets/{ticket_id}/status")
@@ -2715,6 +2741,23 @@ async def update_support_ticket_status(ticket_id: str, body: SupportTicketStatus
     now = datetime.now(timezone.utc).isoformat()
     await db.support_messages.update_one({"id": ticket_id}, {"$set": {"status": body.status, "updated_at": now}})
     return {**ticket, "status": body.status, "updated_at": now}
+
+
+@api_router.post("/support/tickets/{ticket_id}/reply")
+async def sync_support_ticket_reply(ticket_id: str, body: SupportTicketReplyBody, access: dict = Depends(_support_ticket_access)):
+    """Append a PCStore-synchronised reply without triggering a second email."""
+    ticket = await _get_support_ticket(ticket_id, mark_read=access["via"] == "admin")
+    now = datetime.now(timezone.utc).isoformat()
+    admin = access.get("admin") or {}
+    message = {
+        "id": str(uuid.uuid4()), "direction": "outbound", "body": body.body.strip(),
+        "attachments": _safe_ticket_attachments(body.attachments), "created_at": now,
+        "author_name": (admin.get("name") or "PCStore") if access["via"] == "admin" else "PCStore",
+        "author_email": admin.get("email") or "",
+        "sync_source": access["via"],
+    }
+    await db.support_messages.update_one({"id": ticket_id}, {"$push": {"messages": message}, "$set": {"updated_at": now, "last_message_at": now, "unread": False}})
+    return {"ok": True, "ticket_id": ticket["id"], "message": message, "email_sent": False}
 
 
 @api_router.post("/support/tickets/{ticket_id}/replies")

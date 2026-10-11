@@ -395,6 +395,42 @@ The API delivers support requests to the store email recipient set in
 configuration-specific message. Do not send a recipient address, subject, or HTML
 from PCStore — those are deliberately server-controlled.
 
+### Ticket sync (PCStore server only)
+
+PCStore may backfill and synchronize its customer support view through the
+following server-to-server routes. **Never call these from browser code and
+never expose the shared secret to a customer.** Send the existing
+`X-PCStore-Secret` header from PCStore's backend only.
+
+```http
+GET /api/support/tickets?email=ada@example.com
+X-PCStore-Secret: <server-side-secret>
+```
+
+Returns `{ tickets, total }`, with only that email’s tickets, newest activity
+first. `email` is mandatory for shared-secret requests.
+
+```http
+GET /api/support/tickets/{ticket_id}
+X-PCStore-Secret: <server-side-secret>
+```
+
+Returns the complete ticket and `messages` thread. A PCStore read does not
+change the admin’s unread state.
+
+```http
+POST /api/support/tickets/{ticket_id}/reply
+X-PCStore-Secret: <server-side-secret>
+Content-Type: application/json
+
+{ "body": "Your support reply", "attachments": [] }
+```
+
+This appends an outbound PCStore-synced reply to the ticket and returns
+`{ ok: true, ticket_id, message, email_sent: false }`. It deliberately does
+**not** send a second email: PCStore owns delivery for this synchronization
+path. The existing PCAdmin reply route continues to send customer email.
+
 ---
 
 ## 7. Images

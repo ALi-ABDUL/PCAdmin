@@ -1,0 +1,44 @@
+{
+  "summary": "Completed backend + frontend verification for PCStore attachment proxy contract using mocked upstream image responses and live admin UI checks. Found one backend security-handling defect for malformed absolute URLs.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "helper:_normalise_pcstore_attachment_url (used by GET /api/support/tickets/{ticket_id}/messages/{message_id}/attachments/{attachment_index}/image)",
+        "issue": "Malformed absolute URLs such as 'https://[::1' raise ValueError from urlsplit instead of returning a controlled HTTPException (safe 4xx rejection).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pcstore_attachment_proxy.py",
+    "/app/test_reports/pytest/pytest_iteration64_pcstore_attachment_proxy.xml"
+  ],
+  "action_items": [
+    "Wrap URL parsing in _normalise_pcstore_attachment_url with safe exception handling so malformed URLs always return HTTPException 400.",
+    "Keep current strict checks (exact HTTPS origin, traversal/path/fragment rejection, no redirects, bounded image content).",
+    "MOCKED: Browser image responses were intercepted at the PCAdmin proxy route; no live PCStore image fetch was performed."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py support/proxy logic still resides in a very large monolith (>5k LOC), increasing risk of security regressions; consider extracting support attachment proxy logic into dedicated module + unit tests.",
+    "Malformed URL parsing path currently leaks parser-level ValueError (internal exception type) instead of controlled API error semantics."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pcstore_attachment_proxy.py",
+    "/app/test_reports/iteration_64.json"
+  ],
+  "success_rate": {
+    "backend": "94% (17/18 tests passed)",
+    "frontend": "100% (requested proxy URL wiring checks passed)"
+  },
+  "seed_data_creation": "Created temporary support fixture via /app/scripts/create_support_fixture_iteration63.py and removed it via /app/scripts/cleanup_support_fixture_iteration63.py after UI validation.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Frontend verified in live admin session (qa account) that thumbnail src, lightbox image src, thread download href, and lightbox download href all use /api/support/tickets/{ticket}/messages/{message}/attachments/{index}/image and include ?download=true for downloads; proxy image requests were intercepted and mocked in browser (3 intercepted requests). Backend test suite now includes expanded security/upstream validation coverage and currently fails only malformed URL exception handling.",
+  "rca of the issue": "RCA: _normalise_pcstore_attachment_url directly calls urllib.parse.urlsplit(value) without guarding parser exceptions. Repro: run pytest test_attachment_proxy_malformed_url_is_rejected_as_http_exception with input 'https://[::1'. Observed: ValueError('Invalid IPv6 URL') bubbles up. Expected: HTTPException(400, 'Invalid ticket attachment URL'). Mitigation: catch ValueError (and similar parser errors) around urlsplit for both base and candidate URLs, then raise HTTPException 400 with existing invalid-url detail."
+}

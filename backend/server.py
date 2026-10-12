@@ -15,7 +15,8 @@ import uuid
 from html import escape
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Any
-from urllib.parse import quote, urlparse
+from pathlib import PurePosixPath
+from urllib.parse import quote, urlparse, urlsplit, urlunsplit
 
 import resend
 import bleach
@@ -2783,6 +2784,90 @@ async def _push_admin_reply_to_pcstore(ticket_id: str, message: str, timestamp: 
     except Exception:
         logger.exception("PCStore reply push error: ticket_id=%s", ticket_id)
         return False
+
+
+_PCSTORE_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"}
+_PCSTORE_MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+def _normalise_pcstore_attachment_url(raw_url: str) -> str:
+    """Allow only a relative path or exact-origin PCStore attachment URL."""
+    try:
+        base = urlsplit((os.environ.get("PCSTORE_URL") or "").strip().rstrip("/"))
+    except ValueError:
+        raise HTTPException(status_code=500, detail="PCStore image proxy is not configured")
+    if base.scheme != "https" or not base.hostname or base.username or base.password:
+        raise HTTPException(status_code=500, detail="PCStore image proxy is not configured")
+    value = (raw_url or "").strip()
+    if not value or "\\" in value or "#" in value:
+        raise HTTPException(status_code=400, detail="Invalid ticket attachment URL")
+    try:
+        candidate = urlsplit(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid ticket attachment URL")
+    base_origin = (base.scheme.lower(), base.hostname.lower().rstrip("."), base.port)
+    if candidate.scheme or candidate.netloc:
+        if not candidate.scheme or not candidate.netloc:
+            raise HTTPException(status_code=400, detail="Invalid ticket attachment URL")
+        candidate_origin = (candidate.scheme.lower(), (candidate.hostname or "").lower().rstrip("."), candidate.port)
+        if candidate_origin != base_origin:
+            raise HTTPException(status_code=400, detail="Ticket attachment is outside PCStore")
+        path, query = candidate.path, candidate.query
+    else:
+        if not candidate.path.startswith("/"):
+            raise HTTPException(status_code=400, detail="Ticket attachment path must be absolute")
+        path, query = candidate.path, candidate.query
+    if not path or ".." in PurePosixPath(path).parts:
+        raise HTTPException(status_code=400, detail="Invalid ticket attachment path")
+    netloc = base.hostname if base.port is None else f"{base.hostname}:{base.port}"
+    return urlunsplit((base.scheme, netloc, path, query, ""))
+
+
+async def _fetch_pcstore_attachment(url: str) -> tuple[bytes, str]:
+    """Fetch a bounded image from trusted PCStore without redirects."""
+    secret = os.environ.get("PCADMIN_INTERNAL_SECRET")
+    if not secret:
+        raise HTTPException(status_code=500, detail="PCStore image proxy is not configured")
+    try:
+        timeout = httpx.Timeout(10.0, connect=3.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            response = await client.get(url, headers={"X-PCStore-Secret": secret, "Accept": ",".join(sorted(_PCSTORE_IMAGE_TYPES))})
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="PCStore image request timed out")
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="PCStore image is unavailable")
+    if response.status_code != 200:
+        raise HTTPException(status_code=404 if response.status_code == 404 else 502, detail="PCStore image is unavailable")
+    content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+    if content_type not in _PCSTORE_IMAGE_TYPES:
+        raise HTTPException(status_code=415, detail="Ticket attachment is not a supported image")
+    length = response.headers.get("content-length")
+    try:
+        if length and int(length) > _PCSTORE_MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="Ticket attachment image is too large")
+    except ValueError:
+        raise HTTPException(status_code=502, detail="PCStore image response is invalid")
+    content = response.content
+    if len(content) > _PCSTORE_MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Ticket attachment image is too large")
+    return content, content_type
+
+
+@api_router.get("/support/tickets/{ticket_id}/messages/{message_id}/attachments/{attachment_index}/image")
+async def proxy_support_ticket_attachment(ticket_id: str, message_id: str, attachment_index: int, download: bool = Query(default=False), current_admin: dict = Depends(get_current_admin)):
+    """Admin-authenticated proxy for PCStore-hosted support attachment images."""
+    ticket = await db.support_messages.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support ticket not found")
+    shaped = _shape_support_ticket(ticket)
+    message = next((row for row in shaped["messages"] if row.get("id") == message_id), None)
+    if not message or attachment_index < 0 or attachment_index >= len(message.get("attachments") or []):
+        raise HTTPException(status_code=404, detail="Ticket attachment not found")
+    upstream = _normalise_pcstore_attachment_url(message["attachments"][attachment_index])
+    content, content_type = await _fetch_pcstore_attachment(upstream)
+    extension = {"image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp", "image/avif": "avif"}[content_type]
+    disposition = f'attachment; filename="ticket-attachment-{attachment_index + 1}.{extension}"' if download else "inline"
+    return Response(content=content, media_type=content_type, headers={"Content-Disposition": disposition, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @api_router.post("/support/tickets/{ticket_id}/replies")

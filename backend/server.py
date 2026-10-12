@@ -9,12 +9,13 @@ import re
 import random
 import secrets
 import asyncio
+import logging
 import httpx
 import uuid
 from html import escape
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import resend
 import bleach
@@ -2760,6 +2761,30 @@ async def sync_support_ticket_reply(ticket_id: str, body: SupportTicketReplyBody
     return {"ok": True, "ticket_id": ticket["id"], "message": message, "email_sent": False}
 
 
+async def _push_admin_reply_to_pcstore(ticket_id: str, message: str, timestamp: str) -> bool:
+    """Best-effort PCStore thread sync; failures never affect a saved admin reply."""
+    base_url = (os.environ.get("PCSTORE_URL") or "").strip().rstrip("/")
+    secret = os.environ.get("PCADMIN_INTERNAL_SECRET")
+    parsed = urlparse(base_url)
+    if not secret or parsed.scheme != "https" or not parsed.netloc:
+        logger.error("PCStore reply push skipped: PCSTORE_URL or shared secret is not configured")
+        return False
+    url = f"{base_url}/api/support/my-tickets/{quote(ticket_id, safe='')}/admin-reply"
+    payload = {"message": message, "author": "Support Team", "timestamp": timestamp.replace("+00:00", "Z")}
+    try:
+        timeout = httpx.Timeout(5.0, connect=2.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            response = await client.post(url, headers={"X-PCStore-Secret": secret, "Content-Type": "application/json"}, json=payload)
+        if response.status_code != 200:
+            logger.error("PCStore reply push failed: ticket_id=%s status=%s", ticket_id, response.status_code)
+            return False
+        logger.info("PCStore reply push succeeded: ticket_id=%s", ticket_id)
+        return True
+    except Exception:
+        logger.exception("PCStore reply push error: ticket_id=%s", ticket_id)
+        return False
+
+
 @api_router.post("/support/tickets/{ticket_id}/replies")
 async def reply_to_support_ticket(ticket_id: str, body: SupportTicketReplyBody, current_admin: dict = Depends(get_current_admin)):
     ticket = await _get_support_ticket(ticket_id, mark_read=True)
@@ -2773,6 +2798,7 @@ async def reply_to_support_ticket(ticket_id: str, body: SupportTicketReplyBody, 
     html = f"""<!doctype html><html><body style="margin:0;padding:24px;background:#f3f4f6;font-family:Arial,sans-serif;color:#172033"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border:1px solid #e5e7eb"><tr><td style="padding:24px"><p style="margin:0 0 10px;font-size:13px;color:#64748b">Reply to your support request</p><h1 style="font-size:20px;margin:0 0 18px">{safe_subject}</h1><div style="font-size:14px;line-height:1.65">{safe_body}</div><p style="font-size:11px;color:#94a3b8;margin:22px 0 0">Sent by {escape(EMAIL_FROM_NAME)}</p></td></tr></table></td></tr></table></body></html>"""
     delivery_id = await send_managed_email(to=recipient, subject=f"Re: {ticket['subject']}", html=html)
     await db.support_messages.update_one({"id": ticket_id}, {"$push": {"messages": message}, "$set": {"updated_at": now, "last_message_at": now, "unread": False}})
+    await _push_admin_reply_to_pcstore(ticket_id, message["body"], now)
     return {"ok": True, "message": message, "delivery_id": delivery_id}
 
 

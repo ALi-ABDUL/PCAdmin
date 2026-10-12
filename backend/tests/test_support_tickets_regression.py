@@ -43,7 +43,12 @@ async def test_support_tickets_end_to_end_regression_with_mocked_email(monkeypat
         captured.append({"to": to, "subject": subject, "html": html})
         return "mock-delivery-id"
 
+    async def fake_push_to_pcstore(ticket_id, message, timestamp):
+        captured.append({"pcstore_ticket_id": ticket_id, "pcstore_message": message, "pcstore_timestamp": timestamp})
+        return True
+
     monkeypatch.setattr(server_mod, "send_managed_email", fake_send_managed_email)
+    monkeypatch.setattr(server_mod, "_push_admin_reply_to_pcstore", fake_push_to_pcstore)
     marker = f"TEST_support_norm_{uuid.uuid4().hex[:8]}"
     body = SupportContactBody(
         name="Ticket Customer",
@@ -145,8 +150,10 @@ async def test_support_tickets_end_to_end_regression_with_mocked_email(monkeypat
         assert status_ticket_after["status"] == "closed"
         assert status_ticket_after["messages"][-1]["direction"] == "outbound"
         assert status_ticket_after["messages"][-1]["body"] == "Final outbound response"
-        assert captured[-1]["to"].endswith("@example.com")
-        assert captured[-1]["subject"].startswith("Re: ")
+        assert captured[-2]["to"].endswith("@example.com")
+        assert captured[-2]["subject"].startswith("Re: ")
+        assert captured[-1]["pcstore_ticket_id"] == status_ticket["id"]
+        assert captured[-1]["pcstore_message"] == "Final outbound response"
     finally:
         db.support_messages.delete_many({"id": created["id"]})
         db.support_messages.delete_many({"id": status_ticket["id"]})

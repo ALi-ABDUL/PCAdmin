@@ -431,6 +431,28 @@ This appends an outbound PCStore-synced reply to the ticket and returns
 **not** send a second email: PCStore owns delivery for this synchronization
 path. The existing PCAdmin reply route continues to send customer email.
 
+### Receive PCAdmin admin replies
+
+PCStore must expose this authenticated server route for its **My Tickets**
+view to receive replies saved in PCAdmin:
+
+```http
+POST /api/support/my-tickets/{ticket_id}/admin-reply
+X-PCStore-Secret: <server-side-secret>
+Content-Type: application/json
+
+{
+  "message": "Your support reply",
+  "author": "Support Team",
+  "timestamp": "2026-10-11T10:30:00Z"
+}
+```
+
+Validate the shared-secret header, append the reply to the matching customer
+ticket, and return **HTTP 200** after it is durable. PCAdmin pushes this only
+after saving its own reply. A PCStore non-200 or unavailable endpoint is logged
+in PCAdmin but never rolls back the admin’s saved reply or exposes the secret.
+
 ---
 
 ## 7. Images

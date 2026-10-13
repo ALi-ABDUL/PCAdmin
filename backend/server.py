@@ -79,7 +79,7 @@ from helpers import (
     _seller_id, _build_sellers, _match_rules, _guess_category, _get_push_settings, _mask, 
     _get_credential, _push_channel_status, _notif_is_critical, _send_email, _send_telegram, 
     _format_notification_html, _push_notification, _emit_notification, 
-    _emit_price_change_notifications, _auto_archive_if_out_of_stock, calc_pricing, _ensure_pricing_rules_seeded, 
+    _emit_price_change_notifications, _auto_archive_if_out_of_stock, calc_pricing, pricing_margin_snapshot, _ensure_pricing_rules_seeded, 
     _load_pricing_rules, _ensure_postage_presets_seeded, _get_delivery_settings, _get_site_menus, _delete_categories_if_empty, _get_category_cleanup_schedule, _purge_empty_categories, _run_category_cleanup, _category_cleanup_scheduler_loop,
     _ensure_main_admin_seeded, _default_seo,
     send_customer_email, send_customer_order_confirmation, send_customer_order_status_update, send_customer_order_line_status_update,
@@ -3160,6 +3160,8 @@ async def create_product_from_item(item_id: str):
         title=it.get("title") or "Untitled",
         price=pricing["sell_price"],
         cost=cost,
+        pricing_margin=pricing_margin_snapshot(pricing),
+        pricing_reference_sell_price=pricing["sell_price"],
         stock=10,
         category=ebay_cat_slug or it.get("category") or _guess_category(
             title=it.get("title") or "",

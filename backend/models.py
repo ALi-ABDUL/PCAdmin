@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 
 
-__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'OrderLineInput', 'OrderLineFulfillmentUpdate', 'CartLineInput', 'CartUpdate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'CategoryCleanupScheduleUpdate', 'CATEGORY_CLEANUP_SCHEDULE_DEFAULTS', 'PaymentMethodToggles', 'StripeGatewayUpdate', 'PayPalGatewayUpdate', 'PaymentGatewayUpdate', 'PAYMENT_GATEWAY_DEFAULTS', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_API_SETTINGS_DEFAULTS', 'ScraperApiProviderUpdate', 'ScraperApiSettingsUpdate', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'AutoRetryConfigBody', 'RetryFailedBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'PortalProfileUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'SITE_PAGES', 'SITE_PAGE_SLUGS', 'SITE_MENUS_DEFAULTS', 'GetHelpLinkBody', 'FaqItemBody', 'ContactFormConfigBody', 'FooterLinkBody', 'FooterConfigBody', 'SupportContactBody', 'SupportTicketReplyBody', 'SupportTicketStatusBody', 'SUPPORT_TICKET_STATUSES', 'SiteMenusUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate', '_DEFAULT_STORE_DISPLAY', 'StoreDisplaySettingsUpdate', 'LOGIN_MODAL_SETTINGS_DEFAULTS', 'LoginModalSettingsUpdate', 'GoogleSignInSettingsUpdate', 'GOOGLE_SIGNIN_SETTINGS_DEFAULTS', 'VerifyTokenBody', 'ResendVerificationBody', 'VERIFICATION_TOKEN_TTL_HOURS', '_DEFAULT_EMAIL_TEMPLATES', 'VerificationTemplate', 'EmailTemplateUpdate', 'EmailBrandUpdate', 'EmailTemplatesUpdate', 'EMAIL_TEMPLATE_IDS', '_DEFAULT_STORE_BRANDING', 'StoreBrandingUpdate', 'TAG_SETTINGS_DEFAULTS', 'TagSettingsUpdate']
+__all__ = ['CATEGORIES', 'SEED_CATEGORIES', 'ScrapeRequest', 'ScrapedItem', 'WatchlistToggle', 'ProductPriceMargin', 'ProductCreate', 'Product', 'ProductUpdate', 'ShippingAddress', '_AU_SUBURBS', '_STREET_NAMES', '_STREET_TYPES', 'OrderCreate', 'OrderLineInput', 'OrderLineFulfillmentUpdate', 'CartLineInput', 'CartUpdate', 'Settings', '_DAY_LETTERS', 'Category', 'CategoryCreate', 'CategoryUpdate', 'CategoryCleanupScheduleUpdate', 'CATEGORY_CLEANUP_SCHEDULE_DEFAULTS', 'PaymentMethodToggles', 'StripeGatewayUpdate', 'PayPalGatewayUpdate', 'PaymentGatewayUpdate', 'PAYMENT_GATEWAY_DEFAULTS', 'ItemBulkAction', 'RefreshAllRequest', 'SCRAPER_API_SETTINGS_DEFAULTS', 'ScraperApiProviderUpdate', 'ScraperApiSettingsUpdate', 'SCRAPER_SCHEDULE_DEFAULTS', 'RETRY_DELAY_SECONDS', 'RUN_HISTORY_LIMIT', 'FREQ_INTERVAL_SECONDS', '_SYDNEY', 'ScraperScheduleUpdate', 'ScheduleEntryBody', 'ScraperSchedulesReplaceBody', 'AutoRetryConfigBody', 'RetryFailedBody', 'ORDER_STATUSES', 'ReturnRequest', 'AbandonedCart', 'Transaction', 'CustomerBase', 'Customer', 'CustomerUpdate', 'PortalProfileUpdate', 'CouponBase', 'Coupon', 'ReviewBase', 'Review', 'JWT_ALGO', 'JWT_ACCESS_TTL', 'PortalRegisterBody', 'PortalLoginBody', 'PortalReviewBody', 'PortalReviewVoteBody', 'MessageBase', 'Message', 'StockMove', '_CATEGORY_RULES', '_EBAY_BREADCRUMB_MAP', 'Notification', 'PUSH_SETTINGS_DEFAULTS', 'PUSH_CRITICAL_TYPES', 'PushSettingsUpdate', 'PricingRuleBase', 'PricingRule', 'PricingRuleUpdate', '_DEFAULT_PRICING_RULES', 'BulkProductIds', 'PostagePresetBase', 'PostagePreset', 'PostagePresetUpdate', 'POSTAGE_PRESET_KINDS', '_DEFAULT_POSTAGE_PRESETS', 'DELIVERY_SETTINGS_DEFAULTS', 'DeliverySettingsUpdate', 'SITE_PAGES', 'SITE_PAGE_SLUGS', 'SITE_MENUS_DEFAULTS', 'GetHelpLinkBody', 'FaqItemBody', 'ContactFormConfigBody', 'FooterLinkBody', 'FooterConfigBody', 'SupportContactBody', 'SupportTicketReplyBody', 'SupportTicketStatusBody', 'SUPPORT_TICKET_STATUSES', 'SiteMenusUpdate', 'ADMIN_ROLES', 'AdminAccountBase', 'AdminAccountCreate', 'AdminAccountUpdate', 'AdminAccount', '_DEFAULT_MAIN_ADMIN', '_DEFAULT_COUNTRY_ACCESS', 'BYPASS_SESSION_TTL_SECONDS', 'CountryAccessUpdate', '_DEFAULT_DISPOSABLE_DOMAINS', 'DISPOSABLE_EMAIL_ERROR', 'DisposableDomainsUpdate', '_DEFAULT_STORE_DISPLAY', 'StoreDisplaySettingsUpdate', 'LOGIN_MODAL_SETTINGS_DEFAULTS', 'LoginModalSettingsUpdate', 'GoogleSignInSettingsUpdate', 'GOOGLE_SIGNIN_SETTINGS_DEFAULTS', 'VerifyTokenBody', 'ResendVerificationBody', 'VERIFICATION_TOKEN_TTL_HOURS', '_DEFAULT_EMAIL_TEMPLATES', 'VerificationTemplate', 'EmailTemplateUpdate', 'EmailBrandUpdate', 'EmailTemplatesUpdate', 'EMAIL_TEMPLATE_IDS', '_DEFAULT_STORE_BRANDING', 'StoreBrandingUpdate', 'TAG_SETTINGS_DEFAULTS', 'TagSettingsUpdate']
 
 
 CATEGORIES = ["electronics", "home", "tools", "apparel", "other"]
@@ -108,6 +108,12 @@ class ScrapedItem(BaseModel):
 class WatchlistToggle(BaseModel):
     watchlisted: bool
 
+class ProductPriceMargin(BaseModel):
+    """The import-time markup rule frozen onto a scraper-created product."""
+    kind: Literal["percent", "fixed"]
+    value: float = Field(ge=0)
+
+
 class ProductCreate(BaseModel):
     title: str
     price: float
@@ -117,6 +123,12 @@ class ProductCreate(BaseModel):
     # products by default — the admin sets it manually.
     original_price: Optional[float] = None
     cost: Optional[float] = 0.0
+    # Scraper imports freeze the applied markup here. Subsequent source-price
+    # refreshes use this snapshot rather than whichever global rule is active.
+    pricing_margin: Optional[ProductPriceMargin] = None
+    # First non-sale selling price. It is the only valid anchor for a future
+    # storefront "was" price caused by a source-price drop.
+    pricing_reference_sell_price: Optional[float] = None
     stock: int = 10
     category: str = "other"
     description: Optional[str] = ""

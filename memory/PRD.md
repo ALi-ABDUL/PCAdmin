@@ -1,4 +1,5 @@
 # Aussie Admin Dashboard — PRD
+_Last updated: 2026-10-13 — verified scraper source-price synchronization_
 
 ## Problem statement
 Build an eBay Australia scraper (ebay.com.au only) with manual + auto scraping methods,
@@ -2537,3 +2538,10 @@ Notification Bell deep-links) — zero regressions detected.
 - **Safe canonical rewrite** — only the configured PCStore slug’s legacy cluster URLs under `/api/files/pcstore/support/` are rewritten to the canonical configured HTTPS `PCSTORE_URL`, preserving path and query. Unrelated slugs/hosts, non-support paths, localhost, credentials, traversal, fragments, malformed URLs, and arbitrary origins remain blocked.
 - **Live verification** — an affected existing attachment was confirmed through the PCAdmin proxy as `200 image/jpeg` (1200×800) and rendered successfully in the actual Customer messages ticket UI. Download links use the same corrected proxy route.
 - **Regression coverage** — testing-agent iteration_65 expanded proxy tests to **24/24** passing checks; final local repeat passed **24/24**. **MOCKED:** all additional PCStore upstream/browser checks used mocked or intercepted responses; no reply/email/scraper/provider flow ran.
+
+## Oct 13, 2026 — Scraper Source-Price Synchronization ✅
+- **Frozen import margin** — scraper-created products now persist `pricing_margin` as either `{kind: "percent", value}` or `{kind: "fixed", value}`, along with `pricing_reference_sell_price`. The snapshot is taken from the pricing rule used when the product is imported, so later global-rule changes cannot rewrite its intended markup.
+- **Correct source refresh behavior** — every detected source-price change now immediately updates the linked product cost and selling price using its stored margin. A one-time fixed-dollar margin snapshot safely migrates legacy linked products on their first refresh.
+- **Accurate sale anchor** — `original_price` is set only when the refreshed sell price is below the original import sell price; it is explicitly cleared whenever the source increase makes the current sell price equal to or above that anchor. This removes stale false discounts in PCStore.
+- **PCStore contract** — PCStore already consumes the live pull APIs `GET /api/store/products` and `GET /api/store/products/{id}`. The updated product is available on the next store request; no undocumented outbound price webhook was added. The integration guide now records this behavior.
+- **Verification** — focused tests passed **7/7**, including the `$699 → $1414` projector case (10% margin → `$1555.40`, no was price/discount), a legitimate drop case, and legacy backfill. Testing-agent iteration_66 confirmed backend **7/7** and a non-blank frontend smoke check. **MOCKED:** no eBay scraper, email, or PCStore transport was called.

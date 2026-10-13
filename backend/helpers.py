@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import Header, HTTPException
 
-__all__ = ['_rand_au_address', '_slug', '_split_name', '_compose_name', '_greeting_first_name', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_ensure_order_line_fulfillment_backfilled', '_ensure_order_line_fulfillment', '_refresh_all_items', '_retry_scrape_items', '_summarise_results', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_auto_retry_cfg', '_run_failed_item_retry', '_update_schedule_entry', '_scheduler_loop', '_get_category_cleanup_schedule', '_purge_empty_categories', '_run_category_cleanup', '_category_cleanup_scheduler_loop', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_link_customer_to_portal_account', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_optional_customer_email', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_line_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_get_site_menus', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
+__all__ = ['_rand_au_address', '_slug', '_split_name', '_compose_name', '_greeting_first_name', '_default_seo', '_suggest_tags', '_product_code_base', '_generate_unique_product_code', '_ensure_product_codes_backfilled', '_ensure_order_references_backfilled', '_ensure_order_line_fulfillment_backfilled', '_ensure_order_line_fulfillment', '_refresh_all_items', '_retry_scrape_items', '_summarise_results', '_get_scraper_schedule', '_compute_next_run', '_compute_next_run_for', '_classify_run', '_push_run_history', '_refresh_all_and_record', '_auto_retry_cfg', '_run_failed_item_retry', '_update_schedule_entry', '_scheduler_loop', '_get_category_cleanup_schedule', '_purge_empty_categories', '_ensure_categories_seeded', '_ensure_ebay_category', '_now_iso', '_seed_transactions_and_returns', '_rebuild_customers_from_orders', '_link_customer_to_portal_account', '_shape_review', '_jwt_secret', '_hash_password', '_verify_password', '_issue_token', 'get_current_customer', '_optional_customer_email', '_has_purchased', '_seller_id', '_build_sellers', '_match_rules', '_guess_category', '_get_push_settings', '_mask', '_get_credential', '_push_channel_status', '_notif_is_critical', '_send_email', '_send_telegram', '_format_notification_html', '_push_notification', '_emit_notification', '_emit_price_change_notifications', '_auto_archive_if_out_of_stock', 'calc_pricing', 'pricing_margin_snapshot', 'apply_pricing_margin', '_ensure_pricing_rules_seeded', '_load_pricing_rules', 'send_customer_email', 'send_customer_order_confirmation', 'send_customer_order_status_update', 'send_customer_order_line_status_update', 'send_customer_order_cancellation', 'send_customer_welcome_email', 'CUSTOMER_EMAIL_KINDS', '_customer_email_html', '_get_email_templates', '_hash_token', '_render_verification_email', '_create_verification_token', '_send_verification_email', '_consume_verification_token', '_ensure_postage_presets_seeded', '_get_delivery_settings', '_get_site_menus', '_delete_categories_if_empty', '_ensure_main_admin_seeded', '_ensure_country_access_seeded', '_get_country_access', '_client_country', '_client_ip', '_bypass_active_for_ip', '_grant_bypass', '_purge_expired_bypasses', '_ensure_disposable_domains_seeded', '_get_disposable_domains', '_is_disposable_email', '_normalise_domain']
 
 
 import bcrypt
@@ -1717,80 +1717,77 @@ async def _emit_notification(**kwargs) -> dict:
 
 async def _emit_price_change_notifications(item: dict, new_image: Optional[str], new_title: str,
                                            old_price: float, new_price: float, now_iso: str) -> None:
-    """Create a notification for each product linked to this scraped item.
+    """Apply the frozen import margin and create product price notifications.
 
-    On a genuine sell-price DROP we also auto-adjust every linked product:
-      * stash the product's current `price` into `original_price`
-        (keeping whichever `original_price` is higher if the admin had
-        already set one manually — so the strikethrough always reflects
-        the largest historical anchor)
-      * set the product's `price` to the new (lower) rule-derived sell
-        price so PCStore instantly renders the sale + strikethrough
-        without any admin intervention.
-    Price INCREASES never touch `original_price` — a rising anchor would
-    display a nonsensical strikethrough on the storefront.
+    Storefront products are read live by PCStore from ``/api/store/products``.
+    Updating the product document here is therefore the established immediate
+    synchronization contract; no undocumented outbound product webhook exists.
     """
     ebay_item_id = item.get("item_id") or item.get("id")
     if not ebay_item_id:
         return
-    rules = await _load_pricing_rules()
-    old_calc = calc_pricing(old_price, rules=rules)
-    new_calc = calc_pricing(new_price, rules=rules)
-
     def margin_pct(sell: float, cost: float) -> float:
         return round(((sell - cost) / sell) * 100, 2) if sell > 0 else 0.0
-
-    old_margin = margin_pct(old_calc["sell_price"], old_price)
-    new_margin = margin_pct(new_calc["sell_price"], new_price)
 
     # Broader projection so we can preserve any existing `original_price`.
     products = await db.products.find(
         {"source_item_id": ebay_item_id},
-        {"_id": 0, "id": 1, "title": 1, "images": 1, "price": 1, "original_price": 1},
+        {"_id": 0, "id": 1, "title": 1, "images": 1, "price": 1,
+         "pricing_margin": 1, "pricing_reference_sell_price": 1},
     ).to_list(50)
 
-    # ---------- Auto-apply the drop to every linked product ------------
-    is_drop = float(new_calc["sell_price"]) < float(old_calc["sell_price"])
-    if is_drop and products:
-        new_sell = round(float(new_calc["sell_price"]), 2)
-        for prod in products:
-            current_sell = prod.get("price")
-            if current_sell is None:
-                continue
-            # Skip if the new sell isn't actually lower than what's on the
-            # product doc right now — protects admins who already dropped
-            # the price manually below the rule-derived value.
-            if float(current_sell) <= new_sell:
-                continue
-            # Anchor for the strikethrough: keep whichever is higher
-            # between the existing `original_price` and the current sell
-            # price we're about to overwrite. This way a second drop
-            # doesn't shrink the was-price.
-            existing_orig = prod.get("original_price")
-            anchor = float(current_sell)
-            if existing_orig is not None:
-                try:
-                    anchor = max(anchor, float(existing_orig))
-                except (TypeError, ValueError):
-                    pass
-            await db.products.update_one(
-                {"id": prod["id"]},
-                {"$set": {
-                    "price": new_sell,
-                    "original_price": round(anchor, 2),
-                    "updated_at": now_iso,
-                }},
-            )
-            logger.info(
-                "price-drop auto-apply: product %s · %.2f → %.2f (was %.2f)",
-                prod["id"], float(current_sell), new_sell, anchor,
-            )
+    # Refresh every linked product for either source-price direction. A
+    # historical product gets a one-time fixed-dollar snapshot from its
+    # existing sell price, so changing current global rules cannot rewrite its
+    # economics on later refreshes.
+    for prod in products:
+        current_sell = prod.get("price")
+        if current_sell is None:
+            continue
+        try:
+            current_sell = round(float(current_sell), 2)
+        except (TypeError, ValueError):
+            continue
+        margin = prod.get("pricing_margin")
+        if not isinstance(margin, dict) or margin.get("kind") not in {"percent", "fixed"}:
+            margin = {"kind": "fixed", "value": round(max(0.0, current_sell - float(old_price)), 2)}
+        reference_sell = prod.get("pricing_reference_sell_price")
+        try:
+            reference_sell = round(float(reference_sell), 2)
+        except (TypeError, ValueError):
+            reference_sell = current_sell
+        old_sell = apply_pricing_margin(old_price, margin)
+        new_sell = apply_pricing_margin(new_price, margin)
+        update = {
+            "cost": round(float(new_price), 2),
+            "price": new_sell,
+            "pricing_margin": margin,
+            "pricing_reference_sell_price": reference_sell,
+            "updated_at": now_iso,
+            # A crossed-out price is valid only for an actual saving versus
+            # the original imported sell price. This explicitly clears stale
+            # was-prices when the source price rises.
+            "original_price": reference_sell if new_sell < reference_sell else None,
+        }
+        await db.products.update_one({"id": prod["id"]}, {"$set": update})
+        logger.info(
+            "source-price sync: product %s · source %.2f → %.2f · sell %.2f → %.2f",
+            prod["id"], float(old_price), float(new_price), old_sell, new_sell,
+        )
 
     # No linked products yet — still emit one notification tied to the scraped item so
     # the user sees eBay-side price movement in their bell drop-down.
     targets = products or [{"id": None, "title": new_title, "images": item.get("images") or []}]
 
+    rules = await _load_pricing_rules()
+    fallback_old = calc_pricing(old_price, rules=rules)
+    fallback_new = calc_pricing(new_price, rules=rules)
     for p in targets:
+        margin = p.get("pricing_margin") if isinstance(p.get("pricing_margin"), dict) else None
+        old_sell = apply_pricing_margin(old_price, margin) if margin else fallback_old["sell_price"]
+        new_sell = apply_pricing_margin(new_price, margin) if margin else fallback_new["sell_price"]
+        old_margin = margin_pct(old_sell, old_price)
+        new_margin = margin_pct(new_sell, new_price)
         n = Notification(
             product_id=p.get("id"),
             product_title=p.get("title") or new_title,
@@ -1799,10 +1796,10 @@ async def _emit_price_change_notifications(item: dict, new_image: Optional[str],
             item_id=ebay_item_id,
             old_price=round(float(old_price), 2),
             new_price=round(float(new_price), 2),
-            old_sell=old_calc["sell_price"],
-            new_sell=new_calc["sell_price"],
-            old_profit=old_calc["profit"],
-            new_profit=new_calc["profit"],
+            old_sell=old_sell,
+            new_sell=new_sell,
+            old_profit=round(old_sell - float(old_price), 2),
+            new_profit=round(new_sell - float(new_price), 2),
             old_margin_pct=old_margin,
             new_margin_pct=new_margin,
             delta_margin=round(new_margin - old_margin, 2),
@@ -1998,6 +1995,33 @@ def calc_pricing(ebay_price: float, rules: Optional[list[dict]] = None,
             if matched else None
         ),
     }
+
+
+def pricing_margin_snapshot(pricing: dict) -> dict:
+    """Store the import-time rule in a source-price-independent form."""
+    rule = pricing.get("matched_rule") or {}
+    if rule.get("kind") in {"percent", "flat"}:
+        return {
+            "kind": "percent" if rule["kind"] == "percent" else "fixed",
+            "value": round(float(rule.get("value") or 0), 2),
+        }
+    # The legacy fallback combines percent + minimum profit. Freeze its
+    # resulting dollar profit to keep future source-price changes predictable.
+    return {"kind": "fixed", "value": round(float(pricing.get("profit") or 0), 2)}
+
+
+def apply_pricing_margin(source_price: float, margin: Optional[dict]) -> float:
+    """Return a sell price using a validated frozen percent/fixed margin."""
+    source = round(float(source_price or 0), 2)
+    if source <= 0:
+        return 0.0
+    margin = margin or {}
+    try:
+        value = max(0.0, float(margin.get("value") or 0))
+    except (AttributeError, TypeError, ValueError):
+        value = 0.0
+    sell = source * (1 + value / 100) if margin.get("kind") == "percent" else source + value
+    return round(sell, 2)
 
 async def _ensure_pricing_rules_seeded() -> None:
     if await db.pricing_rules.count_documents({}) > 0:

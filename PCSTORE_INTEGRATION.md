@@ -48,6 +48,11 @@ product pages, and category navigation. All are **read-only, unauthenticated,
 worldwide-accessible**, and only return products that are active,
 non-archived, and not countdown-expired.
 
+Product pricing is pull-based: PCStore reads the current product document from
+these endpoints. When a scraper refresh updates a linked PCAdmin product, its
+new price is therefore available immediately on the next catalogue or product
+request; there is no separate outbound product-price webhook.
+
 ### `GET /api/store/products`
 
 List products for a catalogue grid.

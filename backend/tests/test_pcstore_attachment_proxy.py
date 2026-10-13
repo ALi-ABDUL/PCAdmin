@@ -81,6 +81,43 @@ def test_attachment_proxy_allows_only_relative_or_exact_origin(monkeypatch):
         server_mod._normalise_pcstore_attachment_url("https://vkx-api-integration.preview.emergentagent.com/uploads/ticket.png")
         == "https://vkx-api-integration.preview.emergentagent.com/uploads/ticket.png"
     )
+    assert (
+        server_mod._normalise_pcstore_attachment_url("http://vkx-api-integration.cluster-14.preview.emergentcf.cloud/api/files/pcstore/support/legacy-ticket.jpg")
+        == "https://vkx-api-integration.preview.emergentagent.com/api/files/pcstore/support/legacy-ticket.jpg"
+    )
+
+
+def test_attachment_proxy_rewrites_legacy_cluster_url_preserving_query(monkeypatch):
+    """Legacy cluster support-upload URLs are rewritten to canonical HTTPS origin."""
+    monkeypatch.setenv("PCSTORE_URL", "https://vkx-api-integration.preview.emergentagent.com")
+    assert (
+        server_mod._normalise_pcstore_attachment_url(
+            "http://vkx-api-integration.cluster-14.preview.emergentcf.cloud/api/files/pcstore/support/legacy-ticket.jpg?token=abc123&size=thumb"
+        )
+        == "https://vkx-api-integration.preview.emergentagent.com/api/files/pcstore/support/legacy-ticket.jpg?token=abc123&size=thumb"
+    )
+
+
+@pytest.mark.parametrize(
+    "raw_url",
+    [
+        # wrong slug under preview-cluster host pattern
+        "http://another-store.cluster-14.preview.emergentcf.cloud/api/files/pcstore/support/legacy-ticket.jpg",
+        # legacy cluster host but unsupported path
+        "http://vkx-api-integration.cluster-14.preview.emergentcf.cloud/uploads/not-supported.jpg",
+        # localhost should never be trusted
+        "http://localhost:8001/api/files/pcstore/support/legacy-ticket.jpg",
+        # credentials in URL are forbidden
+        "https://user:pass@vkx-api-integration.preview.emergentagent.com/api/files/pcstore/support/legacy-ticket.jpg",
+        # path traversal must be blocked
+        "http://vkx-api-integration.cluster-14.preview.emergentcf.cloud/api/files/pcstore/support/../private.jpg",
+    ],
+)
+def test_attachment_proxy_rejects_legacy_slug_host_and_path_abuse(monkeypatch, raw_url):
+    """Strictly reject non-canonical legacy host/path/credential attack variants."""
+    monkeypatch.setenv("PCSTORE_URL", "https://vkx-api-integration.preview.emergentagent.com")
+    with pytest.raises(HTTPException):
+        server_mod._normalise_pcstore_attachment_url(raw_url)
 
 
 def test_attachment_proxy_malformed_url_is_rejected_as_http_exception(monkeypatch):

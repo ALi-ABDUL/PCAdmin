@@ -2806,11 +2806,15 @@ def _normalise_pcstore_attachment_url(raw_url: str) -> str:
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid ticket attachment URL")
     base_origin = (base.scheme.lower(), base.hostname.lower().rstrip("."), base.port)
+    is_legacy_pcstore_attachment = False
     if candidate.scheme or candidate.netloc:
-        if not candidate.scheme or not candidate.netloc:
+        if not candidate.scheme or not candidate.netloc or candidate.username or candidate.password:
             raise HTTPException(status_code=400, detail="Invalid ticket attachment URL")
         candidate_origin = (candidate.scheme.lower(), (candidate.hostname or "").lower().rstrip("."), candidate.port)
-        if candidate_origin != base_origin:
+        legacy_host = (candidate.hostname or "").lower().rstrip(".")
+        store_slug = base.hostname.lower().split(".", 1)[0]
+        is_legacy_pcstore_attachment = bool(re.match(rf"^{re.escape(store_slug)}\.cluster-[a-z0-9-]+\.preview\.emergentcf\.cloud$", legacy_host)) and candidate.scheme.lower() in {"http", "https"}
+        if candidate_origin != base_origin and not is_legacy_pcstore_attachment:
             raise HTTPException(status_code=400, detail="Ticket attachment is outside PCStore")
         path, query = candidate.path, candidate.query
     else:
@@ -2819,6 +2823,12 @@ def _normalise_pcstore_attachment_url(raw_url: str) -> str:
         path, query = candidate.path, candidate.query
     if not path or ".." in PurePosixPath(path).parts:
         raise HTTPException(status_code=400, detail="Invalid ticket attachment path")
+    if candidate.scheme or candidate.netloc:
+        # PCStore historically persisted attachment URLs from its internal
+        # cluster HTTP origin. Accept only its support-upload path, then fetch
+        # it through the configured canonical HTTPS PCStore origin.
+        if is_legacy_pcstore_attachment and not path.startswith("/api/files/pcstore/support/"):
+            raise HTTPException(status_code=400, detail="Legacy PCStore attachment path is invalid")
     netloc = base.hostname if base.port is None else f"{base.hostname}:{base.port}"
     return urlunsplit((base.scheme, netloc, path, query, ""))
 

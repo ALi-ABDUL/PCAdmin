@@ -57,6 +57,8 @@ export function ScraperApiSettingsCard() {
   const [revealed, setRevealed] = useState({});
   const [open, setOpen] = useState(false);
   const [newProviderType, setNewProviderType] = useState("custom");
+  const [providerPendingDelete, setProviderPendingDelete] = useState(null);
+  const [deletingProvider, setDeletingProvider] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -73,7 +75,22 @@ export function ScraperApiSettingsCard() {
   useEffect(() => { load(); }, [load]);
 
   const update = (id, patch) => setProviders((current) => current.map((provider) => provider.id === id ? { ...provider, ...patch } : provider));
-  const removeCustom = (id) => setProviders((current) => current.filter((provider) => provider.id !== id));
+
+  const deleteProvider = async () => {
+    if (!providerPendingDelete) return;
+    setDeletingProvider(true);
+    try {
+      await axios.delete(`${API}/scraper/apis/${encodeURIComponent(providerPendingDelete.id)}`);
+      setProviders((current) => current.filter((provider) => provider.id !== providerPendingDelete.id));
+      setRevealed((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(`${providerPendingDelete.id}-`))));
+      toast.success(`${providerPendingDelete.label} deleted`);
+      setProviderPendingDelete(null);
+    } catch (error) {
+      toast.error("Delete failed", { description: error?.response?.data?.detail || error.message });
+    } finally {
+      setDeletingProvider(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -136,7 +153,7 @@ export function ScraperApiSettingsCard() {
                   <input type="checkbox" checked={!!provider.enabled} onChange={(event) => update(provider.id, { enabled: event.target.checked })} className="accent-indigo-600" data-testid={`scraper-provider-enabled-${provider.id}`}/>
                   Enabled
                 </label>
-                {isEditable && <button onClick={() => removeCustom(provider.id)} className="btn btn-danger !p-2" title="Remove provider" data-testid={`scraper-provider-remove-${provider.id}`}><Trash2 size={13}/></button>}
+                <button type="button" onClick={() => setProviderPendingDelete(provider)} className="btn btn-danger !p-2" title={`Delete ${provider.label}`} data-testid={`scraper-provider-delete-${provider.id}`}><Trash2 size={13}/></button>
               </div>
             </div>
 
@@ -181,6 +198,16 @@ export function ScraperApiSettingsCard() {
         <div className="flex items-center gap-2 flex-wrap"><select value={newProviderType} onChange={(event) => setNewProviderType(event.target.value)} className="input px-3 py-2 text-sm" data-testid="scraper-provider-type-choice"><option value="custom">HTML scraper</option><option value="structured_json">Structured JSON API</option></select><button type="button" onClick={() => setProviders((current) => [...current, newProviderType === "structured_json" ? emptyStructuredJson() : emptyCustom()])} className="btn btn-ghost text-sm" data-testid="scraper-provider-add-custom"><Plus size={14}/> Add provider</button></div>
         <button onClick={save} disabled={saving} className="btn btn-primary text-sm" data-testid="scraper-apis-save-button">{saving ? <Loader2 size={14} className="animate-spin"/> : <KeyRound size={14}/>} Save scraper APIs</button>
       </div>
+      {providerPendingDelete && <div className="fixed inset-0 z-50 bg-slate-950/30 grid place-items-center p-4" role="dialog" aria-modal="true" aria-labelledby="delete-provider-title" data-testid="scraper-provider-delete-dialog">
+        <div className="w-full max-w-md rounded-lg bg-white shadow-xl border hairline p-6">
+          <div id="delete-provider-title" className="font-display font-bold text-lg">Delete {providerPendingDelete.label}?</div>
+          <p className="mt-2 text-sm text-slate-600">This permanently removes the provider, its saved credentials, and its usage history. This cannot be undone.</p>
+          <div className="mt-6 flex justify-end gap-2">
+            <button type="button" className="btn btn-ghost" onClick={() => setProviderPendingDelete(null)} disabled={deletingProvider} data-testid="scraper-provider-delete-cancel">Cancel</button>
+            <button type="button" className="btn btn-danger" onClick={deleteProvider} disabled={deletingProvider} data-testid="scraper-provider-delete-confirm">{deletingProvider ? <Loader2 size={14} className="animate-spin"/> : <Trash2 size={14}/>} Delete permanently</button>
+          </div>
+        </div>
+      </div>}
       </div>}
     </div>
   );

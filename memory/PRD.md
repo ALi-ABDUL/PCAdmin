@@ -1,5 +1,5 @@
 # Aussie Admin Dashboard — PRD
-_Last updated: 2026-10-14 — Price Alerts completeness fix verified_
+_Last updated: 2026-10-14 — scraper-provider deletion verified_
 
 ## Problem statement
 Build an eBay Australia scraper (ebay.com.au only) with manual + auto scraping methods,
@@ -2551,3 +2551,9 @@ Notification Bell deep-links) — zero regressions detected.
 - **Exact exclusions only** — the API and page exclude only `sold`, `ended`, and `out_of_stock` items. Active/inactive state and alert age are not additional filters.
 - **Complete rendering and quiet deep-links** — the client pages through every matching record and renders the full list without the previous 100-row cap. The obsolete “Item not in current price-alerts list” notification has been removed; a deep-link that no longer resolves simply clears.
 - **Verification** — local focused Price Alerts regressions passed **3/3** and the frontend production build passed (four pre-existing ProductDetail hook warnings remain). Testing-agent iteration_67 found and the follow-up removed the 100-row cap. The preview API/login was intermittently unavailable during an existing scheduled scraper run, so an authenticated browser confirmation could not be completed in that run. **NOT TRIGGERED BY TESTS:** no scraper, email, or PCStore call was initiated by the focused regression tests.
+
+## Oct 14, 2026 — Permanent Scraper Provider Deletion ✅
+- **Every provider is removable** — Integrations → Scraper APIs now renders a trash icon for every card, including ScrapingBee, ScraperAPI, Scrape.do, Bright Data, Decodo, WebScrapingAPI, ScrapeBadger, HTML custom, and Structured JSON providers.
+- **Explicit confirmation** — clicking the icon opens a cancelable destructive confirmation dialog. Confirming immediately calls the protected `DELETE /api/scraper/apis/{provider_id}` route; no separate settings save is required.
+- **Permanent database cleanup** — deletion removes the entire provider configuration, its inline saved API key/username/password, and its provider-usage rows. Built-ins are only seeded on a brand-new settings document and are not silently restored after deletion.
+- **Verification** — fully mocked provider-deletion tests passed **3/3** (built-in removal, credential/usage cleanup, no reseed, missing-provider safety, and admin-session dependency), plus backend syntax and the frontend production build. **NOT TRIGGERED BY TESTS:** no scraper/eBay/provider/email/PCStore call. The authenticated preview UI remains intermittently blocked by the pre-existing scheduler/API timeout issue, so dialog runtime validation could not complete there.

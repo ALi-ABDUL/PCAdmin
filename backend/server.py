@@ -131,12 +131,10 @@ async def _get_scraper_api_settings() -> dict:
         seed = {**SCRAPER_API_SETTINGS_DEFAULTS}
         await db.scraper_api_settings.insert_one(seed)
         return seed
-    saved_by_id = {p.get("id"): p for p in (saved.get("providers") or []) if p.get("id")}
-    providers = []
-    for default in SCRAPER_API_SETTINGS_DEFAULTS["providers"]:
-        providers.append({**default, **(saved_by_id.pop(default["id"], {}))})
-    providers.extend(saved_by_id.values())
-    return {**SCRAPER_API_SETTINGS_DEFAULTS, **saved, "providers": providers}
+    # Built-in providers are seeded only for a brand-new settings document.
+    # Once an admin permanently deletes one, it must stay absent rather than
+    # being silently restored by every read.
+    return {**SCRAPER_API_SETTINGS_DEFAULTS, **saved, "providers": list(saved.get("providers") or [])}
 
 
 def _public_scraper_api_settings(settings: dict) -> dict:
@@ -280,11 +278,29 @@ async def patch_scraper_apis(body: ScraperApiSettingsUpdate, current_admin: dict
             if not raw.get(secret):
                 raw[secret] = previous.get(secret) or ""
         updated.append(raw)
-    present = {p["id"] for p in updated}
-    for default in SCRAPER_API_SETTINGS_DEFAULTS["providers"]:
-        if default["id"] not in present:
-            updated.append({**default, **existing_by_id.get(default["id"], {})})
     await db.scraper_api_settings.update_one({"id": "singleton"}, {"$set": {"providers": updated, "updated_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+    return _public_scraper_api_settings(await _get_scraper_api_settings())
+
+
+@api_router.delete("/scraper/apis/{provider_id}")
+async def delete_scraper_api(provider_id: str, current_admin: dict = Depends(get_current_admin)):
+    """Permanently remove one scraper provider and every saved secret it owns."""
+    normalized_id = re.sub(r"[^a-z0-9_-]", "", (provider_id or "").lower())
+    if not normalized_id:
+        raise HTTPException(status_code=400, detail="Provider id is invalid")
+    settings = await _get_scraper_api_settings()
+    providers = list(settings.get("providers") or [])
+    if not any(provider.get("id") == normalized_id for provider in providers):
+        raise HTTPException(status_code=404, detail="Scraper provider not found")
+    # Credentials are stored inline on the provider document, so omitting the
+    # full document clears api keys, usernames, passwords, and configuration.
+    remaining = [provider for provider in providers if provider.get("id") != normalized_id]
+    await db.scraper_api_settings.update_one(
+        {"id": "singleton"},
+        {"$set": {"providers": remaining, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    await db.scraper_provider_usage.delete_many({"provider_id": normalized_id})
     return _public_scraper_api_settings(await _get_scraper_api_settings())
 
 @api_router.post("/scrape", dependencies=[Depends(get_current_admin)])

@@ -477,16 +477,50 @@ async def list_items(
     elif status == "inactive":
         query["active"] = False
     elif status == "price_changed":
-        # At least 2 price_history points AND first differs from last
+        # Price Alerts must retain every item that changed at least once, even
+        # if a later refresh returned it to its original price. The only
+        # exclusions are listings that cannot be sold: sold, ended, or OOS.
+        # Filter null history values before comparing adjacent price points.
         query["$expr"] = {
-            "$and": [
-                {"$gte": [{"$size": {"$ifNull": ["$price_history", []]}}, 2]},
-                {"$ne": [
-                    {"$arrayElemAt": ["$price_history.value", 0]},
-                    {"$arrayElemAt": ["$price_history.value", -1]},
-                ]},
-            ]
+            "$let": {
+                "vars": {
+                    "prices": {
+                        "$map": {
+                            "input": {
+                                "$filter": {
+                                    "input": {"$ifNull": ["$price_history", []]},
+                                    "as": "point",
+                                    "cond": {"$ne": ["$$point.value", None]},
+                                }
+                            },
+                            "as": "point",
+                            "in": "$$point.value",
+                        }
+                    }
+                },
+                "in": {
+                    "$and": [
+                        {"$gte": [{"$size": "$$prices"}, 2]},
+                        {
+                            "$anyElementTrue": {
+                                "$map": {
+                                    "input": {"$range": [1, {"$size": "$$prices"}]},
+                                    "as": "index",
+                                    "in": {
+                                        "$ne": [
+                                            {"$arrayElemAt": ["$$prices", "$$index"]},
+                                            {"$arrayElemAt": ["$$prices", {"$subtract": ["$$index", 1]}]},
+                                        ]
+                                    },
+                                }
+                            }
+                        },
+                    ]
+                },
+            }
         }
+        query["is_sold"] = {"$ne": True}
+        query["stock_status"] = {"$nin": ["sold", "ended", "out_of_stock"]}
     if category:
         query["category"] = category
     if min_price is not None or max_price is not None:

@@ -20,7 +20,26 @@ export function ProductsModule({ section, setSection, deepLink, clearDeepLink, o
 
   useEffect(() => {
     if (section === "price-alerts") {
-      axios.get(`${API}/items`, { params: { limit: 300 }}).then(r => setPriceAlertItems(r.data.items));
+      let cancelled = false;
+      const loadAllPriceAlerts = async () => {
+        const pageSize = 500;
+        const rows = [];
+        let offset = 0;
+        let total = 0;
+        do {
+          const { data } = await axios.get(`${API}/items`, {
+            params: { status: "price_changed", limit: pageSize, skip: offset },
+          });
+          const page = data.items || [];
+          rows.push(...page);
+          total = data.total || 0;
+          offset += page.length;
+          if (!page.length) break;
+        } while (offset < total);
+        if (!cancelled) setPriceAlertItems(rows);
+      };
+      loadAllPriceAlerts().catch(() => { if (!cancelled) setPriceAlertItems([]); });
+      return () => { cancelled = true; };
     }
   }, [section]);
 
@@ -37,7 +56,7 @@ export function ProductsModule({ section, setSection, deepLink, clearDeepLink, o
     "low-stock": "Items with 1–3 units remaining. Restock soon.",
     "out-of-stock": "Items at 0 or below. Hidden from storefront.",
     archived: "Archived products are hidden from the main list. Restore them anytime.",
-    "price-alerts": "Scraped eBay AU items whose seller changed the price. Sold or out-of-stock listings are excluded automatically.",
+    "price-alerts": "Scraped eBay AU items whose seller changed the price. Sold, ended, or out-of-stock listings are excluded automatically.",
   };
 
   return (
@@ -55,26 +74,21 @@ export function ProductsModule({ section, setSection, deepLink, clearDeepLink, o
 }
 
 export function PriceAlertsView({ items, highlightItemId, clearDeepLink, openProductDetail }) {
-  // Exclude items that are sold / ended / out of stock — no point pricing what you can't sell.
-  const live = items.filter(it => !it.is_sold && (it.stock_status || "live") === "live");
-  // Price alerts auto-expire 5 days after the most recent detected change.
-  // We use the timestamp of the last `price_history` entry (that's when the
-  // alert was effectively "created") to decide whether the alert is still
-  // fresh enough to display.
-  const ALERT_TTL_MS = 5 * 24 * 60 * 60 * 1000;
-  const nowMs = Date.now();
-  const alerts = live
+  // Only unavailable listings are excluded. A historical price change stays
+  // visible even if a later price returns to its original amount.
+  const excludedStatuses = new Set(["sold", "ended", "out_of_stock"]);
+  const tracked = items.filter(it => !it.is_sold && !excludedStatuses.has(it.stock_status));
+  const alerts = tracked
     .map(it => {
       const h = (it.price_history || []).filter(p => p.value != null);
       if (h.length < 2) return null;
+      const changes = h.slice(1).filter((point, index) => Math.abs(Number(point.value) - Number(h[index].value)) >= 0.01).length;
+      if (!changes) return null;
       const first = h[0].value, last = h[h.length - 1].value;
       const delta = last - first;
-      if (Math.abs(delta) < 0.01) return null;
       const pct = first ? (delta / first) * 100 : 0;
       const alertAt = h[h.length - 1].at;
-      const alertMs = alertAt ? new Date(alertAt).getTime() : 0;
-      if (!alertMs || (nowMs - alertMs) > ALERT_TTL_MS) return null;
-      return { it, first, last, delta, pct, changes: h.length - 1, alertAt };
+      return { it, first, last, delta, pct, changes, alertAt };
     })
     .filter(Boolean)
     // Most recent price change first (falls back to 0 for missing timestamps).
@@ -82,16 +96,7 @@ export function PriceAlertsView({ items, highlightItemId, clearDeepLink, openPro
 
   const drops = alerts.filter(a => a.delta < 0).length;
   const rises = alerts.filter(a => a.delta > 0).length;
-  const excluded = items.length - live.length;
-  // Alerts that were suppressed only because they aged past the 5-day TTL.
-  const staleAlerts = live.filter(it => {
-    const h = (it.price_history || []).filter(p => p.value != null);
-    if (h.length < 2) return false;
-    const first = h[0].value, last = h[h.length - 1].value;
-    if (Math.abs(last - first) < 0.01) return false;
-    const alertMs = h[h.length - 1].at ? new Date(h[h.length - 1].at).getTime() : 0;
-    return alertMs && (nowMs - alertMs) > ALERT_TTL_MS;
-  }).length;
+  const excluded = items.length - tracked.length;
 
   // Scroll to & flash-highlight the row for the item passed via deepLink from the
   // notification bell. Runs once per highlight target, then clears the deepLink so
@@ -109,8 +114,6 @@ export function PriceAlertsView({ items, highlightItemId, clearDeepLink, openPro
         setPulseId(highlightItemId);
         // Fade the highlight out after 2.4s.
         setTimeout(() => setPulseId(null), 2400);
-      } else {
-        toast("Item not in current price-alerts list", { description: "The seller price change may no longer be active." });
       }
       clearDeepLink?.();
     }, 120);
@@ -123,26 +126,19 @@ export function PriceAlertsView({ items, highlightItemId, clearDeepLink, openPro
         <StatBox label="Alerts" value={alerts.length}/>
         <StatBox label="Price drops" value={drops} tone="success"/>
         <StatBox label="Price rises" value={rises}/>
-        <StatBox label="Items tracked" value={live.length}/>
+        <StatBox label="Items tracked" value={tracked.length}/>
       </div>
-      {(excluded > 0 || staleAlerts > 0) && (
+      {excluded > 0 && (
         <div className="text-[11px] text-slate-500 font-mono flex items-center gap-3 flex-wrap" data-testid="price-alerts-excluded">
-          {excluded > 0 && (
-            <span className="flex items-center gap-1"><Ban size={11}/> {excluded} sold / ended / out-of-stock listing{excluded===1?"":"s"} excluded</span>
-          )}
-          {staleAlerts > 0 && (
-            <span className="flex items-center gap-1" data-testid="price-alerts-expired">
-              <Ban size={11}/> {staleAlerts} alert{staleAlerts===1?"":"s"} auto-cleared after 5 days
-            </span>
-          )}
+          <span className="flex items-center gap-1"><Ban size={11}/> {excluded} sold / ended / out-of-stock listing{excluded===1?"":"s"} excluded</span>
         </div>
       )}
       <div className="card overflow-hidden">
-        {alerts.length === 0 && <div className="p-10 text-center text-slate-500">No price changes in the last 5 days. Older alerts are auto-cleared.</div>}
+        {alerts.length === 0 && <div className="p-10 text-center text-slate-500" data-testid="price-alerts-empty-state">No tracked price changes yet.</div>}
         <div className="overflow-x-auto"><table className="tbl">
           <thead><tr><th>eBay AU item</th><th>Seller</th><th>First price</th><th>Latest</th><th>Change</th><th>Last change</th><th>Trend</th><th></th></tr></thead>
           <tbody>
-            {alerts.slice(0, 100).map(({ it, first, last, delta, pct, changes, alertAt }) => {
+            {alerts.map(({ it, first, last, delta, pct, changes, alertAt }) => {
               const linkedId = it.linked_product_id;
               const openProduct = () => { if (linkedId) openProductDetail?.(linkedId); };
               const isExpanded = expandedId === it.id;
@@ -150,7 +146,7 @@ export function PriceAlertsView({ items, highlightItemId, clearDeepLink, openPro
                 <Fragment key={it.id}>
                 <tr
                   ref={(el) => { if (el) rowRefs.current[it.item_id] = el; }}
-                  data-testid="price-alert-row"
+                  data-testid={`price-alert-row-${it.item_id}`}
                   data-item-id={it.item_id}
                   onClick={openProduct}
                   title={linkedId ? "Open product detail" : "This scraped item hasn't been added to products yet"}
@@ -167,8 +163,8 @@ export function PriceAlertsView({ items, highlightItemId, clearDeepLink, openPro
                   <td className="text-sm text-slate-600 truncate max-w-[160px]">{it.seller || "—"}</td>
                   <td className="font-mono text-slate-500">AU ${first.toFixed(2)}</td>
                   <td className="font-mono font-bold text-indigo-600">AU ${last.toFixed(2)}</td>
-                  <td className={`font-mono font-bold ${delta > 0 ? "text-amber-600" : "text-emerald-600"}`}>
-                    {delta > 0 ? "▲" : "▼"} AU ${Math.abs(delta).toFixed(2)} <span className="text-xs">({pct.toFixed(1)}%)</span>
+                  <td className={`font-mono font-bold ${delta > 0 ? "text-amber-600" : delta < 0 ? "text-emerald-600" : "text-slate-500"}`}>
+                    {delta > 0 ? "▲" : delta < 0 ? "▼" : "—"} AU ${Math.abs(delta).toFixed(2)} <span className="text-xs">({pct.toFixed(1)}%)</span>
                   </td>
                   <td className="text-xs text-slate-500 whitespace-nowrap">{alertAt ? fmtDate(alertAt) : "—"}</td>
                   <td onClick={(e) => e.stopPropagation()}>

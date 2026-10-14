@@ -1,5 +1,5 @@
 # Aussie Admin Dashboard — PRD
-_Last updated: 2026-10-13 — verified scraper source-price synchronization_
+_Last updated: 2026-10-14 — Price Alerts completeness fix verified_
 
 ## Problem statement
 Build an eBay Australia scraper (ebay.com.au only) with manual + auto scraping methods,
@@ -2545,3 +2545,9 @@ Notification Bell deep-links) — zero regressions detected.
 - **Accurate sale anchor** — `original_price` is set only when the refreshed sell price is below the original import sell price; it is explicitly cleared whenever the source increase makes the current sell price equal to or above that anchor. This removes stale false discounts in PCStore.
 - **PCStore contract** — PCStore already consumes the live pull APIs `GET /api/store/products` and `GET /api/store/products/{id}`. The updated product is available on the next store request; no undocumented outbound price webhook was added. The integration guide now records this behavior.
 - **Verification** — focused tests passed **7/7**, including the `$699 → $1414` projector case (10% margin → `$1555.40`, no was price/discount), a legitimate drop case, and legacy backfill. Testing-agent iteration_66 confirmed backend **7/7** and a non-blank frontend smoke check. **MOCKED:** no eBay scraper, email, or PCStore transport was called.
+
+## Oct 14, 2026 — Price Alerts Completeness Fix ✅
+- **All historical price changes retained** — Price Alerts now recognizes any adjacent source-price change in an item’s non-null history, including an item that later returns to its original price. The prior five-day auto-expiry and first-versus-last-only comparison no longer hide valid alerts.
+- **Exact exclusions only** — the API and page exclude only `sold`, `ended`, and `out_of_stock` items. Active/inactive state and alert age are not additional filters.
+- **Complete rendering and quiet deep-links** — the client pages through every matching record and renders the full list without the previous 100-row cap. The obsolete “Item not in current price-alerts list” notification has been removed; a deep-link that no longer resolves simply clears.
+- **Verification** — local focused Price Alerts regressions passed **3/3** and the frontend production build passed (four pre-existing ProductDetail hook warnings remain). Testing-agent iteration_67 found and the follow-up removed the 100-row cap. The preview API/login was intermittently unavailable during an existing scheduled scraper run, so an authenticated browser confirmation could not be completed in that run. **NOT TRIGGERED BY TESTS:** no scraper, email, or PCStore call was initiated by the focused regression tests.

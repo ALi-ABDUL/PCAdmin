@@ -10,7 +10,7 @@ import { calcPricing, usePricingRules } from "../lib/pricing";
 import { Orders } from "./Orders";
 import { Products } from "./ProductsList";
 
-export function ScraperPage({ onView, onEditProduct }) {
+export function ScraperPage({ onView, onEditProduct, embedded = false }) {
   const [url, setUrl] = useState("");
   const [providers, setProviders] = useState([]); const [scrapeMethod, setScrapeMethod] = useState("auto");
   const [loading, setLoading] = useState(false); const [status, setStatus] = useState("");
@@ -44,7 +44,7 @@ export function ScraperPage({ onView, onEditProduct }) {
   }, []);
 
   // The Sourcing selector intentionally lists only providers that have both
-  // been enabled and fully configured in Store Management → Integrations.
+  // been enabled and fully configured in Product Sourcing → Scraper APIs.
   // Custom providers use their saved label, so entries such as ZenRows appear
   // here automatically without another frontend release.
   useEffect(() => {
@@ -214,11 +214,11 @@ export function ScraperPage({ onView, onEditProduct }) {
 
   return (
     <div className="grid gap-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
+      <div className={`flex items-center justify-between flex-wrap gap-3 ${embedded ? "justify-end" : ""}`}>
+        {!embedded && <div>
           <div className="font-display text-2xl font-bold tracking-tight">Product Sourcing</div>
           <div className="text-xs text-slate-500 font-mono">stealth scrape · nightly auto-refresh · sold detection</div>
-        </div>
+        </div>}
         <button data-testid="refresh-all-btn" onClick={refreshAll} disabled={refreshingAll} className="btn btn-primary">
           {refreshingAll ? <Loader2 className="animate-spin" size={14}/> : <RefreshCw size={14}/>}
           {refreshingAll ? "Refreshing all…" : "Refresh all now"}
@@ -288,7 +288,7 @@ export function ScraperPage({ onView, onEditProduct }) {
                   : "Import item will use the automatic fallback chain."}
             </div>
           </div>
-          {providers.length === 0 && <div className="mt-2 text-sm text-slate-500" data-testid="provider-selector-empty">No enabled, configured providers yet. Add one under Store Management → Integrations.</div>}
+          {providers.length === 0 && <div className="mt-2 text-sm text-slate-500" data-testid="provider-selector-empty">No enabled, configured providers yet. Add one under Product Sourcing → Scraper APIs.</div>}
         </div>
 
         {status && <div className="mt-4 text-sm text-slate-500 flex items-center gap-2"><Loader2 size={14} className="animate-spin"/>{status}</div>}

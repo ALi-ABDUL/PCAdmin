@@ -10,8 +10,6 @@ import { STORE_NAV } from "../lib/nav";
 import { calcPricingWithRules, usePricingRules, _refreshPricingRules } from "../lib/pricing";
 import { Analytics } from "./Analytics";
 import { Dashboard } from "./Dashboard";
-import { ScraperApiSettingsCard } from "../components/ScraperApiSettingsCard";
-import { ScraperProviderUsageDashboard } from "../components/ScraperProviderUsageDashboard";
 import { LoginModalSettingsEditor } from "../components/LoginModalSettingsEditor";
 
 const ADMIN_SESSION_REQUEST = { withCredentials: true };
@@ -1105,11 +1103,6 @@ export function IntegrationsPanel() {
     <div className="grid gap-3" data-testid="integrations-panel">
       <ResendIntegrationCard/>
       <div className="pt-3"><div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2" data-testid="auth-social-integrations-heading">Authentication &amp; social</div><GoogleSignInIntegrationCard/></div>
-      <div className="pt-3" data-testid="scraper-integrations-section">
-        <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2" data-testid="scraper-integrations-heading">Product sourcing</div>
-        <ScraperApiSettingsCard/>
-        <div className="mt-3"><ScraperProviderUsageDashboard/></div>
-      </div>
     </div>
   );
 }
@@ -2249,7 +2242,6 @@ export function StoreManagement({ section, setSection }) {
     "store-settings":      { hint: "Your storefront brand — name, tagline, logo, favicon and tab title (shown live on PCStore) — plus contact and legal info.", fields: [], custom: <StoreSettingsPanel/> },
     "pricing-rules":       { hint: "Tiered profit rules the scraper uses when calculating sell prices for imported items.", fields: [], custom: <PricingRulesEditor/> },
     "tag-settings":        { hint: "Choose which smart product badges shoppers see and customise their display labels. Deal is assigned manually per product.", fields: [], custom: <TagSettingsEditor/> },
-    "scraper-schedule":    { hint: "Automate the eBay re-fetch: add one or more schedules, each with its own start time, frequency and optional stop date — or run one right now.", fields: [], custom: <ScraperScheduleEditor/> },
     "payment-gateway":     { hint: "Configure Stripe and PayPal credentials. Apple Pay, Google Pay, and Afterpay use Stripe with no extra keys.", fields: [], custom: <PaymentGatewayPanel/> },
     "shipping-methods":    { hint: "Everything delivery: reusable postage presets and the store-wide delivery window.", fields: [], custom: <ShippingMethodsPanel/> },
     "tax-rates":           { hint: "GST and location-based tax rules.", fields: ["Australia — GST 10%","New Zealand — GST 15%","B2B / ABN entries"] },

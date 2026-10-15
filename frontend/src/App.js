@@ -20,7 +20,7 @@ import { Orders, OrdersModule } from "./pages/Orders";
 import { PaymentsModule } from "./pages/Payments";
 import { ProductsModule } from "./pages/Products";
 import { Products } from "./pages/ProductsList";
-import { ScraperPage } from "./pages/Scraper";
+import { ProductSourcingWorkspace } from "./pages/ProductSourcing";
 import { SettingsPage } from "./pages/Settings";
 import { AdminLoginScreen } from "./pages/AdminLogin";
 import { AccessDenied } from "./pages/AccessDenied";
@@ -36,6 +36,7 @@ export default function App() {
   const [productSection, setProductSection] = useState("all");
   const [ordersSection, setOrdersSection] = useState("all");
   const [paymentsSection, setPaymentsSection] = useState("transactions");
+  const [sourcingSection, setSourcingSection] = useState("sourcing");
   const [selectedItem, setSelectedItem] = useState(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [deepLink, setDeepLink] = useState(null); // { orderId?: str, productId?: str, itemId?: str }
@@ -191,7 +192,7 @@ export default function App() {
     if (t === "orders") { setTab("orders"); if (section) setOrdersSection(section); }
     else if (t === "products") { setTab("products"); if (section) setProductSection(section); }
     else if (t === "customers") { setTab("customers"); if (section) setCustomerSection(section); }
-    else if (t === "scraper") { setTab("scraper"); }
+    else if (t === "scraper") { setTab("scraper"); if (["sourcing", "schedule", "apis", "usage"].includes(section)) setSourcingSection(section); }
     else if (t) setTab(t);
     // Detail-page deep-links (from notifications / global search)
     if (filter?.productId) setProductDetailId(filter.productId);
@@ -211,6 +212,7 @@ export default function App() {
     setOrderDetailId(null);
     setCustomerDetailId(null);
     setSupplierDetailId(null);
+    if (t === "scraper") setSourcingSection("sourcing");
     setTab(t);
   }, []);
   const changeProductSection = useCallback((s) => {
@@ -330,7 +332,7 @@ export default function App() {
               {tab === "orders"    && <OrdersModule section={ordersSection} setSection={changeOrdersSection} deepLink={deepLink} clearDeepLink={clearDeepLink} openOrderDetail={setOrderDetailId} orderDetailId={orderDetailId}/>}
               {tab === "payments"  && <PaymentsModule section={paymentsSection} setSection={setPaymentsSection}/>}
               {tab === "categories" && <Categories navigateTo={navigateTo}/>}
-              {tab === "scraper"   && <ScraperPage onView={setSelectedItem} onEditProduct={(pid) => { setTab("products"); setProductDetailId(pid); }} />}
+              {tab === "scraper"   && <ProductSourcingWorkspace section={sourcingSection} setSection={setSourcingSection} onView={setSelectedItem} onEditProduct={(pid) => { setTab("products"); setProductDetailId(pid); }} />}
               {tab === "analytics" && <Analytics />}
               {tab === "settings"  && <SettingsPage />}
             </motion.div>

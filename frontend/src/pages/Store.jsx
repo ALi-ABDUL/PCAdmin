@@ -1042,16 +1042,16 @@ export function ResendIntegrationCard() {
 
 export function GeminiIntegrationCard() {
   const [settings, setSettings] = useState(null);
-  const [draft, setDraft] = useState({ api_key: "", model: "gemini-2.5-flash" });
+  const [draft, setDraft] = useState({ api_key: "", model: "gemini-3.8-flash" });
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
     const { data } = await axios.get(`${API}/integrations/gemini`);
     setSettings(data);
-    setDraft({ api_key: "", model: data.model || "gemini-2.5-flash" });
+    setDraft({ api_key: "", model: data.model || "gemini-3.8-flash" });
     if (!data.api_key_set) setOpen(true);
   }, []);
-  useEffect(() => { load().catch(() => setSettings({ api_key_set: false, status: "disconnected", model: "gemini-2.5-flash" })); }, [load]);
+  useEffect(() => { load().catch(() => setSettings({ api_key_set: false, status: "disconnected", model: "gemini-3.8-flash" })); }, [load]);
   if (!settings) return <div className="card p-5 text-slate-500 text-sm" data-testid="gemini-integration-loading">Loading Gemini integration…</div>;
   const connected = !!settings.api_key_set;
   const dirty = !!draft.api_key.trim() || draft.model !== settings.model;
@@ -1078,7 +1078,7 @@ export function GeminiIntegrationCard() {
     </div>
     {open && <div className="mt-5 pt-5 border-t hairline grid gap-4" data-testid="gemini-configure-panel">
       <CredField label="Gemini API Key" testId="gemini-api-key" type="password" placeholder={connected ? `Saved · ${settings.api_key_masked}` : "AIza..."} value={draft.api_key} onChange={(api_key) => setDraft((current) => ({ ...current, api_key }))} savedBadge={connected} onClear={connected ? clearKey : null}/>
-      <label className="grid gap-1"><span className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Model</span><select value={draft.model} onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))} className="input px-3 py-2 text-sm" data-testid="gemini-model-select"><option value="gemini-2.0-flash">Gemini 2.0 Flash</option><option value="gemini-2.5-flash">Gemini 2.5 Flash</option></select></label>
+      <label className="grid gap-1"><span className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Model</span><select value={draft.model} onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))} className="input px-3 py-2 text-sm" data-testid="gemini-model-select"><option value="gemini-3.8-flash">Gemini 3.8 Flash</option></select></label>
       <div className="flex items-center justify-between gap-3 flex-wrap"><span className="text-[11px] text-slate-400">Your key is stored server-side and never sent to the product editor.</span><button type="button" onClick={save} disabled={busy || !dirty} className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed" data-testid="gemini-save-button">{busy ? <Loader2 size={14} className="animate-spin"/> : <KeyRound size={14}/>} Save Gemini</button></div>
     </div>}
   </div>;

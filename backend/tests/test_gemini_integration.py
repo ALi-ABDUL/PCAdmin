@@ -44,11 +44,11 @@ def test_gemini_settings_mask_key_and_persist_selected_model(monkeypatch):
     monkeypatch.setattr(server, "db", fake_db)
 
     saved = _run(server.update_gemini_integration(
-        GeminiSettingsUpdate(api_key="AIza-private-value", model="gemini-2.0-flash"),
+        GeminiSettingsUpdate(api_key="AIza-private-value", model="gemini-3.8-flash"),
         current_admin={"id": "admin-1"},
     ))
 
-    assert saved["model"] == "gemini-2.0-flash"
+    assert saved["model"] == "gemini-3.8-flash"
     assert saved["api_key_set"] is True
     assert "private-value" not in str(saved)
     assert fake_db.gemini_settings.document["api_key"] == "AIza-private-value"
@@ -58,7 +58,7 @@ def test_gemini_settings_mask_key_and_persist_selected_model(monkeypatch):
 
 
 def test_rewrite_returns_requested_no_key_message(monkeypatch):
-    monkeypatch.setattr(server, "db", _Db({"id": "singleton", "api_key": "", "model": "gemini-2.5-flash"}))
+    monkeypatch.setattr(server, "db", _Db({"id": "singleton", "api_key": "", "model": "gemini-3.8-flash"}))
 
     with pytest.raises(HTTPException) as error:
         _run(server.rewrite_product_description(
@@ -71,7 +71,7 @@ def test_rewrite_returns_requested_no_key_message(monkeypatch):
 
 
 def test_rewrite_stream_uses_saved_model_without_external_call(monkeypatch):
-    fake_db = _Db({"id": "singleton", "api_key": "AIza-test-key", "model": "gemini-2.0-flash"})
+    fake_db = _Db({"id": "singleton", "api_key": "AIza-test-key", "model": "gemini-3.8-flash"})
     captured = {}
 
     class FakeDelta:
@@ -101,7 +101,17 @@ def test_rewrite_stream_uses_saved_model_without_external_call(monkeypatch):
     stream = _run(consume(response))
 
     assert captured["provider"] == "gemini"
-    assert captured["model"] == "gemini-2.0-flash"
+    assert captured["model"] == "gemini-3.8-flash"
     assert "Professional copy" in stream
     assert fake_db.ai_rewrite_history.document["status"] == "completed"
     assert fake_db.ai_rewrite_history.document["output"] == "<p>Professional copy</p>"
+
+
+def test_retired_model_is_migrated_to_current_default(monkeypatch):
+    fake_db = _Db({"id": "singleton", "api_key": "", "model": "gemini-2.5-flash"})
+    monkeypatch.setattr(server, "db", fake_db)
+
+    settings = _run(server.get_gemini_integration(current_admin={"id": "admin-1"}))
+
+    assert settings["model"] == "gemini-3.8-flash"
+    assert fake_db.gemini_settings.document["model"] == "gemini-3.8-flash"

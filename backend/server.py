@@ -132,6 +132,14 @@ async def _get_gemini_settings() -> dict:
         await db.gemini_settings.insert_one({**seed})
         return seed
     model = settings.get("model") if settings.get("model") in GEMINI_MODELS else GEMINI_SETTINGS_DEFAULTS["model"]
+    # Retired Gemini model selections are migrated at read time so the next
+    # rewrite cannot continue failing with an upstream model-not-found error.
+    if settings.get("model") != model:
+        await db.gemini_settings.update_one(
+            {"id": "singleton"},
+            {"$set": {"model": model, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        settings["model"] = model
     return {**GEMINI_SETTINGS_DEFAULTS, **settings, "model": model}
 
 

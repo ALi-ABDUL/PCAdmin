@@ -39,7 +39,7 @@ def admin_session() -> requests.Session:
     session.post(f"{_base_url()}/api/integrations/gemini/clear-secret", timeout=20)
     session.patch(
         f"{_base_url()}/api/integrations/gemini",
-        json={"model": "gemini-2.5-flash"},
+        json={"model": "gemini-3.8-flash"},
         timeout=20,
     )
 
@@ -52,7 +52,7 @@ def test_gemini_settings_endpoints_require_admin_session():
 
     anonymous_patch = requests.patch(
         f"{base}/api/integrations/gemini",
-        json={"model": "gemini-2.0-flash"},
+        json={"model": "gemini-3.8-flash"},
         timeout=20,
     )
     assert anonymous_patch.status_code in {401, 403}
@@ -69,12 +69,12 @@ def test_gemini_get_omits_secret_and_persists_selected_model(admin_session: requ
 
     patch = admin_session.patch(
         f"{base}/api/integrations/gemini",
-        json={"model": "gemini-2.0-flash"},
+        json={"model": "gemini-3.8-flash"},
         timeout=20,
     )
     assert patch.status_code == 200, patch.text
     saved = patch.json()
-    assert saved["model"] == "gemini-2.0-flash"
+    assert saved["model"] == "gemini-3.8-flash"
     assert saved["api_key_set"] is False
     assert saved["status"] == "disconnected"
     assert "api_key" not in saved
@@ -82,7 +82,7 @@ def test_gemini_get_omits_secret_and_persists_selected_model(admin_session: requ
     fetched = admin_session.get(f"{base}/api/integrations/gemini", timeout=20)
     assert fetched.status_code == 200, fetched.text
     data = fetched.json()
-    assert data["model"] == "gemini-2.0-flash"
+    assert data["model"] == "gemini-3.8-flash"
     assert data["api_key_set"] is False
     assert data["status"] == "disconnected"
     assert "api_key" not in data
@@ -109,7 +109,7 @@ def test_clear_secret_keeps_model_and_disconnected_status(admin_session: request
 
     set_model = admin_session.patch(
         f"{base}/api/integrations/gemini",
-        json={"model": "gemini-2.0-flash"},
+        json={"model": "gemini-3.8-flash"},
         timeout=20,
     )
     assert set_model.status_code == 200, set_model.text
@@ -117,7 +117,7 @@ def test_clear_secret_keeps_model_and_disconnected_status(admin_session: request
     cleared = admin_session.post(f"{base}/api/integrations/gemini/clear-secret", timeout=20)
     assert cleared.status_code == 200, cleared.text
     data = cleared.json()
-    assert data["model"] == "gemini-2.0-flash"
+    assert data["model"] == "gemini-3.8-flash"
     assert data["api_key_set"] is False
     assert data["status"] == "disconnected"
     assert "api_key" not in data

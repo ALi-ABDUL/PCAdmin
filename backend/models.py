@@ -461,13 +461,13 @@ class RefreshAllRequest(BaseModel):
     scraperapi_key: Optional[str] = None
 
 
-GEMINI_MODELS = ("gemini-2.0-flash", "gemini-2.5-flash")
-GEMINI_SETTINGS_DEFAULTS = {"id": "singleton", "api_key": "", "model": "gemini-2.5-flash"}
+GEMINI_MODELS = ("gemini-3.8-flash",)
+GEMINI_SETTINGS_DEFAULTS = {"id": "singleton", "api_key": "", "model": "gemini-3.8-flash"}
 
 
 class GeminiSettingsUpdate(BaseModel):
     api_key: Optional[str] = Field(default=None, max_length=4000)
-    model: Optional[Literal["gemini-2.0-flash", "gemini-2.5-flash"]] = None
+    model: Optional[Literal["gemini-3.8-flash"]] = None
 
 
 class ProductDescriptionRewriteBody(BaseModel):

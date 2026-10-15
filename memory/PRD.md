@@ -2562,3 +2562,8 @@ Notification Bell deep-links) — zero regressions detected.
 - **Single sourcing entry point** — Product Sourcing now owns a top tab bar: Product Sourcing (default import + Scraped items), Scraper Schedule, Scraper APIs, and Provider Usage. Each tab reuses the existing screen and behavior without changing scraper API contracts.
 - **Navigation cleanup** — Scraper Schedule has been removed from Store Management navigation. Integrations now contains only non-scraper integrations (Resend and Google Sign-In); provider credentials and usage are no longer rendered there.
 - **Verification** — frontend production build passed (only four pre-existing ProductDetail hook warnings). Testing-agent iteration_69 passed all **5/5** requested public-preview navigation checks: default source tab, all four tab panels, no legacy schedule nav item, no scraper content in Integrations, and unique tab test IDs. **MOCKED:** navigation testing did not invoke import, refresh, schedule, retry, delete, or provider-save actions.
+
+## Oct 15, 2026 — Product Sourcing Pill Tab Styling ✅
+- **Modern tab treatment** — replaced the underline navigation with an elevated, bordered tab rail and purple filled capsule for the active section.
+- **Clear interaction states** — inactive tabs now have a soft indigo hover state, prominent icon badges, keyboard focus rings, and restrained press/shadow feedback while preserving the existing four-tab behavior.
+- **Verification** — frontend production build passed (the same four pre-existing ProductDetail hook warnings remain). Public-preview Playwright smoke check confirmed the pill bar renders and tabs continue switching without invoking a sourcing action.

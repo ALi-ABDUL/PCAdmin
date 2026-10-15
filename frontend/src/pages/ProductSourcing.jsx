@@ -21,8 +21,8 @@ export function ProductSourcingWorkspace({ section, setSection, onView, onEditPr
         <div className="font-display text-2xl font-bold tracking-tight" data-testid="product-sourcing-page-title">Product Sourcing</div>
         <div className="text-xs text-slate-500 font-mono mt-1">eBay AU imports · provider controls · scheduled refreshes</div>
       </div>
-      <div className="border-b hairline" role="tablist" aria-label="Product sourcing sections" data-testid="product-sourcing-tabs">
-        <div className="flex gap-1 overflow-x-auto">
+      <div className="rounded-xl border border-indigo-100 bg-white/90 p-1.5 shadow-sm" role="tablist" aria-label="Product sourcing sections" data-testid="product-sourcing-tabs">
+        <div className="flex gap-1 overflow-x-auto" data-testid="product-sourcing-tab-list">
           {SOURCING_TABS.map((tab) => {
             const Icon = tab.icon;
             const selected = tab.id === activeTab;
@@ -32,9 +32,9 @@ export function ProductSourcingWorkspace({ section, setSection, onView, onEditPr
               role="tab"
               aria-selected={selected}
               onClick={() => setSection(tab.id)}
-              className={`shrink-0 inline-flex items-center gap-2 px-3 py-2.5 border-b-2 text-sm font-medium transition-colors ${selected ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200"}`}
+              className={`shrink-0 inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-sm font-semibold transition-[background-color,color,box-shadow,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${selected ? "bg-indigo-600 text-white shadow-md shadow-indigo-200" : "text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 hover:shadow-sm active:translate-y-px"}`}
               data-testid={`product-sourcing-tab-${tab.id}`}
-            ><Icon size={15}/>{tab.label}</button>;
+            ><span className={`grid h-6 w-6 place-items-center rounded-full transition-colors ${selected ? "bg-white/15 text-white" : "bg-indigo-50 text-indigo-600"}`}><Icon size={16} strokeWidth={2.25}/></span>{tab.label}</button>;
           })}
         </div>
       </div>

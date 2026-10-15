@@ -32,6 +32,8 @@ export function ProductDetailPage({ productId, onBack }) {
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshProviders, setRefreshProviders] = useState([]);
+  const [showRefreshMenu, setShowRefreshMenu] = useState(false);
   const [showCatPopover, setShowCatPopover] = useState(false);
   const [imgDialog, setImgDialog] = useState({ open: false, mode: "add", idx: null, current: "" });
   const [lightboxIdx, setLightboxIdx] = useState(null);   // opens full-size viewer at index
@@ -77,6 +79,20 @@ export function ProductDetailPage({ productId, onBack }) {
   useEffect(() => { axios.get(`${API}/categories`, { params: { active: true }}).then(r => setCats(r.data.categories || [])); }, []);
   useEffect(() => { axios.get(`${API}/postage-presets`).then(r => setPresets((r.data.presets || []).filter(x => x.active !== false))); }, []);
   useEffect(() => { axios.get(`${API}/delivery-settings`).then(r => setDeliveryDefaults(r.data || { default_min_days: 3, default_max_days: 7 })); }, []);
+  useEffect(() => {
+    const ready = (provider) => {
+      if (!provider.enabled) return false;
+      if (provider.type === "decodo") return provider.username_set && provider.password_set;
+      if (provider.type === "custom") {
+        const auth = provider.auth_mode || "query";
+        return !!provider.endpoint && (auth === "none" || provider.api_key_set || (provider.username_set && provider.password_set));
+      }
+      return provider.api_key_set;
+    };
+    axios.get(`${API}/scraper/apis`)
+      .then(({ data }) => setRefreshProviders((data.providers || []).filter(ready)))
+      .catch(() => setRefreshProviders([]));
+  }, []);
 
   const setField = (k, v) => { setF(prev => ({ ...prev, [k]: v })); setDirty(true); };
   const buildSaveBody = () => {
@@ -162,13 +178,14 @@ export function ProductDetailPage({ productId, onBack }) {
     try { await axios.delete(`${API}/products/${productId}`); toast.success("Deleted"); onBack(); }
     catch { toast.error("Delete failed"); }
   };
-  const refresh = async () => {
+  const refresh = async (method = "auto") => {
+    setShowRefreshMenu(false);
     setRefreshing(true);
     try {
-      const { data } = await axios.post(`${API}/products/${productId}/refresh`);
+      const { data } = await axios.post(`${API}/products/${productId}/refresh`, { method });
       setP(data);
       setF(v => ({ ...v, title: data.title, price: data.price, cost: data.cost }));
-      toast.success("Refreshed from eBay");
+      toast.success("Refreshed from eBay", { description: `Used ${data.method_used || method}` });
       await load();
     } catch (e) { toast.error("Refresh failed", { description: e?.response?.data?.detail }); }
     finally { setRefreshing(false); }
@@ -232,9 +249,19 @@ export function ProductDetailPage({ productId, onBack }) {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <button onClick={onBack} className="btn btn-ghost text-sm" data-testid="product-back-btn"><ChevronLeft size={14}/> Back to products</button>
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={refresh} disabled={refreshing || !p.source_url} className="btn btn-ghost text-sm" data-testid="product-refresh-btn" title={p.source_url ? "Re-scrape latest data from eBay" : "This product isn't linked to an eBay URL"}>
-            {refreshing ? <Loader2 className="animate-spin" size={13}/> : <RefreshCw size={13}/>} Refresh from eBay
-          </button>
+          <div className="relative inline-flex" data-testid="product-refresh-control">
+            <button onClick={() => refresh("auto")} disabled={refreshing || !p.source_url} className="btn btn-ghost text-sm rounded-r-none border-r-0" data-testid="product-refresh-btn" title={p.source_url ? "Re-scrape with the automatic provider fallback chain" : "This product isn't linked to an eBay URL"}>
+              {refreshing ? <Loader2 className="animate-spin" size={13}/> : <RefreshCw size={13}/>} Refresh from eBay
+            </button>
+            <button type="button" onClick={() => setShowRefreshMenu((open) => !open)} disabled={refreshing || !p.source_url} className="btn btn-ghost text-sm !px-2 rounded-l-none" aria-label="Choose refresh method" aria-expanded={showRefreshMenu} data-testid="product-refresh-method-toggle">
+              <ChevronDown size={14}/>
+            </button>
+            {showRefreshMenu && <div className="absolute right-0 top-11 z-30 w-72 rounded-lg border hairline bg-white p-1.5 shadow-xl" data-testid="product-refresh-method-menu">
+              <button type="button" onClick={() => refresh("auto")} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-indigo-50 transition-colors" data-testid="product-refresh-method-auto"><span className="block font-medium">Auto (fallback chain)</span><span className="block text-xs text-slate-500 mt-0.5">Uses the automatic provider fallback chain</span></button>
+              <button type="button" onClick={() => refresh("manual")} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-indigo-50 transition-colors" data-testid="product-refresh-method-manual"><span className="block font-medium">Manual (browser TLS)</span><span className="block text-xs text-slate-500 mt-0.5">Browser TLS impersonation with no API provider</span></button>
+              {refreshProviders.length > 0 && <><div className="my-1.5 border-t hairline" role="separator" data-testid="product-refresh-provider-separator"/>{refreshProviders.map((provider) => <button key={provider.id} type="button" onClick={() => refresh(provider.id)} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-indigo-50 transition-colors" data-testid={`product-refresh-method-provider-${provider.id}`}><span className="block font-medium">{provider.label}</span><span className="block text-xs text-slate-500 mt-0.5">Configured provider</span></button>)}</>}
+            </div>}
+          </div>
           <div className="relative">
             <button onClick={() => setShowCatPopover(v => !v)} className="btn btn-ghost text-sm" data-testid="product-changecat-btn"><Layout size={13}/> Change category</button>
             {showCatPopover && (

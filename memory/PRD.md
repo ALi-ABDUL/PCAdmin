@@ -2567,3 +2567,9 @@ Notification Bell deep-links) — zero regressions detected.
 - **Modern tab treatment** — replaced the underline navigation with an elevated, bordered tab rail and purple filled capsule for the active section.
 - **Clear interaction states** — inactive tabs now have a soft indigo hover state, prominent icon badges, keyboard focus rings, and restrained press/shadow feedback while preserving the existing four-tab behavior.
 - **Verification** — frontend production build passed (the same four pre-existing ProductDetail hook warnings remain). Public-preview Playwright smoke check confirmed the pill bar renders and tabs continue switching without invoking a sourcing action.
+
+## Oct 15, 2026 — Product Detail Refresh Provider Selector ✅
+- **Refresh split button** — Product Detail now retains the one-click “Refresh from eBay” Auto action and adds a method menu with Auto (fallback chain), Manual (browser TLS), a separator, and every enabled/configured provider by its saved label.
+- **Existing refresh contract reused** — the product refresh endpoint now forwards the selected method through the established `fetch_html` provider/fallback flow, records provider attempts, supports structured providers, and remains compatible with older empty-body refresh calls.
+- **Concurrent product-code hardening** — manual, sourced, and bulk product creation now retry `product_code` allocation after a unique-index collision instead of returning a 500 during concurrent creates.
+- **Verification** — mocked refresh/collision regressions passed **4/4** and frontend production build passed (four pre-existing ProductDetail hook warnings remain). Public-preview browser smoke check opened the method menu and confirmed Auto, Manual, separator, and configured provider labels without selecting a refresh method. **MOCKED:** no external eBay/provider/email/PCStore call was invoked.

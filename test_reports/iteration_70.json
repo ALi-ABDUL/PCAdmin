@@ -1,0 +1,48 @@
+{
+  "summary": "Validated refresh split-button backend/frontend behavior for Product Detail with mocked refresh flow only. Confirmed method body compatibility, method forwarding contract, dropdown rendering (Auto/Manual/separator/providers), and no refresh request when opening/toggling the menu.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/products",
+        "issue": "Observed 500 DuplicateKeyError on product_code during parallel product creation (initial run with pytest xdist workers).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_product_refresh_methods.py",
+    "/app/backend/tests/test_product_refresh_endpoint.py",
+    "/app/test_reports/pytest/pytest_iteration70_refresh_methods.xml",
+    "/app/frontend/src/pages/ProductDetail.jsx"
+  ],
+  "action_items": [
+    "Harden product_code generation/insert path to avoid DuplicateKeyError under concurrent /api/products requests.",
+    "Keep refresh behavior as MOCKED in tests: do not invoke real eBay/provider refresh during this validation scope.",
+    "Optional cleanup: address existing ProductDetail React Hook dependency warnings (build remains healthy)."
+  ],
+  "critical_code_review_comments": [
+    "Refresh endpoint keeps backward compatibility via optional body (`body: Optional[RefreshAllRequest] = None` then fallback to default).",
+    "Refresh method forwarding is correctly wired to `fetch_html(..., method=body.method or 'auto', providers=...)`.",
+    "ProductDetail split button uses unique data-testid values for control/toggle/menu/methods/provider entries."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_product_refresh_methods.py",
+    "/app/backend/tests/test_product_refresh_endpoint.py",
+    "/app/test_reports/iteration_70.json"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8 focused refresh tests passing after test hardening)",
+    "frontend": "100% (requested refresh-menu checks passed)"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Browser smoke used QA admin login, opened an eBay-linked product, opened/toggled refresh dropdown only, verified Auto/Manual + provider list + separator, and confirmed zero POST /api/products/{id}/refresh calls unless a method option is clicked.",
+  "rca of the issue": "Reproduction for concurrency issue: run product-creating tests with xdist workers (parallel POST /api/products using similar title-derived code paths). One request returned 500 with Mongo DuplicateKeyError on unique index `product_code_1`. Mitigation: enforce retry-on-duplicate or atomic unique code generation for create_product; meanwhile tests were stabilized with less collision-prone titles and serial execution for this focused suite."
+}

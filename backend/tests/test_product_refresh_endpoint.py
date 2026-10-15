@@ -14,7 +14,8 @@ API = f"{BASE_URL}/api"
 
 
 def _create_product(**kw):
-    body = {"title": kw.pop("title", f"Test-{uuid.uuid4().hex[:6]}"), "price": 20, "cost": 10, "stock": 5, **kw}
+    first = chr(65 + (uuid.uuid4().int % 26))
+    body = {"title": kw.pop("title", f"{first}-{uuid.uuid4().hex[:8]}"), "price": 20, "cost": 10, "stock": 5, **kw}
     r = requests.post(f"{API}/products", json=body, timeout=15)
     r.raise_for_status()
     return r.json()
@@ -33,6 +34,15 @@ class TestRefreshEndpoint:
     def test_refresh_404_on_missing(self):
         r = requests.post(f"{API}/products/does-not-exist/refresh", timeout=15)
         assert r.status_code == 404
+
+    def test_refresh_accepts_optional_method_body_without_422(self):
+        p = _create_product()
+        try:
+            r = requests.post(f"{API}/products/{p['id']}/refresh", json={"method": "manual"}, timeout=15)
+            assert r.status_code == 400
+            assert "isn't linked to an eBay URL" in r.json()["detail"]
+        finally:
+            requests.delete(f"{API}/products/{p['id']}", timeout=15)
 
     def test_refresh_rejects_non_ebay_source_url(self):
         p = _create_product(source_url="https://example.com/not-ebay")

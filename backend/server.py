@@ -22,6 +22,7 @@ import resend
 import bleach
 import bcrypt
 import jwt
+from pymongo.errors import DuplicateKeyError
 
 from deps import app, api_router, db, client, logger
 from scraper import (
@@ -101,6 +102,25 @@ from helpers import (
 # --- Product code generator -------------------------------------------------
 # Format: [First letter of product name][First letter of day][Day number]-PC[Month][Year]
 # Example: "Keyboard" on Friday 21 Aug 2026 → "KF21-PC0826". Collisions get a "-N" suffix.
+
+
+async def _insert_product_with_unique_code(product: Product, max_attempts: int = 8) -> Product:
+    """Insert a product safely when simultaneous creates choose the same code.
+
+    The initial existence lookup is helpful for human-friendly codes but cannot
+    be atomic. The unique index remains the source of truth, and a product-code
+    collision simply receives the next generated suffix instead of surfacing a
+    500 to the admin.
+    """
+    for _ in range(max_attempts):
+        product.product_code = await _generate_unique_product_code(product.title)
+        try:
+            await db.products.insert_one(product.model_dump())
+            return product
+        except DuplicateKeyError as error:
+            if "product_code" not in str(error):
+                raise
+    raise HTTPException(status_code=409, detail="Could not allocate a unique product code. Please try again.")
 
 
 # ---------------------------------------------------------------------------
@@ -639,8 +659,7 @@ async def items_bulk_action(body: ItemBulkAction):
                     delivery_speed=it.get("delivery_speed") or None,
                     delivery_date_range=it.get("delivery_date_range") or None,
                 )
-                prod.product_code = await _generate_unique_product_code(prod.title)
-                await db.products.insert_one(prod.model_dump())
+                await _insert_product_with_unique_code(prod)
                 await db.items.update_one({"id": iid}, {"$set": {"added_to_products": True}})
                 created += 1
             except Exception as e:
@@ -3231,11 +3250,10 @@ async def create_product_from_item(item_id: str):
         active=False,
         draft=True,
     )
-    prod.product_code = await _generate_unique_product_code(prod.title)
     # Auto-fill SEO fields from title/description; admin can edit later.
     for k, v in _default_seo(prod.title, prod.description or "", prod.category).items():
         setattr(prod, k, v)
-    await db.products.insert_one(prod.model_dump())
+    await _insert_product_with_unique_code(prod)
     await db.items.update_one({"id": item_id}, {"$set": {"added_to_products": True}})
     return prod.model_dump()
 
@@ -3243,14 +3261,12 @@ async def create_product_from_item(item_id: str):
 @api_router.post("/products", response_model=Product)
 async def create_product(body: ProductCreate):
     prod = Product(**body.model_dump())
-    if not prod.product_code:
-        prod.product_code = await _generate_unique_product_code(prod.title)
     # Auto-fill SEO fields when the caller hasn't supplied them.
     defaults = _default_seo(prod.title, prod.description or "", prod.category)
     for k, v in defaults.items():
         if not getattr(prod, k, None):
             setattr(prod, k, v)
-    await db.products.insert_one(prod.model_dump())
+    await _insert_product_with_unique_code(prod)
     return prod
 
 
@@ -3407,7 +3423,7 @@ async def restore_product(pid: str):
 
 
 @api_router.post("/products/{pid}/refresh")
-async def refresh_product_from_ebay(pid: str):
+async def refresh_product_from_ebay(pid: str, body: Optional[RefreshAllRequest] = None):
     """Re-scrape the linked eBay listing and mirror title / price / images / variants /
     stock_status onto this product. Requires source_url on the product."""
     p = await db.products.find_one({"id": pid}, {"_id": 0})
@@ -3416,10 +3432,23 @@ async def refresh_product_from_ebay(pid: str):
     url = p.get("source_url")
     if not url:
         raise HTTPException(status_code=400, detail="This product isn't linked to an eBay URL — nothing to refresh.")
+    body = body or RefreshAllRequest()
     try:
         validate_ebay_au_url(url)
-        html = await fetch_html(url)
-        data = await parse_and_enrich(html, url)
+        html, method_used = await fetch_html(
+            url,
+            method=body.method or "auto",
+            scrapingbee_key=body.scrapingbee_key or None,
+            scraperapi_key=body.scraperapi_key or None,
+            providers=(await _get_scraper_api_settings()).get("providers") or [],
+            on_provider_attempt=_record_provider_usage,
+        )
+        if isinstance(html, dict) and html.get("_pcadmin_structured_json"):
+            data = parse_structured_json_item(html, url)
+        elif method_used == "scrapebadger":
+            data = parse_scrapebadger_item(html, url)
+        else:
+            data = await parse_and_enrich(html, url)
     except NotEbayAUError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except BlockedError as e:
@@ -3448,7 +3477,8 @@ async def refresh_product_from_ebay(pid: str):
         update["archived"] = True
         update["archived_at"] = now
     await db.products.update_one({"id": pid}, {"$set": update})
-    return await db.products.find_one({"id": pid}, {"_id": 0})
+    refreshed = await db.products.find_one({"id": pid}, {"_id": 0})
+    return {**refreshed, "method_used": method_used}
 
 
 @api_router.post("/products/bulk-archive")

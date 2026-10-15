@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowDown, ArrowUp, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, CreditCard, ExternalLink, Eye, EyeOff, Globe, HelpCircle, History, Link2, Loader2, Mail, Menu, Monitor, Package, Plus, RefreshCw, Smartphone, Store, Tag, Trash2, Wallet, X, XCircle, Zap } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, BadgeCheck, Ban, Bell, Calculator, Calendar, Clock as ClockIcon, CreditCard, ExternalLink, Eye, EyeOff, Globe, HelpCircle, History, KeyRound, Link2, Loader2, Mail, Menu, Monitor, Package, Plus, RefreshCw, Smartphone, Sparkles, Store, Tag, Trash2, Wallet, X, XCircle, Zap } from "lucide-react";
 import { Field } from "../components/atoms";
 import { API } from "../lib/api";
 import { fmtDate, moneyCents } from "../lib/format";
@@ -1040,6 +1040,51 @@ export function ResendIntegrationCard() {
 }
 
 
+export function GeminiIntegrationCard() {
+  const [settings, setSettings] = useState(null);
+  const [draft, setDraft] = useState({ api_key: "", model: "gemini-2.5-flash" });
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    const { data } = await axios.get(`${API}/integrations/gemini`);
+    setSettings(data);
+    setDraft({ api_key: "", model: data.model || "gemini-2.5-flash" });
+    if (!data.api_key_set) setOpen(true);
+  }, []);
+  useEffect(() => { load().catch(() => setSettings({ api_key_set: false, status: "disconnected", model: "gemini-2.5-flash" })); }, [load]);
+  if (!settings) return <div className="card p-5 text-slate-500 text-sm" data-testid="gemini-integration-loading">Loading Gemini integration…</div>;
+  const connected = !!settings.api_key_set;
+  const dirty = !!draft.api_key.trim() || draft.model !== settings.model;
+  const save = async () => {
+    if (!dirty) return;
+    setBusy(true);
+    try {
+      const { data } = await axios.patch(`${API}/integrations/gemini`, { api_key: draft.api_key || undefined, model: draft.model });
+      setSettings(data); setDraft({ api_key: "", model: data.model }); toast.success("Gemini settings saved");
+    } catch (error) { toast.error("Could not save Gemini", { description: error?.response?.data?.detail || error.message }); }
+    finally { setBusy(false); }
+  };
+  const clearKey = async () => {
+    if (!window.confirm("Disconnect Gemini? AI Rewrite will be unavailable until you add a key again.")) return;
+    setBusy(true);
+    try { const { data } = await axios.post(`${API}/integrations/gemini/clear-secret`); setSettings(data); setDraft((current) => ({ ...current, api_key: "" })); toast.success("Gemini disconnected"); }
+    catch { toast.error("Could not disconnect Gemini"); }
+    finally { setBusy(false); }
+  };
+  return <div className="card p-5" data-testid="gemini-integration">
+    <div className="flex items-start justify-between gap-3 flex-wrap">
+      <div className="flex items-center gap-3 min-w-0"><div className="w-11 h-11 rounded-xl grid place-items-center shrink-0 text-white bg-indigo-600"><Sparkles size={18}/></div><div className="min-w-0"><div className="font-display font-bold text-base flex items-center gap-2">Gemini AI — Product Description Rewriter <span className={`chip text-[10px] ${connected ? "chip-success" : "chip-neutral"}`} data-testid="gemini-status">{connected ? <><BadgeCheck size={11}/> Connected</> : <>Disconnected</>}</span></div><div className="text-xs text-slate-500 mt-0.5">Used by the AI Rewrite button in the product editor to generate professional product descriptions.</div></div></div>
+      <button type="button" onClick={() => setOpen((value) => !value)} className="btn btn-ghost text-sm" data-testid="gemini-configure-toggle">{open ? "Close" : "Configure"}</button>
+    </div>
+    {open && <div className="mt-5 pt-5 border-t hairline grid gap-4" data-testid="gemini-configure-panel">
+      <CredField label="Gemini API Key" testId="gemini-api-key" type="password" placeholder={connected ? `Saved · ${settings.api_key_masked}` : "AIza..."} value={draft.api_key} onChange={(api_key) => setDraft((current) => ({ ...current, api_key }))} savedBadge={connected} onClear={connected ? clearKey : null}/>
+      <label className="grid gap-1"><span className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Model</span><select value={draft.model} onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))} className="input px-3 py-2 text-sm" data-testid="gemini-model-select"><option value="gemini-2.0-flash">Gemini 2.0 Flash</option><option value="gemini-2.5-flash">Gemini 2.5 Flash</option></select></label>
+      <div className="flex items-center justify-between gap-3 flex-wrap"><span className="text-[11px] text-slate-400">Your key is stored server-side and never sent to the product editor.</span><button type="button" onClick={save} disabled={busy || !dirty} className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed" data-testid="gemini-save-button">{busy ? <Loader2 size={14} className="animate-spin"/> : <KeyRound size={14}/>} Save Gemini</button></div>
+    </div>}
+  </div>;
+}
+
+
 const GOOGLE_SIGNIN_FORM_DEFAULTS = { google_signin_enabled: true, google_client_id: "", google_client_secret_masked: "", google_client_secret_set: false };
 
 export function GoogleSignInIntegrationCard() {
@@ -1102,6 +1147,7 @@ export function GoogleSignInIntegrationCard() {
 export function IntegrationsPanel() {
   return (
     <div className="grid gap-3" data-testid="integrations-panel">
+      <GeminiIntegrationCard/>
       <ResendIntegrationCard/>
       <div className="pt-3"><div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2" data-testid="auth-social-integrations-heading">Authentication &amp; social</div><GoogleSignInIntegrationCard/></div>
     </div>

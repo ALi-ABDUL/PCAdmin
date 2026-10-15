@@ -2,7 +2,7 @@
 Deps: app/router/db/logger from deps.py — Pydantic models from models.py — helpers from helpers.py.
 Refactored Feb 2026."""
 from fastapi import HTTPException, Query, Depends, Header, Body, Request
-from fastapi.responses import Response, JSONResponse, RedirectResponse
+from fastapi.responses import Response, JSONResponse, RedirectResponse, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 import os
 import re
@@ -12,6 +12,7 @@ import asyncio
 import logging
 import httpx
 import uuid
+import json
 from html import escape
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Any
@@ -23,6 +24,7 @@ import bleach
 import bcrypt
 import jwt
 from pymongo.errors import DuplicateKeyError
+from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
 
 from deps import app, api_router, db, client, logger
 from scraper import (
@@ -47,7 +49,7 @@ from models import (
     CATEGORIES, SEED_CATEGORIES, ScrapeRequest, ScrapedItem, WatchlistToggle, ProductCreate, 
     Product, ProductUpdate, ShippingAddress, _AU_SUBURBS, _STREET_NAMES, _STREET_TYPES, 
     OrderCreate, OrderLineInput, OrderLineFulfillmentUpdate, CartLineInput, CartUpdate, Settings, _DAY_LETTERS, Category, CategoryCreate, CategoryUpdate, CategoryCleanupScheduleUpdate, PaymentGatewayUpdate, PAYMENT_GATEWAY_DEFAULTS, ItemBulkAction, 
-    RefreshAllRequest, SCRAPER_API_SETTINGS_DEFAULTS, ScraperApiSettingsUpdate, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
+    RefreshAllRequest, GEMINI_MODELS, GEMINI_SETTINGS_DEFAULTS, GeminiSettingsUpdate, ProductDescriptionRewriteBody, SCRAPER_API_SETTINGS_DEFAULTS, ScraperApiSettingsUpdate, SCRAPER_SCHEDULE_DEFAULTS, RETRY_DELAY_SECONDS, RUN_HISTORY_LIMIT, 
     FREQ_INTERVAL_SECONDS, _SYDNEY, ScraperScheduleUpdate, ScheduleEntryBody, ScraperSchedulesReplaceBody, AutoRetryConfigBody, RetryFailedBody, ORDER_STATUSES, ReturnRequest, 
     AbandonedCart, Transaction, CustomerBase, Customer, CustomerUpdate, PortalProfileUpdate,
     CouponBase, Coupon, ReviewBase, Review, JWT_ALGO, JWT_ACCESS_TTL, PortalRegisterBody, 
@@ -121,6 +123,27 @@ async def _insert_product_with_unique_code(product: Product, max_attempts: int =
             if "product_code" not in str(error):
                 raise
     raise HTTPException(status_code=409, detail="Could not allocate a unique product code. Please try again.")
+
+
+async def _get_gemini_settings() -> dict:
+    settings = await db.gemini_settings.find_one({"id": "singleton"}, {"_id": 0})
+    if not settings:
+        seed = {**GEMINI_SETTINGS_DEFAULTS}
+        await db.gemini_settings.insert_one({**seed})
+        return seed
+    model = settings.get("model") if settings.get("model") in GEMINI_MODELS else GEMINI_SETTINGS_DEFAULTS["model"]
+    return {**GEMINI_SETTINGS_DEFAULTS, **settings, "model": model}
+
+
+def _public_gemini_settings(settings: dict) -> dict:
+    api_key = (settings.get("api_key") or "").strip()
+    return {
+        "model": settings.get("model") or GEMINI_SETTINGS_DEFAULTS["model"],
+        "api_key_set": bool(api_key),
+        "api_key_masked": _mask(api_key),
+        "status": "connected" if api_key else "disconnected",
+        "updated_at": settings.get("updated_at"),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +292,92 @@ async def get_scraper_provider_usage(period: Optional[str] = None, current_admin
 @api_router.get("/scraper/apis")
 async def get_scraper_apis(current_admin: dict = Depends(get_current_admin)):
     return _public_scraper_api_settings(await _get_scraper_api_settings())
+
+
+@api_router.get("/integrations/gemini")
+async def get_gemini_integration(current_admin: dict = Depends(get_current_admin)):
+    """Return Gemini setup state without ever returning the stored API key."""
+    return _public_gemini_settings(await _get_gemini_settings())
+
+
+@api_router.patch("/integrations/gemini")
+async def update_gemini_integration(body: GeminiSettingsUpdate, current_admin: dict = Depends(get_current_admin)):
+    updates: dict[str, Any] = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if body.model is not None:
+        updates["model"] = body.model
+    if body.api_key is not None:
+        api_key = body.api_key.strip()
+        if api_key:
+            updates["api_key"] = api_key
+    if len(updates) == 1:
+        raise HTTPException(status_code=400, detail="Add a Gemini API key or select a model before saving")
+    await db.gemini_settings.update_one(
+        {"id": "singleton"},
+        {"$setOnInsert": {"id": "singleton"}, "$set": updates},
+        upsert=True,
+    )
+    return _public_gemini_settings(await _get_gemini_settings())
+
+
+@api_router.post("/integrations/gemini/clear-secret")
+async def clear_gemini_secret(current_admin: dict = Depends(get_current_admin)):
+    await db.gemini_settings.update_one(
+        {"id": "singleton"},
+        {"$setOnInsert": {"id": "singleton", "model": GEMINI_SETTINGS_DEFAULTS["model"]}, "$set": {"api_key": "", "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return _public_gemini_settings(await _get_gemini_settings())
+
+
+@api_router.post("/products/description/rewrite")
+async def rewrite_product_description(body: ProductDescriptionRewriteBody, current_admin: dict = Depends(get_current_admin)):
+    """Stream a Gemini rewrite while retaining the API key server-side only."""
+    settings = await _get_gemini_settings()
+    api_key = (settings.get("api_key") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Configure Gemini API in Integrations to use AI Rewrite.")
+    model = settings.get("model") or GEMINI_SETTINGS_DEFAULTS["model"]
+    session_id = f"product-description-rewrite-{uuid.uuid4()}"
+    history_id = str(uuid.uuid4())
+    await db.ai_rewrite_history.insert_one({
+        "id": history_id, "session_id": session_id, "kind": "product_description_rewrite",
+        "created_at": datetime.now(timezone.utc).isoformat(), "model": model,
+        "product_title": body.product_title.strip(), "input": body.description, "output": "",
+        "status": "streaming", "admin_id": current_admin.get("id"),
+    })
+    prompt = (
+        "Rewrite the current product description into polished, accurate Australian online-store copy. "
+        "Preserve factual claims only; do not invent specifications, guarantees, pricing, stock, or delivery promises. "
+        "Use clear Australian English with short paragraphs and concise bullets only when they improve scannability. "
+        "Return only clean HTML using p, ul, li, strong, and br tags—no markdown, headings, scripts, styles, or commentary.\n\n"
+        f"Product title: {body.product_title.strip() or 'Not provided'}\n\nCurrent description:\n{body.description}"
+    )
+
+    async def event_stream():
+        chunks: list[str] = []
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=session_id,
+                system_message="You are a precise ecommerce product-description editor for an Australian retailer.",
+            ).with_model("gemini", model)
+            async for event in chat.stream_message(UserMessage(text=prompt)):
+                if isinstance(event, TextDelta):
+                    chunks.append(event.content)
+                    yield f"data: {json.dumps({'type': 'delta', 'text': event.content})}\n\n"
+                elif isinstance(event, StreamDone):
+                    break
+            output = bleach.clean("".join(chunks).strip(), tags=["p", "ul", "li", "strong", "br"], attributes={}, strip=True)
+            if not output:
+                raise RuntimeError("Gemini returned an empty rewrite")
+            await db.ai_rewrite_history.update_one({"id": history_id}, {"$set": {"output": output, "status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}})
+            yield "data: {\"type\": \"done\"}\n\n"
+        except Exception as error:
+            logger.exception("Gemini description rewrite failed")
+            await db.ai_rewrite_history.update_one({"id": history_id}, {"$set": {"status": "failed", "error": str(error)[:500], "completed_at": datetime.now(timezone.utc).isoformat()}})
+            yield f"data: {json.dumps({'type': 'error', 'detail': 'AI Rewrite could not be completed. Please try again.'})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @api_router.patch("/scraper/apis")

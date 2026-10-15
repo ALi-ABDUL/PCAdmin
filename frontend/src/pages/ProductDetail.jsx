@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { BadgeCheck, Ban, Bold, Calendar, CheckCircle2, ChevronDown, ChevronLeft, CircleDollarSign, ClipboardPaste, Eye, ExternalLink, FileText, Heading2, Home, Image, ImagePlus, Italic, Layers3, Layout, Link2, List, ListOrdered, Loader2, Package, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
+import { BadgeCheck, Ban, Bold, Calendar, CheckCircle2, ChevronDown, ChevronLeft, CircleDollarSign, ClipboardPaste, Eye, ExternalLink, FileText, Heading2, Home, Image, ImagePlus, Italic, Layers3, Layout, Link2, List, ListOrdered, Loader2, Package, Pencil, Play, Plus, RefreshCw, RotateCcw, Rocket, Save, Search, Sparkles, Square, Star as StarIcon, Tag, Timer, Trash2, Truck, X } from "lucide-react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
@@ -34,6 +34,7 @@ export function ProductDetailPage({ productId, onBack }) {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshProviders, setRefreshProviders] = useState([]);
   const [showRefreshMenu, setShowRefreshMenu] = useState(false);
+  const [aiRewriting, setAiRewriting] = useState(false);
   const [showCatPopover, setShowCatPopover] = useState(false);
   const [imgDialog, setImgDialog] = useState({ open: false, mode: "add", idx: null, current: "" });
   const [lightboxIdx, setLightboxIdx] = useState(null);   // opens full-size viewer at index
@@ -190,6 +191,38 @@ export function ProductDetailPage({ productId, onBack }) {
     } catch (e) { toast.error("Refresh failed", { description: e?.response?.data?.detail }); }
     finally { setRefreshing(false); }
   };
+  const rewriteDescription = async () => {
+    if (!String(f.description || "").trim()) { toast.error("Add a description before using AI Rewrite."); return; }
+    setAiRewriting(true);
+    try {
+      const response = await fetch(`${API}/products/description/rewrite`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ description: f.description, product_title: f.title }) });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || "AI Rewrite could not be completed.");
+      }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("AI Rewrite stream could not be read.");
+      const decoder = new TextDecoder(); let buffer = ""; let rewritten = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary;
+        while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+          const packet = buffer.slice(0, boundary); buffer = buffer.slice(boundary + 2);
+          const data = packet.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
+          if (!data) continue;
+          const event = JSON.parse(data);
+          if (event.type === "delta") rewritten += event.text || "";
+          if (event.type === "error") throw new Error(event.detail || "AI Rewrite could not be completed.");
+        }
+      }
+      if (!rewritten.trim()) throw new Error("AI Rewrite returned no description.");
+      setField("description", rewritten.trim());
+      toast.success("Description rewritten with Gemini");
+    } catch (error) { toast.error(error.message || "AI Rewrite could not be completed."); }
+    finally { setAiRewriting(false); }
+  };
   const changeCategory = async (slug) => {
     setF(prev => ({ ...prev, category: slug }));
     setShowCatPopover(false);
@@ -302,7 +335,7 @@ export function ProductDetailPage({ productId, onBack }) {
         </div>
       </ProductEditSection>
 
-      <ProductEditSection id="content" title="Description & Specs" icon={FileText} open alwaysOpen summary={f.description ? "Content ready" : "Add product detail"}><div className="grid gap-6"><Field label="Description"><RichTextDescription value={f.description} onChange={(html) => setField("description", html)}/></Field><ProductSpecsCard product={p} onUpdated={(fresh) => setP(fresh)} embedded/></div></ProductEditSection>
+      <ProductEditSection id="content" title="Description & Specs" icon={FileText} open alwaysOpen summary={f.description ? "Content ready" : "Add product detail"}><div className="grid gap-6"><Field label="Description"><RichTextDescription value={f.description} onChange={(html) => setField("description", html)} onAIRewrite={rewriteDescription} aiRewriting={aiRewriting}/></Field><ProductSpecsCard product={p} onUpdated={(fresh) => setP(fresh)} embedded/></div></ProductEditSection>
 
       <ProductEditSection id="images" title="Images" icon={Image} open={openSections.images} onToggle={() => toggleSection("images")} summary={`${(p.images || []).length} image${(p.images || []).length === 1 ? "" : "s"}`}>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -463,7 +496,7 @@ function inlineImageUrl(value) {
   return /^https?:\/\/[^\s]+$/i.test(url) ? url : "";
 }
 
-function RichTextDescription({ value, onChange }) {
+function RichTextDescription({ value, onChange, onAIRewrite, aiRewriting }) {
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [StarterKit.configure({ heading: { levels: [2, 3, 4] }, link: false }), Link.configure({ openOnClick: false, autolink: false, HTMLAttributes: { rel: "noopener noreferrer nofollow", target: "_blank" } }), TiptapImage.configure({ allowBase64: false, HTMLAttributes: { class: "max-w-full h-auto rounded-lg my-3" } })],
@@ -531,7 +564,7 @@ function RichTextDescription({ value, onChange }) {
     event.preventDefault();
     editor.chain().focus().setImage({ src: url, alt: "" }).run();
   };
-  return <div className="product-rich-description rounded-lg border hairline overflow-hidden bg-white" data-testid="product-description-rich-editor"><div className="flex items-center gap-1 p-2 bg-slate-50 border-b hairline flex-wrap" data-testid="product-description-toolbar">{tools.map(([name, Icon, run, active]) => <button key={name} type="button" onClick={command(run)} title={name === "heading" ? "Heading" : name} className={`w-9 h-9 grid place-items-center rounded-md transition-colors ${active ? "bg-indigo-100 text-indigo-700" : "text-slate-600 hover:bg-white hover:text-indigo-600"}`} data-testid={`product-description-toolbar-${name}`}><Icon size={16}/></button>)}</div><EditorContent editor={editor} onPaste={handleEditorPaste} data-testid="product-description-input"/></div>;
+  return <div className="product-rich-description rounded-lg border hairline overflow-hidden bg-white" data-testid="product-description-rich-editor"><div className="flex items-center gap-1 p-2 bg-slate-50 border-b hairline flex-wrap" data-testid="product-description-toolbar">{tools.map(([name, Icon, run, active]) => <button key={name} type="button" onClick={command(run)} title={name === "heading" ? "Heading" : name} className={`w-9 h-9 grid place-items-center rounded-md transition-colors ${active ? "bg-indigo-100 text-indigo-700" : "text-slate-600 hover:bg-white hover:text-indigo-600"}`} data-testid={`product-description-toolbar-${name}`}><Icon size={16}/></button>)}<span className="mx-1 h-6 border-l hairline"/><button type="button" onClick={onAIRewrite} disabled={aiRewriting} title="Rewrite description with Gemini" className="inline-flex h-9 items-center gap-1.5 rounded-md bg-indigo-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-70" data-testid="product-description-ai-rewrite">{aiRewriting ? <Loader2 size={14} className="animate-spin"/> : <Sparkles size={14}/>} AI Rewrite</button></div><EditorContent editor={editor} onPaste={handleEditorPaste} data-testid="product-description-input"/></div>;
 }
 
 

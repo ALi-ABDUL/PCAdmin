@@ -461,6 +461,20 @@ class RefreshAllRequest(BaseModel):
     scraperapi_key: Optional[str] = None
 
 
+GEMINI_MODELS = ("gemini-2.0-flash", "gemini-2.5-flash")
+GEMINI_SETTINGS_DEFAULTS = {"id": "singleton", "api_key": "", "model": "gemini-2.5-flash"}
+
+
+class GeminiSettingsUpdate(BaseModel):
+    api_key: Optional[str] = Field(default=None, max_length=4000)
+    model: Optional[Literal["gemini-2.0-flash", "gemini-2.5-flash"]] = None
+
+
+class ProductDescriptionRewriteBody(BaseModel):
+    description: str = Field(min_length=1, max_length=50000)
+    product_title: str = Field(default="", max_length=500)
+
+
 # Scraper provider credentials live only in the database. GET responses are
 # masked by the API, while this update model accepts fresh secret values only.
 SCRAPER_API_SETTINGS_DEFAULTS: dict = {

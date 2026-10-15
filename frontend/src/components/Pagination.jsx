@@ -37,6 +37,8 @@ export function Pagination({
   testPrefix = "pg",
   sizes = [50, 100, 150, 200],
   className = "",
+  showSummary = true,
+  pageSizeLabel = "",
 }) {
   const totalPages = Math.max(1, Math.ceil((total || 0) / pageSize));
   const current = Math.min(Math.max(1, page), totalPages);
@@ -49,13 +51,14 @@ export function Pagination({
   return (
     <div className={`flex items-center justify-between flex-wrap gap-3 ${className}`} data-testid={`${testPrefix}-pagination`}>
       <div className="flex items-center gap-3">
-        <div className="text-xs text-slate-500 font-mono">
+        {showSummary && <div className="text-xs text-slate-500 font-mono">
           {total > 0 ? (
             <>Showing <span className="text-slate-700 font-semibold">{from}</span>–<span className="text-slate-700 font-semibold">{to}</span> of <span className="text-slate-700 font-semibold">{total}</span></>
           ) : (
             <>No results</>
           )}
-        </div>
+        </div>}
+        {pageSizeLabel && <span className="text-xs text-slate-500 font-medium" data-testid={`${testPrefix}-page-size-label`}>{pageSizeLabel}</span>}
         <select
           value={pageSize}
           onChange={(e) => onPageSizeChange?.(Number(e.target.value))}

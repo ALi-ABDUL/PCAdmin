@@ -11,6 +11,7 @@ import { calcPricingWithRules, usePricingRules, _refreshPricingRules } from "../
 import { Analytics } from "./Analytics";
 import { Dashboard } from "./Dashboard";
 import { LoginModalSettingsEditor } from "../components/LoginModalSettingsEditor";
+import { Pagination, usePagePref } from "../components/Pagination";
 
 const ADMIN_SESSION_REQUEST = { withCredentials: true };
 
@@ -1215,6 +1216,8 @@ export function ScraperScheduleEditor() {
   const [retryProviderId, setRetryProviderId] = useState("");
   const [retryRequestLimit, setRetryRequestLimit] = useState("");
   const [retryProviders, setRetryProviders] = useState([]);
+  const [resultsPage, setResultsPage] = useState(1);
+  const [resultsPageSize, setResultsPageSize] = usePagePref("scraper-last-run-breakdown", 20, [20, 50, 100]);
   const [arLocal, setArLocal] = useState(null);
   const [arDirty, setArDirty] = useState(false);
   const dirtyRef = useRef(false);
@@ -1257,6 +1260,7 @@ export function ScraperScheduleEditor() {
   useEffect(() => {
     if (sched?.auto_retry && !arDirty) setArLocal(sched.auto_retry);
   }, [sched, arDirty]);
+  useEffect(() => { setResultsPage(1); }, [sched?.last_run_at]);
 
   if (!sched) return <div className="text-slate-500 py-24 text-center">loading…</div>;
 
@@ -1364,6 +1368,12 @@ export function ScraperScheduleEditor() {
   const results = Array.isArray(sched.last_run_results) ? sched.last_run_results : [];
   const failedResults = results.filter((r) => !r.ok);
   const okResults = results.filter((r) => r.ok);
+  const orderedResults = [...failedResults, ...okResults];
+  const resultsTotalPages = Math.max(1, Math.ceil(orderedResults.length / resultsPageSize));
+  const activeResultsPage = Math.min(resultsPage, resultsTotalPages);
+  const resultsFrom = orderedResults.length ? (activeResultsPage - 1) * resultsPageSize + 1 : 0;
+  const resultsTo = Math.min(activeResultsPage * resultsPageSize, orderedResults.length);
+  const visibleResults = orderedResults.slice(resultsFrom - 1, resultsTo);
   const itemRetry = sched.failed_retry_pending && sched.failed_retry_pending.retry_at ? sched.failed_retry_pending : null;
   const retryPending = sched.retry_pending && sched.retry_pending.retry_at ? sched.retry_pending : null;
 
@@ -1634,6 +1644,7 @@ export function ScraperScheduleEditor() {
                 <span className={failedResults.length ? "text-red-600 font-medium" : "text-slate-400"}>{failedResults.length} failed</span>
                 {" · "}{results.length} total
               </div>
+              <div className="mt-1 text-xs text-slate-500 font-mono" data-testid="sched-results-count">Showing <span className="font-semibold text-slate-700">{resultsFrom}</span>–<span className="font-semibold text-slate-700">{resultsTo}</span> of <span className="font-semibold text-slate-700">{orderedResults.length}</span></div>
             </div>
             {failedResults.length > 0 && (
               <div className="flex flex-wrap items-end justify-end gap-2" data-testid="sched-retry-controls">
@@ -1672,7 +1683,7 @@ export function ScraperScheduleEditor() {
 
           <div className="grid gap-2">
             {/* Failed first so they're front-and-centre */}
-            {[...failedResults, ...okResults].map((r) => {
+            {visibleResults.map((r) => {
               const isRetrying = retryingIds.includes(r.id) || (retryingAll && !r.ok);
               return (
                 <div key={r.id || r.item_id} className={`flex items-center gap-3 rounded-xl border hairline p-3 ${r.ok ? "bg-white" : "bg-red-50/40"}`} data-testid={`sched-result-row-${r.item_id}`}>
@@ -1706,6 +1717,18 @@ export function ScraperScheduleEditor() {
               );
             })}
           </div>
+          <Pagination
+            total={orderedResults.length}
+            page={activeResultsPage}
+            pageSize={resultsPageSize}
+            onPageChange={setResultsPage}
+            onPageSizeChange={(size) => { setResultsPageSize(size); setResultsPage(1); }}
+            sizes={[20, 50, 100]}
+            testPrefix="sched-results"
+            showSummary={false}
+            pageSizeLabel="Items per page"
+            className="mt-4 pt-4 border-t hairline"
+          />
         </div>
       )}
 

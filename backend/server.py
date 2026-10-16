@@ -297,6 +297,21 @@ async def get_scraper_provider_usage(period: Optional[str] = None, current_admin
     return {"period": selected_period, "providers": providers, "totals": totals}
 
 
+@api_router.delete("/scraper/provider-usage/{provider_id}")
+async def delete_removed_scraper_provider_usage(provider_id: str, current_admin: dict = Depends(get_current_admin)):
+    """Permanently delete usage history for a provider that has already been removed."""
+    normalized_id = re.sub(r"[^a-z0-9_-]", "", (provider_id or "").lower())
+    if not normalized_id:
+        raise HTTPException(status_code=400, detail="Provider id is invalid")
+    settings = await _get_scraper_api_settings()
+    if any(provider.get("id") == normalized_id for provider in settings.get("providers") or []):
+        raise HTTPException(status_code=400, detail="Delete the active provider configuration instead")
+    result = await db.scraper_provider_usage.delete_many({"provider_id": normalized_id})
+    if not result.deleted_count:
+        raise HTTPException(status_code=404, detail="Removed provider usage was not found")
+    return {"provider_id": normalized_id, "deleted_count": result.deleted_count}
+
+
 @api_router.get("/scraper/apis")
 async def get_scraper_apis(current_admin: dict = Depends(get_current_admin)):
     return _public_scraper_api_settings(await _get_scraper_api_settings())

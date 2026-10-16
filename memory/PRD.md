@@ -2588,3 +2588,8 @@ Notification Bell deep-links) — zero regressions detected.
 - **Current model only** — retired Gemini 2.0 Flash and Gemini 2.5 Flash have been removed from the backend allow-list, default configuration, and Integrations selector. Gemini 3.8 Flash is now the only available/default rewrite model.
 - **Automatic saved-setting migration** — when existing Gemini settings contain a retired model, the backend rewrites it to `gemini-3.8-flash` during the next authenticated settings read so future rewrite calls avoid model-not-found failures.
 - **Verification** — focused Gemini migration tests passed **8/8**, frontend production build passed (four pre-existing ProductDetail hook warnings remain), and testing-agent iteration_73 passed backend + public-preview UI checks. **MOCKED:** no real Gemini key or external Gemini request was used.
+
+## Oct 15, 2026 — Removed Provider Usage Cleanup ✅
+- **Protected orphan-history deletion** — added an admin-only `DELETE /api/scraper/provider-usage/{provider_id}` action that permanently removes all usage rows for a provider only when its active provider configuration is already gone. Active configurations remain protected and must use the provider delete flow.
+- **Confirmed cleanup performed** — permanently removed the four confirmed inactive/removed history IDs: `custom-1791461461495`, `custom-1791375129202`, `custom-1791461888620`, and `custom-1791463160707`. A post-delete Provider Usage read confirmed none remain visible.
+- **Verification** — focused deletion protections passed **2/2**. Live admin API verification confirmed each exact ID was removed (one historical row each) and the Provider Usage response no longer includes them. No scraper/provider request was initiated.
